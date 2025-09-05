@@ -1,0 +1,29 @@
+# FastAPI and ASGI server
+fastapi
+uvicorn[standard]
+
+# Database
+sqlalchemy
+alembic
+psycopg2-binary
+
+# Data validation
+pydantic
+
+# Authentication
+python-jose[cryptography]
+passlib[bcrypt]
+
+# LLM and Agent Framework
+langchain
+langgraph
+langchain-openai
+openai
+
+# Utilities
+python-multipart
+
+# Development and Testing
+pytest
+pytest-asyncio
+python-dotenv

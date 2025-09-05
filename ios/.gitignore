@@ -1,0 +1,4 @@
+# Xcode
+*.xcuserstate
+*.xcuserdatad/
+build/
