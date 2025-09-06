@@ -67,6 +67,7 @@ struct LoginView: View {
                         
                         SecureField("Enter your password", text: $password)
                             .textFieldStyle(RoundedBorderTextFieldStyle())
+                            .textContentType(.none)
                             .focused($focusedField, equals: .password)
                             .onSubmit {
                                 Task {

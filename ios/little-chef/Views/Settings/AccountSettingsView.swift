@@ -136,14 +136,17 @@ struct AccountSettingsView: View {
                     VStack(spacing: 12) {
                         SecureField("Current password", text: $currentPassword)
                             .textFieldStyle(RoundedBorderTextFieldStyle())
+                            .textContentType(.none)
                             .focused($focusedField, equals: .currentPassword)
                         
                         SecureField("New password", text: $newPassword)
                             .textFieldStyle(RoundedBorderTextFieldStyle())
+                            .textContentType(.none)
                             .focused($focusedField, equals: .newPassword)
                         
                         SecureField("Confirm new password", text: $confirmPassword)
                             .textFieldStyle(RoundedBorderTextFieldStyle())
+                            .textContentType(.none)
                             .focused($focusedField, equals: .confirmPassword)
                         
                         if !newPassword.isEmpty && newPassword.count < 8 {
