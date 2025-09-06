@@ -33,6 +33,12 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# Include routers
+from app.routers import auth, users
+
+app.include_router(auth.router)
+app.include_router(users.router)
+
 # Basic health check endpoint
 @app.get("/")
 async def root():
