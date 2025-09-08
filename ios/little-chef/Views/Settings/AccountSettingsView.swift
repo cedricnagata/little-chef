@@ -57,24 +57,36 @@ struct AccountSettingsView: View {
                     VStack(spacing: 12) {
                         TextField("Enter new name", text: $name)
                             .textFieldStyle(RoundedBorderTextFieldStyle())
+                            .autocorrectionDisabled()
                             .focused($focusedField, equals: .name)
                         
-                        HStack {
+                        VStack(spacing: 16) {
+                            Button("Save Changes") {
+                                // Immediately capture the current name value
+                                let nameToUpdate = name
+                                
+                                guard !nameToUpdate.isEmpty else {
+                                    return
+                                }
+                                
+                                updateNameWith(nameToUpdate)
+                            }
+                            .disabled(name.isEmpty || name == authManager.currentUser?.name)
+                            .foregroundColor(.white)
+                            .fontWeight(.semibold)
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 12)
+                            .background(name.isEmpty || name == authManager.currentUser?.name ? Color.gray : Color.orange)
+                            .cornerRadius(12)
+                            
                             Button("Cancel") {
                                 activeSection = nil
                                 name = ""
                                 clearError()
                             }
                             .foregroundColor(.secondary)
-                            
-                            Spacer()
-                            
-                            Button("Save") {
-                                updateName()
-                            }
-                            .disabled(name.isEmpty || name == authManager.currentUser?.name)
-                            .foregroundColor(.orange)
-                            .fontWeight(.semibold)
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 8)
                         }
                     }
                 } else {
@@ -100,22 +112,39 @@ struct AccountSettingsView: View {
                             .autocorrectionDisabled()
                             .focused($focusedField, equals: .email)
                         
-                        HStack {
+                        if !email.isEmpty && !isValidEmail(email) {
+                            Text("Please enter a valid email address")
+                                .font(.caption)
+                                .foregroundColor(.red)
+                        }
+                        
+                        VStack(spacing: 16) {
+                            Button("Save Changes") {
+                                // Immediately capture the current email value
+                                let emailToUpdate = email
+                                
+                                guard !emailToUpdate.isEmpty, isValidEmail(emailToUpdate) else {
+                                    return
+                                }
+                                
+                                updateEmailWith(emailToUpdate)
+                            }
+                            .disabled(email.isEmpty || !isValidEmail(email) || email == authManager.currentUser?.email)
+                            .foregroundColor(.white)
+                            .fontWeight(.semibold)
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 12)
+                            .background(email.isEmpty || !isValidEmail(email) || email == authManager.currentUser?.email ? Color.gray : Color.orange)
+                            .cornerRadius(12)
+                            
                             Button("Cancel") {
                                 activeSection = nil
                                 email = ""
                                 clearError()
                             }
                             .foregroundColor(.secondary)
-                            
-                            Spacer()
-                            
-                            Button("Save") {
-                                updateEmail()
-                            }
-                            .disabled(email.isEmpty || !email.contains("@") || email == authManager.currentUser?.email)
-                            .foregroundColor(.orange)
-                            .fontWeight(.semibold)
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 8)
                         }
                     }
                 } else {
@@ -136,17 +165,20 @@ struct AccountSettingsView: View {
                     VStack(spacing: 12) {
                         SecureField("Current password", text: $currentPassword)
                             .textFieldStyle(RoundedBorderTextFieldStyle())
-                            .textContentType(.none)
+                            .textContentType(.password)
+                            .autocorrectionDisabled()
                             .focused($focusedField, equals: .currentPassword)
                         
                         SecureField("New password", text: $newPassword)
                             .textFieldStyle(RoundedBorderTextFieldStyle())
-                            .textContentType(.none)
+                            .textContentType(.newPassword)
+                            .autocorrectionDisabled()
                             .focused($focusedField, equals: .newPassword)
                         
                         SecureField("Confirm new password", text: $confirmPassword)
                             .textFieldStyle(RoundedBorderTextFieldStyle())
-                            .textContentType(.none)
+                            .textContentType(.newPassword)
+                            .autocorrectionDisabled()
                             .focused($focusedField, equals: .confirmPassword)
                         
                         if !newPassword.isEmpty && newPassword.count < 8 {
@@ -161,7 +193,26 @@ struct AccountSettingsView: View {
                                 .foregroundColor(.red)
                         }
                         
-                        HStack {
+                        VStack(spacing: 16) {
+                            Button("Change Password") {
+                                // Immediately capture the current password values
+                                let currentPwd = currentPassword
+                                let newPwd = newPassword
+                                
+                                guard isPasswordValid else {
+                                    return
+                                }
+                                
+                                updatePasswordWith(currentPwd, newPwd)
+                            }
+                            .disabled(!isPasswordValid)
+                            .foregroundColor(.white)
+                            .fontWeight(.semibold)
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 12)
+                            .background(isPasswordValid ? Color.orange : Color.gray)
+                            .cornerRadius(12)
+                            
                             Button("Cancel") {
                                 activeSection = nil
                                 currentPassword = ""
@@ -170,15 +221,8 @@ struct AccountSettingsView: View {
                                 clearError()
                             }
                             .foregroundColor(.secondary)
-                            
-                            Spacer()
-                            
-                            Button("Save") {
-                                updatePassword()
-                            }
-                            .disabled(!isPasswordValid)
-                            .foregroundColor(.orange)
-                            .fontWeight(.semibold)
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 8)
                         }
                     }
                 } else {
@@ -231,73 +275,118 @@ struct AccountSettingsView: View {
         newPassword == confirmPassword
     }
     
+    private func isValidEmail(_ email: String) -> Bool {
+        let emailRegex = "[A-Z0-9a-z._%+-]+@[A-Za-z0-9.-]+\\.[A-Za-z]{2,64}"
+        let emailPredicate = NSPredicate(format:"SELF MATCHES %@", emailRegex)
+        return emailPredicate.evaluate(with: email)
+    }
+    
     private func clearError() {
         errorMessage = nil
     }
     
     private func updateName() {
-        guard !name.isEmpty else { return }
+        updateNameWith(name)
+    }
+    
+    private func updateNameWith(_ nameToUpdate: String) {
+        guard !nameToUpdate.isEmpty else { 
+            return 
+        }
         
         isLoading = true
         clearError()
         
-        // TODO: Implement API call to update name
-        // For now, just simulate the update
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1) {
-            isLoading = false
-            activeSection = nil
-            showingSuccess = true
+        Task {
+            let success = await authManager.updateProfile(name: nameToUpdate)
             
-            // Update local user (this would normally come from the API response)
-            if var user = authManager.currentUser {
-                // Note: In real implementation, this would be updated via API call
-                // and the authManager would be updated with the response
+            await MainActor.run {
+                isLoading = false
+                
+                if success {
+                    activeSection = nil
+                    showingSuccess = true
+                    name = ""
+                } else {
+                    errorMessage = authManager.errorMessage ?? "Failed to update name"
+                }
             }
-            
-            name = ""
         }
     }
     
     private func updateEmail() {
-        guard !email.isEmpty, email.contains("@") else { return }
+        updateEmailWith(email)
+    }
+    
+    private func updateEmailWith(_ emailToUpdate: String) {
+        guard !emailToUpdate.isEmpty, isValidEmail(emailToUpdate) else { 
+            return 
+        }
         
         isLoading = true
         clearError()
         
-        // TODO: Implement API call to update email
-        // For now, just simulate the update
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1) {
-            isLoading = false
-            activeSection = nil
-            showingSuccess = true
+        Task {
+            let success = await authManager.updateProfile(email: emailToUpdate)
             
-            // Update local user (this would normally come from the API response)
-            if var user = authManager.currentUser {
-                // Note: In real implementation, this would be updated via API call
-                // and the authManager would be updated with the response
+            await MainActor.run {
+                isLoading = false
+                
+                if success {
+                    activeSection = nil
+                    showingSuccess = true
+                    email = ""
+                } else {
+                    errorMessage = authManager.errorMessage ?? "Failed to update email"
+                }
             }
-            
-            email = ""
         }
     }
     
     private func updatePassword() {
-        guard isPasswordValid else { return }
+        updatePasswordWith(currentPassword, newPassword)
+    }
+    
+    private func updatePasswordWith(_ currentPwd: String, _ newPwd: String) {
+        guard !currentPwd.isEmpty && !newPwd.isEmpty && newPwd.count >= 8 && newPwd == confirmPassword else { 
+            return 
+        }
         
         isLoading = true
         clearError()
         
-        // TODO: Implement API call to change password
-        // For now, just simulate the update
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1) {
-            isLoading = false
-            activeSection = nil
-            showingSuccess = true
+        Task {
+            // Step 1: Verify the current password first
+            let isCurrentPasswordValid = await authManager.verifyPassword(currentPassword: currentPwd)
             
-            // Clear password fields
-            currentPassword = ""
-            newPassword = ""
-            confirmPassword = ""
+            if !isCurrentPasswordValid {
+                await MainActor.run {
+                    isLoading = false
+                    errorMessage = "Current password is incorrect"
+                }
+                return
+            }
+            
+            // Step 2: Change the password
+            let success = await authManager.changePassword(
+                currentPassword: currentPwd,
+                newPassword: newPwd
+            )
+            
+            await MainActor.run {
+                isLoading = false
+                
+                if success {
+                    activeSection = nil
+                    showingSuccess = true
+                    // Clear password fields
+                    currentPassword = ""
+                    newPassword = ""
+                    confirmPassword = ""
+                } else {
+                    errorMessage = authManager.errorMessage ?? "Failed to change password"
+                }
+            }
         }
     }
 }

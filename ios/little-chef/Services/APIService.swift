@@ -131,6 +131,62 @@ class APIService {
         return try await performRequest(request: request, responseType: User.self)
     }
     
+    func updateProfile(name: String? = nil, email: String? = nil) async throws -> User {
+        let userUpdate = UserUpdate(name: name, email: email)
+        let url = URL(string: "\(baseURL)/auth/profile")!
+        
+        var request = URLRequest(url: url)
+        request.httpMethod = "PUT"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try jsonEncoder.encode(userUpdate)
+        
+        // Add auth header
+        guard let token = KeychainService.shared.getAccessToken() else {
+            throw AuthError.tokenExpired
+        }
+        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        
+        return try await performRequest(request: request, responseType: User.self)
+    }
+    
+    func verifyPassword(currentPassword: String) async throws -> Bool {
+        let passwordVerification = ["current_password": currentPassword]
+        let url = URL(string: "\(baseURL)/auth/verify-password")!
+        
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try jsonEncoder.encode(passwordVerification)
+        
+        // Add auth header
+        guard let token = KeychainService.shared.getAccessToken() else {
+            throw AuthError.tokenExpired
+        }
+        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        
+        do {
+            let (_, response) = try await session.data(for: request)
+            
+            guard let httpResponse = response as? HTTPURLResponse else {
+                throw AuthError.networkError("Invalid response")
+            }
+            
+            if httpResponse.statusCode == 200 {
+                return true
+            } else if httpResponse.statusCode == 400 {
+                return false  // Password is incorrect
+            } else {
+                throw AuthError.serverError(httpResponse.statusCode)
+            }
+        } catch {
+            if let authError = error as? AuthError {
+                throw authError
+            } else {
+                throw AuthError.networkError(error.localizedDescription)
+            }
+        }
+    }
+    
     func changePassword(currentPassword: String, newPassword: String) async throws {
         let passwordChange = PasswordChange(currentPassword: currentPassword, newPassword: newPassword)
         let url = URL(string: "\(baseURL)/auth/change-password")!

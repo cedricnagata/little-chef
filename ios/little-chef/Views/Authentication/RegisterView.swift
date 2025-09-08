@@ -50,6 +50,7 @@ struct RegisterView: View {
                         TextField("Enter your full name", text: $name)
                             .textFieldStyle(RoundedBorderTextFieldStyle())
                             .textInputAutocapitalization(.words)
+                            .autocorrectionDisabled()
                             .focused($focusedField, equals: .name)
                             .onSubmit {
                                 focusedField = .email
@@ -85,7 +86,8 @@ struct RegisterView: View {
                         
                         SecureField("Create a password", text: $password)
                             .textFieldStyle(RoundedBorderTextFieldStyle())
-                            .textContentType(.none)
+                            .textContentType(.newPassword)
+                            .autocorrectionDisabled()
                             .focused($focusedField, equals: .password)
                             .onSubmit {
                                 focusedField = .confirmPassword
@@ -106,7 +108,8 @@ struct RegisterView: View {
                         
                         SecureField("Confirm your password", text: $confirmPassword)
                             .textFieldStyle(RoundedBorderTextFieldStyle())
-                            .textContentType(.none)
+                            .textContentType(.newPassword)
+                            .autocorrectionDisabled()
                             .focused($focusedField, equals: .confirmPassword)
                             .onSubmit {
                                 Task {

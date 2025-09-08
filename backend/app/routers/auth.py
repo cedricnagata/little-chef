@@ -7,7 +7,7 @@ from fastapi.security import HTTPBearer
 from sqlalchemy.orm import Session
 
 from app.database import get_db
-from app.schemas import UserCreate, UserLogin, UserResponse, Token, TokenRefresh, PasswordChange
+from app.schemas import UserCreate, UserLogin, UserResponse, Token, TokenRefresh, PasswordChange, UserUpdate
 from app.crud import user_crud
 from app.security import (
     create_access_token, 
@@ -149,6 +149,61 @@ async def get_current_user_info(
         )
     
     return UserResponse.model_validate(user)
+
+
+@router.put("/profile", response_model=UserResponse)
+async def update_profile(
+    user_update: UserUpdate,
+    current_user_id: str = Depends(get_current_user_id),
+    db: Session = Depends(get_db)
+):
+    """Update user profile information"""
+    
+    # Check if email is being updated and if it already exists
+    email_to_update = getattr(user_update, 'email', None)
+    if email_to_update:
+        existing_user = user_crud.get_user_by_email(db, email_to_update)
+        if existing_user and str(existing_user.id) != current_user_id:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="User with this email already exists"
+            )
+    
+    updated_user = user_crud.update_user(db, current_user_id, user_update)
+    
+    if not updated_user:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="User not found"
+        )
+    
+    return UserResponse.model_validate(updated_user)
+
+
+@router.post("/verify-password", status_code=status.HTTP_200_OK)
+async def verify_password(
+    password_verification: dict,
+    current_user_id: str = Depends(get_current_user_id),
+    db: Session = Depends(get_db)
+):
+    """Verify if the current password is correct"""
+    
+    current_password = password_verification.get("current_password")
+    if not current_password:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Current password is required"
+        )
+    
+    is_valid = user_crud.verify_password(db, current_user_id, current_password)
+    
+    if not is_valid:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Current password is incorrect"
+        )
+    
+    return {"message": "Password verified successfully"}
 
 
 @router.post("/change-password", status_code=status.HTTP_200_OK)

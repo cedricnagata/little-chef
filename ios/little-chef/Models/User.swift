@@ -36,6 +36,37 @@ struct UserLogin: Codable {
     let password: String
 }
 
+struct UserUpdate: Codable {
+    let name: String?
+    let email: String?
+    let preferences: [String: AnyCodable]?
+    
+    init(name: String? = nil, email: String? = nil, preferences: [String: AnyCodable]? = nil) {
+        self.name = name
+        self.email = email
+        self.preferences = preferences
+    }
+    
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        
+        // Only encode non-nil values
+        if let name = name {
+            try container.encode(name, forKey: .name)
+        }
+        if let email = email {
+            try container.encode(email, forKey: .email)
+        }
+        if let preferences = preferences {
+            try container.encode(preferences, forKey: .preferences)
+        }
+    }
+    
+    enum CodingKeys: String, CodingKey {
+        case name, email, preferences
+    }
+}
+
 struct UserPreferences: Codable {
     let llmModel: String
     let measurementSystem: String

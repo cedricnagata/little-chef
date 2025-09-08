@@ -48,7 +48,12 @@ class UserResponse(UserBase):
 class UserUpdate(BaseModel):
     """Schema for user updates"""
     name: Optional[str] = Field(None, min_length=1, max_length=255)
+    email: Optional[EmailStr] = None
     preferences: Optional[Dict[str, Any]] = None
+    
+    class Config:
+        # This ensures that None values are excluded from model_dump
+        exclude_none = True
 
 
 class UserPreferences(BaseModel):

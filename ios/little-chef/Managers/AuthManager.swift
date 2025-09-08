@@ -147,6 +147,31 @@ class AuthManager: ObservableObject {
         }
     }
     
+    func updateProfile(name: String? = nil, email: String? = nil) async -> Bool {
+        isLoading = true
+        errorMessage = nil
+        
+        do {
+            let updatedUser = try await apiService.updateProfile(name: name, email: email)
+            currentUser = updatedUser
+            isLoading = false
+            return true
+        } catch {
+            handleAuthError(error)
+            isLoading = false
+            return false
+        }
+    }
+    
+    func verifyPassword(currentPassword: String) async -> Bool {
+        do {
+            return try await apiService.verifyPassword(currentPassword: currentPassword)
+        } catch {
+            handleAuthError(error)
+            return false
+        }
+    }
+    
     func changePassword(currentPassword: String, newPassword: String) async -> Bool {
         isLoading = true
         errorMessage = nil

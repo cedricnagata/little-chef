@@ -56,7 +56,7 @@ class UserCRUD:
             if not db_user:
                 return None
             
-            update_data = user_update.model_dump(exclude_unset=True)
+            update_data = user_update.model_dump(exclude_none=True)
             
             for field, value in update_data.items():
                 setattr(db_user, field, value)
@@ -88,6 +88,21 @@ class UserCRUD:
             
         except ValueError:
             return None
+    
+    def verify_password(self, db: Session, user_id: str, password: str) -> bool:
+        """Verify if the provided password matches the user's current password"""
+        try:
+            user_uuid = uuid.UUID(user_id)
+            db_user = db.query(User).filter(User.id == user_uuid, User.is_active == True).first()
+            
+            if not db_user:
+                return False
+            
+            # Verify password
+            return verify_password(password, db_user.hashed_password)
+            
+        except ValueError:
+            return False
     
     def change_password(self, db: Session, user_id: str, current_password: str, new_password: str) -> bool:
         """Change user password"""
