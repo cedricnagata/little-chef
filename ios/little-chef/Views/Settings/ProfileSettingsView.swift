@@ -11,10 +11,10 @@ struct ProfileSettingsView: View {
     @EnvironmentObject var authManager: AuthManager
     @State private var selectedLLMModel = "gpt-4.1"
     @State private var measurementSystem = "imperial"
-    @State private var dietaryRestrictions: [String] = []
-    @State private var newRestriction = ""
     @State private var isLoading = false
     @State private var showingSuccess = false
+    @State private var showingError = false
+    @State private var errorMessage = ""
     
     // Available LLM models
     private let llmModels = [
@@ -22,11 +22,6 @@ struct ProfileSettingsView: View {
         "gpt-4.1", "gpt-4.1-mini", "gpt-4.1-nano"
     ]
     
-    // Common dietary restrictions
-    private let commonRestrictions = [
-        "Vegetarian", "Vegan", "Gluten-Free", "Dairy-Free", 
-        "Nut-Free", "Keto", "Paleo", "Low-Carb", "Halal", "Kosher"
-    ]
     
     var body: some View {
         Form {
@@ -55,57 +50,6 @@ struct ProfileSettingsView: View {
                 Text("Measurements")
             }
             
-            // Dietary Restrictions
-            Section {
-                // Current restrictions
-                ForEach(dietaryRestrictions, id: \.self) { restriction in
-                    HStack {
-                        Text(restriction)
-                        Spacer()
-                        Button("Remove") {
-                            dietaryRestrictions.removeAll { $0 == restriction }
-                        }
-                        .foregroundColor(.red)
-                        .font(.caption)
-                    }
-                }
-                
-                // Add new restriction
-                HStack {
-                    TextField("Add dietary restriction", text: $newRestriction)
-                    Button("Add") {
-                        if !newRestriction.isEmpty && !dietaryRestrictions.contains(newRestriction) {
-                            dietaryRestrictions.append(newRestriction)
-                            newRestriction = ""
-                        }
-                    }
-                    .disabled(newRestriction.isEmpty)
-                }
-                
-                // Quick add common restrictions
-                LazyVGrid(columns: [
-                    GridItem(.flexible()),
-                    GridItem(.flexible())
-                ], spacing: 8) {
-                    ForEach(commonRestrictions, id: \.self) { restriction in
-                        if !dietaryRestrictions.contains(restriction) {
-                            Button(restriction) {
-                                dietaryRestrictions.append(restriction)
-                            }
-                            .font(.caption)
-                            .padding(.horizontal, 12)
-                            .padding(.vertical, 6)
-                            .background(Color.orange.opacity(0.1))
-                            .foregroundColor(.orange)
-                            .cornerRadius(16)
-                        }
-                    }
-                }
-            } header: {
-                Text("Dietary Restrictions")
-            } footer: {
-                Text("Your dietary restrictions help the AI provide better recipe suggestions and substitutions.")
-            }
             
             // Save Button
             Section {
@@ -140,37 +84,81 @@ struct ProfileSettingsView: View {
         } message: {
             Text("Your preferences have been updated successfully.")
         }
+        .alert("Error", isPresented: $showingError) {
+            Button("OK") { }
+        } message: {
+            Text(errorMessage)
+        }
     }
     
     private func loadCurrentPreferences() {
-        // Load current user preferences
-        if let user = authManager.currentUser {
-            if let preferences = user.preferences as? [String: Any] {
-                selectedLLMModel = preferences["llm_model"] as? String ?? "gpt-4.1"
-                measurementSystem = preferences["measurement_system"] as? String ?? "imperial"
-                dietaryRestrictions = preferences["dietary_restrictions"] as? [String] ?? []
+        // Load preferences from backend to get the latest values
+        Task {
+            await loadPreferencesFromBackend()
+        }
+    }
+    
+    private func loadPreferencesFromBackend() async {
+        guard authManager.isAuthenticated else { return }
+        
+        do {
+            let preferences = try await APIService.shared.getPreferences()
+            
+            await MainActor.run {
+                selectedLLMModel = preferences.llmModel
+                measurementSystem = preferences.measurementSystem
+            }
+        } catch {
+            print("Failed to load preferences from backend: \(error)")
+            
+            // Fallback to local user preferences if backend fails
+            await MainActor.run {
+                if let user = authManager.currentUser {
+                    if let localPreferences = user.preferences as? [String: Any] {
+                        selectedLLMModel = localPreferences["llm_model"] as? String ?? "gpt-4.1"
+                        measurementSystem = localPreferences["measurement_system"] as? String ?? "imperial"
+                    }
+                }
             }
         }
     }
     
     private func savePreferences() {
-        isLoading = true
+        Task {
+            await savePreferencesToBackend()
+        }
+    }
+    
+    private func savePreferencesToBackend() async {
+        await MainActor.run {
+            isLoading = true
+            errorMessage = ""
+        }
         
-        // TODO: Implement API call to save preferences
-        // For now, just simulate saving
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1) {
-            isLoading = false
-            showingSuccess = true
+        // Create UserPreferences object
+        let preferences = UserPreferences(
+            llmModel: selectedLLMModel,
+            measurementSystem: measurementSystem,
+            dietaryRestrictions: [], // Empty for now - feature not implemented
+            voiceSettings: [:] // Empty for now
+        )
+        
+        do {
+            // Call the AuthManager which will handle the API call and update the current user
+            await authManager.updatePreferences(preferences)
             
-            // Update local user preferences (this would normally come from the API response)
-            if var user = authManager.currentUser {
-                var preferences = user.preferences as? [String: Any] ?? [:]
-                preferences["llm_model"] = selectedLLMModel
-                preferences["measurement_system"] = measurementSystem
-                preferences["dietary_restrictions"] = dietaryRestrictions
-                
-                // Note: In real implementation, this would be updated via API call
-                // and the authManager would be updated with the response
+            await MainActor.run {
+                isLoading = false
+                showingSuccess = true
+            }
+            
+        } catch {
+            print("Failed to save preferences: \(error)")
+            
+            await MainActor.run {
+                isLoading = false
+                errorMessage = "Failed to save preferences. Please try again."
+                showingError = true
             }
         }
     }

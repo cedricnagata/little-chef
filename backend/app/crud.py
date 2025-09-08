@@ -8,7 +8,7 @@ from typing import Optional, Dict, Any
 import uuid
 
 from app.models import User
-from app.schemas import UserCreate, UserUpdate
+from app.schemas import UserCreate, UserUpdate, UserPreferences
 from app.security import get_password_hash, verify_password
 
 
@@ -31,11 +31,15 @@ class UserCRUD:
         """Create a new user"""
         hashed_password = get_password_hash(user.password)
         
+        # Create default preferences
+        default_preferences = UserPreferences()
+        preferences_dict = default_preferences.model_dump()
+        
         db_user = User(
             email=user.email,
             name=user.name,
             hashed_password=hashed_password,
-            preferences={}
+            preferences=preferences_dict
         )
         
         try:
@@ -80,13 +84,27 @@ class UserCRUD:
             # Merge with existing preferences
             current_prefs = db_user.preferences or {}
             current_prefs.update(preferences)
+            
+            # Update the preferences
             db_user.preferences = current_prefs
             
-            db.commit()
-            db.refresh(db_user)
-            return db_user
+            # Mark the JSONB field as modified so SQLAlchemy detects the change
+            from sqlalchemy.orm.attributes import flag_modified
+            flag_modified(db_user, 'preferences')
+            
+            try:
+                db.commit()
+                db.refresh(db_user)
+                return db_user
+            except Exception as e:
+                db.rollback()
+                return None
             
         except ValueError:
+            db.rollback()
+            return None
+        except Exception:
+            db.rollback()
             return None
     
     def verify_password(self, db: Session, user_id: str, password: str) -> bool:
