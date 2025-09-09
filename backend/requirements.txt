@@ -8,7 +8,8 @@ alembic
 psycopg2-binary
 
 # Data validation
-pydantic
+pydantic[email]
+email-validator
 
 # Authentication
 python-jose[cryptography]
@@ -22,6 +23,8 @@ openai
 
 # Utilities
 python-multipart
+aiofiles
+requests
 
 # Development and Testing
 pytest

@@ -4,11 +4,12 @@ CRUD operations for database models
 
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import IntegrityError
-from typing import Optional, Dict, Any
+from sqlalchemy import or_, func
+from typing import Optional, Dict, Any, List
 import uuid
 
-from app.models import User
-from app.schemas import UserCreate, UserUpdate, UserPreferences
+from app.models import User, Recipe
+from app.schemas import UserCreate, UserUpdate, UserPreferences, RecipeCreate, RecipeUpdate
 from app.security import get_password_hash, verify_password
 
 
@@ -170,5 +171,148 @@ class UserCRUD:
         return user
 
 
-# Global CRUD instance
+class RecipeCRUD:
+    """CRUD operations for Recipe model"""
+    
+    def get_recipe(self, db: Session, recipe_id: str, user_id: str) -> Optional[Recipe]:
+        """Get recipe by ID for a specific user"""
+        try:
+            recipe_uuid = uuid.UUID(recipe_id)
+            user_uuid = uuid.UUID(user_id)
+            return db.query(Recipe).filter(
+                Recipe.id == recipe_uuid, 
+                Recipe.user_id == user_uuid
+            ).first()
+        except ValueError:
+            return None
+    
+    def get_user_recipes(self, db: Session, user_id: str, skip: int = 0, limit: int = 100) -> List[Recipe]:
+        """Get all recipes for a user"""
+        try:
+            user_uuid = uuid.UUID(user_id)
+            return db.query(Recipe).filter(
+                Recipe.user_id == user_uuid
+            ).order_by(Recipe.updated_at.desc()).offset(skip).limit(limit).all()
+        except ValueError:
+            return []
+    
+    def create_recipe(self, db: Session, recipe: RecipeCreate, user_id: str) -> Recipe:
+        """Create a new recipe"""
+        try:
+            user_uuid = uuid.UUID(user_id)
+            
+            # Convert recipe to dict for JSONB storage
+            recipe_data = recipe.model_dump()
+            
+            db_recipe = Recipe(
+                user_id=user_uuid,
+                recipe_data=recipe_data
+            )
+            
+            db.add(db_recipe)
+            db.commit()
+            db.refresh(db_recipe)
+            return db_recipe
+            
+        except ValueError as e:
+            db.rollback()
+            raise ValueError(f"Invalid user ID: {str(e)}")
+        except IntegrityError as e:
+            db.rollback()
+            raise ValueError(f"Database error: {str(e)}")
+    
+    def update_recipe(self, db: Session, recipe_id: str, recipe_update: RecipeUpdate) -> Optional[Recipe]:
+        """Update an existing recipe"""
+        try:
+            recipe_uuid = uuid.UUID(recipe_id)
+            db_recipe = db.query(Recipe).filter(Recipe.id == recipe_uuid).first()
+            
+            if not db_recipe:
+                return None
+            
+            # Get current recipe data
+            current_data = db_recipe.recipe_data.copy()
+            
+            # Update with new data (only non-None values)
+            update_data = recipe_update.model_dump(exclude_none=True)
+            current_data.update(update_data)
+            
+            # Update the recipe data
+            db_recipe.recipe_data = current_data
+            
+            # Mark the JSONB field as modified
+            from sqlalchemy.orm.attributes import flag_modified
+            flag_modified(db_recipe, 'recipe_data')
+            
+            db.commit()
+            db.refresh(db_recipe)
+            return db_recipe
+            
+        except ValueError:
+            return None
+    
+    def delete_recipe(self, db: Session, recipe_id: str) -> bool:
+        """Delete a recipe"""
+        try:
+            recipe_uuid = uuid.UUID(recipe_id)
+            db_recipe = db.query(Recipe).filter(Recipe.id == recipe_uuid).first()
+            
+            if not db_recipe:
+                return False
+            
+            db.delete(db_recipe)
+            db.commit()
+            return True
+            
+        except ValueError:
+            return False
+    
+    def search_recipes(self, db: Session, user_id: str, query: str, skip: int = 0, limit: int = 50) -> List[Recipe]:
+        """Search recipes by title, ingredients, or tags"""
+        try:
+            user_uuid = uuid.UUID(user_id)
+            
+            # Create search filter for JSONB fields
+            search_filter = or_(
+                # Search in title
+                func.lower(Recipe.recipe_data['title'].astext).contains(query.lower()),
+                # Search in ingredients (array of strings)
+                Recipe.recipe_data['ingredients'].astext.ilike(f'%{query}%'),
+                # Search in tags (array of strings)
+                Recipe.recipe_data['tags'].astext.ilike(f'%{query}%'),
+                # Search in cuisine_type
+                func.lower(Recipe.recipe_data['cuisine_type'].astext).contains(query.lower())
+            )
+            
+            return db.query(Recipe).filter(
+                Recipe.user_id == user_uuid,
+                search_filter
+            ).order_by(Recipe.updated_at.desc()).offset(skip).limit(limit).all()
+            
+        except ValueError:
+            return []
+    
+    def get_user_recipe_tags(self, db: Session, user_id: str) -> List[str]:
+        """Get all unique tags from user's recipes"""
+        try:
+            user_uuid = uuid.UUID(user_id)
+            
+            # Query to extract all tags from recipes
+            recipes = db.query(Recipe).filter(Recipe.user_id == user_uuid).all()
+            
+            # Extract unique tags
+            all_tags = set()
+            for recipe in recipes:
+                tags = recipe.recipe_data.get('tags', [])
+                if isinstance(tags, list):
+                    all_tags.update(tag.lower().strip() for tag in tags if tag)
+            
+            return list(all_tags)
+            
+        except ValueError:
+            return []
+
+
+# Global CRUD instances
 user_crud = UserCRUD()
+recipe_crud = RecipeCRUD()

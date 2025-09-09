@@ -13,7 +13,7 @@ struct MainView: View {
     var body: some View {
         TabView {
             // Recipes Tab
-            RecipesView()
+            RecipeListView()
                 .tabItem {
                     Image(systemName: "book.fill")
                     Text("Recipes")
@@ -38,28 +38,6 @@ struct MainView: View {
 }
 
 // MARK: - Temporary Placeholder Views
-struct RecipesView: View {
-    var body: some View {
-        NavigationView {
-            VStack {
-                Image(systemName: "book.fill")
-                    .font(.system(size: 60))
-                    .foregroundColor(.orange)
-                    .padding()
-                
-                Text("My Recipes")
-                    .font(.title)
-                    .fontWeight(.bold)
-                
-                Text("Your recipes will appear here")
-                    .foregroundColor(.secondary)
-                    .padding()
-                
-                Spacer()
-            }
-        }
-    }
-}
 
 struct CookingView: View {
     var body: some View {

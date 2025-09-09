@@ -34,10 +34,11 @@ app.add_middleware(
 )
 
 # Include routers
-from app.routers import auth, users
+from app.routers import auth, users, recipes
 
 app.include_router(auth.router)
 app.include_router(users.router)
+app.include_router(recipes.router)
 
 # Basic health check endpoint
 @app.get("/")

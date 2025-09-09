@@ -3,7 +3,7 @@ Pydantic schemas for request/response models
 """
 
 from pydantic import BaseModel, EmailStr, Field, validator
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, List, Literal
 from datetime import datetime
 import uuid
 
@@ -89,3 +89,171 @@ class PasswordChange(BaseModel):
         if len(v) < 8:
             raise ValueError('Password must be at least 8 characters long')
         return v
+
+
+# ===== Recipe Schemas =====
+
+class RecipeBase(BaseModel):
+    """Base recipe schema matching design document"""
+    title: str = Field(..., min_length=1, max_length=255)
+    description: Optional[str] = None
+    servings: int = Field(default=4, ge=1, le=100)
+    prep_time: Optional[int] = Field(None, ge=0, le=1440)  # max 24 hours in minutes
+    cook_time: Optional[int] = Field(None, ge=0, le=1440)  # max 24 hours in minutes
+    ingredients: List[str] = Field(..., min_items=1)
+    instructions: List[str] = Field(..., min_items=1)
+    tags: List[str] = Field(default_factory=list)
+    source_url: Optional[str] = None
+    cuisine_type: Optional[str] = None
+    difficulty: Optional[str] = Field(None, pattern="^(easy|medium|hard)$")
+
+
+class RecipeCreate(RecipeBase):
+    """Schema for creating a new recipe"""
+    pass
+
+
+class RecipeUpdate(BaseModel):
+    """Schema for updating an existing recipe"""
+    title: Optional[str] = Field(None, min_length=1, max_length=255)
+    description: Optional[str] = None
+    servings: Optional[int] = Field(None, ge=1, le=100)
+    prep_time: Optional[int] = Field(None, ge=0, le=1440)
+    cook_time: Optional[int] = Field(None, ge=0, le=1440)
+    ingredients: Optional[List[str]] = Field(None, min_items=1)
+    instructions: Optional[List[str]] = Field(None, min_items=1)
+    tags: Optional[List[str]] = None
+    source_url: Optional[str] = None
+    cuisine_type: Optional[str] = None
+    difficulty: Optional[str] = Field(None, pattern="^(easy|medium|hard)$")
+
+    class Config:
+        exclude_none = True
+
+
+class RecipeResponse(RecipeBase):
+    """Schema for recipe response"""
+    id: uuid.UUID
+    created_at: datetime
+    updated_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class RecipeListResponse(BaseModel):
+    """Schema for recipe list response"""
+    id: uuid.UUID
+    recipe_data: RecipeBase
+    created_at: datetime
+    updated_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+# ===== Recipe Parsing Schemas =====
+
+class RecipeParseUrlRequest(BaseModel):
+    """Schema for URL parsing request"""
+    url: str = Field(..., pattern=r'^https?://.+')
+
+
+class RecipeParseTextRequest(BaseModel):
+    """Schema for text parsing request"""
+    text: str = Field(..., min_length=10, max_length=50000)
+
+
+class RecipeParseImageRequest(BaseModel):
+    """Schema for image parsing request"""
+    image: str = Field(..., description="Base64 encoded image")
+
+
+class RecipeParseResponse(BaseModel):
+    """Schema for recipe parsing response"""
+    recipe: RecipeBase
+    confidence: float = Field(..., ge=0.0, le=1.0)
+    warnings: List[str] = Field(default_factory=list)
+
+
+# ===== Recipe Modifications Schemas =====
+
+class RecipeModifications(BaseModel):
+    """Schema for recipe modifications"""
+    serving_multiplier: float = Field(default=1.0, gt=0.0, le=10.0)
+    ingredient_substitutions: Dict[str, str] = Field(default_factory=dict)
+    notes: List[str] = Field(default_factory=list)
+
+
+class Timer(BaseModel):
+    """Schema for cooking timers"""
+    id: uuid.UUID = Field(default_factory=uuid.uuid4)
+    label: str
+    duration_seconds: int = Field(..., ge=1)
+    remaining_seconds: int = Field(..., ge=0)
+    is_active: bool = True
+    created_at: datetime = Field(default_factory=datetime.now)
+
+
+class Message(BaseModel):
+    """Schema for conversation messages"""
+    id: uuid.UUID = Field(default_factory=uuid.uuid4)
+    role: Literal["user", "assistant"]
+    content: str
+    timestamp: datetime = Field(default_factory=datetime.now)
+
+
+class VoiceSettings(BaseModel):
+    """Schema for voice settings"""
+    speech_rate: float = Field(default=0.5, ge=0.1, le=2.0)
+    voice_identifier: str = Field(default="com.apple.ttsbundle.Samantha-compact")
+    auto_speak_responses: bool = True
+
+
+class UserPreferencesDetailed(UserPreferences):
+    """Extended user preferences with voice settings"""
+    voice_settings: VoiceSettings = Field(default_factory=VoiceSettings)
+
+
+# ===== Cooking Session Schemas =====
+
+class CookingSessionBase(BaseModel):
+    """Base cooking session schema"""
+    recipe: RecipeBase
+    modifications: RecipeModifications = Field(default_factory=RecipeModifications)
+    active_timers: List[Timer] = Field(default_factory=list)
+    conversation_history: List[Message] = Field(default_factory=list)
+    user_preferences: UserPreferencesDetailed = Field(default_factory=UserPreferencesDetailed)
+    started_at: datetime = Field(default_factory=datetime.now)
+
+
+class CookingSessionCreate(CookingSessionBase):
+    """Schema for creating a cooking session"""
+    pass
+
+
+class CookingSessionResponse(CookingSessionBase):
+    """Schema for cooking session response"""
+    id: uuid.UUID
+
+    class Config:
+        from_attributes = True
+
+
+class AgentQueryRequest(BaseModel):
+    """Schema for agent query request"""
+    cooking_session: CookingSessionBase
+    query: str = Field(..., min_length=1, max_length=1000)
+
+
+class SuggestedAction(BaseModel):
+    """Schema for suggested actions from agent"""
+    type: str
+    description: str
+
+
+class AgentQueryResponse(BaseModel):
+    """Schema for agent query response"""
+    response: str
+    updated_session: CookingSessionBase
+    suggested_actions: List[SuggestedAction] = Field(default_factory=list)

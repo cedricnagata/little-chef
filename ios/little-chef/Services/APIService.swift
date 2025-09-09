@@ -267,8 +267,135 @@ class APIService {
         return try await performRequest(request: request, responseType: UserPreferences.self)
     }
     
+    // MARK: - Recipe Management Endpoints
+    func getRecipes() async throws -> [RecipeListResponse] {
+        let url = URL(string: "\(baseURL)/recipes/")!
+        var request = URLRequest(url: url)
+        request.httpMethod = "GET"
+        
+        // Add auth header
+        guard let token = KeychainService.shared.getAccessToken() else {
+            throw AuthError.tokenExpired
+        }
+        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        
+        return try await performRequest(request: request, responseType: [RecipeListResponse].self)
+    }
+    
+    func getRecipe(id: UUID) async throws -> Recipe {
+        let url = URL(string: "\(baseURL)/recipes/\(id.uuidString)")!
+        var request = URLRequest(url: url)
+        request.httpMethod = "GET"
+        
+        // Add auth header
+        guard let token = KeychainService.shared.getAccessToken() else {
+            throw AuthError.tokenExpired
+        }
+        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        
+        return try await performRequest(request: request, responseType: Recipe.self)
+    }
+    
+    func createRecipe(_ recipe: RecipeCreate) async throws -> Recipe {
+        let url = URL(string: "\(baseURL)/recipes/")!
+        
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try jsonEncoder.encode(recipe)
+        
+        // Add auth header
+        guard let token = KeychainService.shared.getAccessToken() else {
+            throw AuthError.tokenExpired
+        }
+        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        
+        return try await performRequest(request: request, responseType: Recipe.self)
+    }
+    
+    func deleteRecipe(id: UUID) async throws {
+        let url = URL(string: "\(baseURL)/recipes/\(id.uuidString)")!
+        var request = URLRequest(url: url)
+        request.httpMethod = "DELETE"
+        
+        // Add auth header
+        guard let token = KeychainService.shared.getAccessToken() else {
+            throw AuthError.tokenExpired
+        }
+        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        
+        let (_, response) = try await session.data(for: request)
+        
+        guard let httpResponse = response as? HTTPURLResponse else {
+            throw AuthError.networkError("Invalid response")
+        }
+        
+        guard httpResponse.statusCode == 204 else {
+            throw AuthError.serverError(httpResponse.statusCode)
+        }
+    }
+    
+    // MARK: - Recipe Parsing Endpoints
+    func parseRecipeFromUrl(_ url: String) async throws -> RecipeParseResponse {
+        let request = RecipeParseUrlRequest(url: url)
+        let apiUrl = URL(string: "\(baseURL)/recipes/parse/url")!
+        
+        var urlRequest = URLRequest(url: apiUrl)
+        urlRequest.httpMethod = "POST"
+        urlRequest.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        urlRequest.httpBody = try jsonEncoder.encode(request)
+        
+        // Add auth header
+        guard let token = KeychainService.shared.getAccessToken() else {
+            throw AuthError.tokenExpired
+        }
+        urlRequest.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        
+        return try await performRequest(request: urlRequest, responseType: RecipeParseResponse.self)
+    }
+    
+    func parseRecipeFromText(_ text: String) async throws -> RecipeParseResponse {
+        let request = RecipeParseTextRequest(text: text)
+        let url = URL(string: "\(baseURL)/recipes/parse/text")!
+        
+        var urlRequest = URLRequest(url: url)
+        urlRequest.httpMethod = "POST"
+        urlRequest.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        urlRequest.httpBody = try jsonEncoder.encode(request)
+        
+        // Add auth header
+        guard let token = KeychainService.shared.getAccessToken() else {
+            throw AuthError.tokenExpired
+        }
+        urlRequest.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        
+        return try await performRequest(request: urlRequest, responseType: RecipeParseResponse.self)
+    }
+    
+    func parseRecipeFromImage(_ base64Image: String) async throws -> RecipeParseResponse {
+        let request = RecipeParseImageRequest(image: base64Image)
+        let url = URL(string: "\(baseURL)/recipes/parse/image")!
+        
+        var urlRequest = URLRequest(url: url)
+        urlRequest.httpMethod = "POST"
+        urlRequest.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        urlRequest.httpBody = try jsonEncoder.encode(request)
+        
+        // Add auth header
+        guard let token = KeychainService.shared.getAccessToken() else {
+            throw AuthError.tokenExpired
+        }
+        urlRequest.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        
+        return try await performRequest(request: urlRequest, responseType: RecipeParseResponse.self)
+    }
+    
     // MARK: - Generic Request Handler
     private func performRequest<T: Codable>(request: URLRequest, responseType: T.Type) async throws -> T {
+        return try await performRequestWithRetry(request: request, responseType: responseType, retryCount: 0)
+    }
+    
+    private func performRequestWithRetry<T: Codable>(request: URLRequest, responseType: T.Type, retryCount: Int) async throws -> T {
         do {
             let (data, response) = try await session.data(for: request)
             
@@ -281,6 +408,17 @@ class APIService {
             case 200...299:
                 return try jsonDecoder.decode(responseType, from: data)
             case 401:
+                // Token expired - try to refresh if we haven't already retried
+                if retryCount == 0 {
+                    try await refreshTokenAndRetry()
+                    
+                    // Update the request with the new token
+                    var updatedRequest = request
+                    if let newToken = KeychainService.shared.getAccessToken() {
+                        updatedRequest.setValue("Bearer \(newToken)", forHTTPHeaderField: "Authorization")
+                        return try await performRequestWithRetry(request: updatedRequest, responseType: responseType, retryCount: 1)
+                    }
+                }
                 throw AuthError.tokenExpired
             case 404:
                 throw AuthError.userNotFound
@@ -305,5 +443,18 @@ class APIService {
                 throw AuthError.networkError(error.localizedDescription)
             }
         }
+    }
+    
+    private func refreshTokenAndRetry() async throws {
+        guard let storedRefreshToken = KeychainService.shared.getRefreshToken() else {
+            throw AuthError.tokenExpired
+        }
+        
+        // Call the refresh endpoint
+        let authResponse = try await refreshToken(refreshToken: storedRefreshToken)
+        
+        // Save new tokens
+        _ = KeychainService.shared.saveAccessToken(authResponse.accessToken)
+        _ = KeychainService.shared.saveRefreshToken(authResponse.refreshToken)
     }
 }

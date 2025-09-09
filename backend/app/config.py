@@ -25,6 +25,10 @@ class Settings(BaseSettings):
     # OpenAI Configuration
     openai_api_key: str = ""  # Will be required when using LLM features
     
+    # Firecrawl Configuration
+    firecrawl_api_key: str = ""  # For web scraping
+    firecrawl_api_url: str = "https://api.firecrawl.dev/v2/scrape"  # Firecrawl API endpoint
+    
     # JWT Configuration  
     jwt_secret_key: str  # Must be set in environment
     jwt_algorithm: str = "HS256"
