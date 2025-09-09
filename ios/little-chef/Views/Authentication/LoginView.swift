@@ -19,8 +19,7 @@ struct LoginView: View {
     }
     
     var body: some View {
-        NavigationView {
-            VStack(spacing: 24) {
+        VStack(spacing: 24) {
                 // App Logo and Title
                 VStack(spacing: 16) {
                     Image(systemName: "fork.knife.circle.fill")
@@ -134,11 +133,9 @@ struct LoginView: View {
                     .font(.subheadline)
                 }
                 .padding(.bottom, 32)
-            }
-            .navigationBarHidden(true)
-            .onTapGesture {
-                focusedField = nil
-            }
+        }
+        .onTapGesture {
+            focusedField = nil
         }
         .sheet(isPresented: $showingRegister) {
             RegisterView()

@@ -241,7 +241,7 @@ struct InfoCard: View {
 }
 
 #Preview {
-    NavigationView {
+    NavigationStack {
         RecipeDetailView(recipe: Recipe(
             id: UUID(),
             title: "Chocolate Chip Cookies",

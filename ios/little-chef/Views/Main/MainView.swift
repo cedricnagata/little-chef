@@ -41,7 +41,7 @@ struct MainView: View {
 
 struct CookingView: View {
     var body: some View {
-        NavigationView {
+        NavigationStack {
             VStack {
                 Image(systemName: "flame.fill")
                     .font(.system(size: 60))
@@ -59,6 +59,7 @@ struct CookingView: View {
                 
                 Spacer()
             }
+            .navigationTitle("Cook")
         }
     }
 }
@@ -69,7 +70,7 @@ struct ProfileView: View {
     @State private var isDeleting = false
     
     var body: some View {
-        NavigationView {
+        NavigationStack {
             ScrollView {
                 VStack(spacing: 24) {
                 // User Info
@@ -174,6 +175,7 @@ struct ProfileView: View {
                 .padding(.bottom, 32)
                 }
             }
+            .navigationTitle("Profile")
         }
         .alert("Delete Account", isPresented: $showingDeleteAlert) {
             Button("Cancel", role: .cancel) { }

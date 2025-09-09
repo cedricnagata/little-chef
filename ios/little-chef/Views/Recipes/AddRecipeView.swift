@@ -148,6 +148,7 @@ struct AddRecipeView: View {
                 Text(recipeManager.errorMessage ?? "")
             }
         }
+        .navigationViewStyle(.stack)
     }
     
     private var canParseRecipe: Bool {

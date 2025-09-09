@@ -392,7 +392,7 @@ struct AccountSettingsView: View {
 }
 
 #Preview {
-    NavigationView {
+    NavigationStack {
         AccountSettingsView()
             .environmentObject(AuthManager())
     }

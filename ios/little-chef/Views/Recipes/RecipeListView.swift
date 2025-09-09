@@ -25,7 +25,7 @@ struct RecipeListView: View {
     }
     
     var body: some View {
-        NavigationView {
+        NavigationStack {
             Group {
                 if recipeManager.isLoading && recipeManager.recipes.isEmpty {
                     // Loading state

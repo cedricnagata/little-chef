@@ -127,7 +127,7 @@ struct SettingsRowView: View {
 }
 
 #Preview {
-    NavigationView {
+    NavigationStack {
         SettingsView()
             .environmentObject(AuthManager())
     }

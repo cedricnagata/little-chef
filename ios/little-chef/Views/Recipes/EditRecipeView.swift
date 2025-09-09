@@ -198,6 +198,7 @@ struct EditRecipeView: View {
                 }
             }
         }
+        .navigationViewStyle(.stack)
     }
     
     private var isValid: Bool {

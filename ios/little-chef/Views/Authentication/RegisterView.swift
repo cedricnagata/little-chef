@@ -192,6 +192,7 @@ struct RegisterView: View {
                 focusedField = nil
             }
         }
+        .navigationViewStyle(.stack)
         .onAppear {
             authManager.clearError()
         }

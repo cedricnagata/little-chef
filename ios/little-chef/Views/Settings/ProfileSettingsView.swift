@@ -165,7 +165,7 @@ struct ProfileSettingsView: View {
 }
 
 #Preview {
-    NavigationView {
+    NavigationStack {
         ProfileSettingsView()
             .environmentObject(AuthManager())
     }
