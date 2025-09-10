@@ -94,16 +94,16 @@ class RecipeManager: ObservableObject {
         }
     }
     
-    func parseRecipeFromImage(_ base64Image: String) async -> RecipeParseResponse? {
+    func parseRecipeFromImages(_ base64Images: [String]) async -> RecipeParseResponse? {
         isLoading = true
         errorMessage = nil
         
         do {
-            let response = try await apiService.parseRecipeFromImage(base64Image)
+            let response = try await apiService.parseRecipeFromImage(base64Images)
             isLoading = false
             return response
         } catch {
-            errorMessage = "Failed to parse recipe from image: \(error.localizedDescription)"
+            errorMessage = "Failed to parse recipe from images: \(error.localizedDescription)"
             isLoading = false
             return nil
         }

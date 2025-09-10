@@ -200,9 +200,9 @@ async def parse_recipe_from_image(
     request: RecipeParseImageRequest,
     current_user_id: str = Depends(get_current_user_id)
 ):
-    """Parse a recipe from an image using GPT-4 Vision"""
+    """Parse a recipe from one or more images using GPT-5-mini Vision"""
     try:
-        result = await recipe_parser.parse_from_image(request.image)
+        result = await recipe_parser.parse_from_image(request.images)
         return result
         
     except RecipeParsingError as e:

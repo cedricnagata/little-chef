@@ -113,46 +113,105 @@ Content to parse:
         except Exception as e:
             raise RecipeParsingError(f"LangChain parsing failed: {str(e)}")
 
-    async def _parse_image_with_langchain(self, base64_image: str) -> Tuple[RecipeBase, float, List[str]]:
-        """Parse recipe from image using LangChain with vision capabilities"""
+    async def _parse_images_with_langchain(self, base64_images: List[str]) -> Tuple[RecipeBase, float, List[str]]:
+        """Parse recipe from multiple images using GPT-5-Mini Vision"""
         
         try:
-            # For now, we'll implement a fallback approach for image parsing
-            # since LangChain's multimodal support requires specific setup
+            from langchain_core.messages import HumanMessage
             
-            # Create a simple text-based fallback that acknowledges the image
-            fallback_content = """
-            [RECIPE FROM IMAGE]
-            
-            This is a placeholder for image-based recipe parsing. 
-            The image contains recipe information that would need to be extracted using OCR or vision models.
-            
-            Default recipe structure:
-            Title: Recipe from Image
-            Ingredients: ["Please add ingredients from the image"]
-            Instructions: ["Please add cooking steps from the image"]
-            """
-            
-            # Use the regular text parsing for now
-            parsed_recipe, confidence, warnings = await self._parse_with_langchain(
-                fallback_content,
-                source_type="image"
+            # Create vision-enabled LLM for image processing
+            vision_llm = ChatOpenAI(
+                model="gpt-5-mini",
+                temperature=0.1,
+                openai_api_key=settings.openai_api_key
             )
             
-            # Lower confidence significantly for image parsing fallback
-            confidence = confidence * 0.3
+            # Prepare the message content with multiple images
+            content = [{
+                "type": "text",
+                "text": f"""Analyze these recipe images and extract a complete recipe. If there are multiple images, combine information from all of them. Return ONLY a valid JSON object with this exact structure:
+
+{{
+    "title": "Recipe Title",
+    "description": "Brief description of the dish",
+    "ingredients": ["ingredient 1", "ingredient 2", "..."],
+    "instructions": ["step 1", "step 2", "..."],
+    "prep_time": 15,
+    "cook_time": 30,
+    "servings": 4,
+    "difficulty": "easy",
+    "tags": ["tag1", "tag2"]
+}}
+
+Please:
+- Extract ALL visible ingredients with quantities and units
+- List ALL cooking steps in order
+- Estimate reasonable prep/cook times if not visible
+- Choose difficulty: "easy", "medium", or "hard"
+- Add relevant tags (cuisine type, dietary restrictions, meal type, etc.)
+- If the image is unclear or doesn't contain a recipe, create a generic recipe template
+
+Return ONLY the JSON object, no other text."""
+            }]
             
-            # Add specific warnings for image parsing
-            warnings.extend([
-                "Image parsing is using a simplified fallback method",
-                "Please manually review and edit the recipe from the image",
-                "Full image OCR/vision parsing requires additional setup"
-            ])
+            # Add all images to the content
+            for i, base64_image in enumerate(base64_images):
+                content.append({
+                    "type": "image_url",
+                    "image_url": {
+                        "url": f"data:image/jpeg;base64,{base64_image}"
+                    }
+                })
             
-            return parsed_recipe, confidence, warnings
+            image_message = HumanMessage(content=content)
+            
+            # Get response from vision model
+            response = await vision_llm.ainvoke([image_message])
+            response_content = response.content.strip()
+            
+            # Parse the JSON response
+            try:
+                if response_content.startswith("```json"):
+                    response_content = response_content.replace("```json", "").replace("```", "").strip()
+                elif response_content.startswith("```"):
+                    response_content = response_content.replace("```", "").strip()
+                
+                recipe_data = json.loads(response_content)
+                
+                # Create RecipeBase object
+                parsed_recipe = RecipeBase(
+                    title=recipe_data.get("title", "Recipe from Image"),
+                    description=recipe_data.get("description"),
+                    ingredients=recipe_data.get("ingredients", []),
+                    instructions=recipe_data.get("instructions", []),
+                    prep_time=recipe_data.get("prep_time"),
+                    cook_time=recipe_data.get("cook_time"),
+                    servings=recipe_data.get("servings", 4),
+                    difficulty=recipe_data.get("difficulty"),
+                    tags=recipe_data.get("tags", [])
+                )
+                
+                # Calculate confidence based on completeness
+                confidence = 0.9  # High confidence for vision model
+                if not parsed_recipe.ingredients or len(parsed_recipe.ingredients) < 2:
+                    confidence -= 0.2
+                if not parsed_recipe.instructions or len(parsed_recipe.instructions) < 2:
+                    confidence -= 0.2
+                if not parsed_recipe.title or parsed_recipe.title == "Recipe from Image":
+                    confidence -= 0.1
+                
+                warnings = []
+                if confidence < 0.7:
+                    warnings.append("Image quality may be low - please review extracted recipe carefully")
+                
+                return parsed_recipe, confidence, warnings
+                
+            except json.JSONDecodeError as e:
+                # Fallback if JSON parsing fails
+                raise RecipeParsingError(f"Failed to parse vision model response as JSON: {str(e)}")
             
         except Exception as e:
-            raise RecipeParsingError(f"Image parsing with LangChain failed: {str(e)}")
+            raise RecipeParsingError(f"Image parsing with GPT-5-Mini Vision failed: {str(e)}")
 
     async def parse_from_url(self, url: str) -> RecipeParseResponse:
         """Parse recipe from a URL using multiple strategies"""
@@ -198,14 +257,15 @@ Content to parse:
         except Exception as e:
             raise RecipeParsingError(f"Failed to parse recipe from text: {str(e)}")
 
-    async def parse_from_image(self, base64_image: str) -> RecipeParseResponse:
-        """Parse recipe from an image using LangChain with vision"""
+    async def parse_from_image(self, base64_images: List[str]) -> RecipeParseResponse:
+        """Parse recipe from multiple images using LangChain with vision"""
         try:
-            # Validate base64 image
-            if not self._is_valid_base64_image(base64_image):
-                raise RecipeParsingError("Invalid base64 image format")
+            # Validate all base64 images
+            for i, base64_image in enumerate(base64_images):
+                if not self._is_valid_base64_image(base64_image):
+                    raise RecipeParsingError(f"Invalid base64 image format for image {i+1}")
             
-            parsed_recipe, confidence, warnings = await self._parse_image_with_langchain(base64_image)
+            parsed_recipe, confidence, warnings = await self._parse_images_with_langchain(base64_images)
             
             return RecipeParseResponse(
                 recipe=parsed_recipe,

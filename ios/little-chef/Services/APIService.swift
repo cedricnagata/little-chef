@@ -372,8 +372,8 @@ class APIService {
         return try await performRequest(request: urlRequest, responseType: RecipeParseResponse.self)
     }
     
-    func parseRecipeFromImage(_ base64Image: String) async throws -> RecipeParseResponse {
-        let request = RecipeParseImageRequest(image: base64Image)
+    func parseRecipeFromImage(_ base64Images: [String]) async throws -> RecipeParseResponse {
+        let request = RecipeParseImageRequest(images: base64Images)
         let url = URL(string: "\(baseURL)/recipes/parse/image")!
         
         var urlRequest = URLRequest(url: url)

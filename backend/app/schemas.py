@@ -166,7 +166,7 @@ class RecipeParseTextRequest(BaseModel):
 
 class RecipeParseImageRequest(BaseModel):
     """Schema for image parsing request"""
-    image: str = Field(..., description="Base64 encoded image")
+    images: List[str] = Field(..., description="List of base64 encoded images", min_items=1, max_items=5)
 
 
 class RecipeParseResponse(BaseModel):

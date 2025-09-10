@@ -15,8 +15,8 @@ struct AddRecipeView: View {
     @State private var selectedInputType: RecipeInputType = .url
     @State private var urlInput = ""
     @State private var textInput = ""
-    @State private var selectedPhoto: PhotosPickerItem?
-    @State private var imageData: Data?
+    @State private var selectedPhotos: [PhotosPickerItem] = []
+    @State private var imageDataArray: [Data] = []
     
     // Parsed recipe state
     @State private var parsedRecipe: RecipeData?
@@ -74,9 +74,9 @@ struct AddRecipeView: View {
                         case .text:
                             TextInputView(textInput: $textInput)
                         case .image:
-                            ImageInputView(
-                                selectedPhoto: $selectedPhoto,
-                                imageData: $imageData
+                            MultiImageInputView(
+                                selectedPhotos: $selectedPhotos,
+                                imageDataArray: $imageDataArray
                             )
                         }
                     }
@@ -158,15 +158,15 @@ struct AddRecipeView: View {
         case .text:
             return !textInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         case .image:
-            return imageData != nil
+            return !imageDataArray.isEmpty
         }
     }
     
     private func clearInputs() {
         urlInput = ""
         textInput = ""
-        selectedPhoto = nil
-        imageData = nil
+        selectedPhotos = []
+        imageDataArray = []
         parsedRecipe = nil
         parseWarnings = []
         parseConfidence = 0.0
@@ -184,9 +184,9 @@ struct AddRecipeView: View {
             case .text:
                 result = await recipeManager.parseRecipeFromText(textInput.trimmingCharacters(in: .whitespacesAndNewlines))
             case .image:
-                if let imageData = imageData {
-                    let base64Image = imageData.base64EncodedString()
-                    result = await recipeManager.parseRecipeFromImage(base64Image)
+                if !imageDataArray.isEmpty {
+                    let base64Images = imageDataArray.map { $0.base64EncodedString() }
+                    result = await recipeManager.parseRecipeFromImages(base64Images)
                 } else {
                     result = nil
                 }
@@ -274,56 +274,105 @@ struct TextInputView: View {
     }
 }
 
-// MARK: - Image Input View
-struct ImageInputView: View {
-    @Binding var selectedPhoto: PhotosPickerItem?
-    @Binding var imageData: Data?
+// MARK: - Multi Image Input View
+struct MultiImageInputView: View {
+    @Binding var selectedPhotos: [PhotosPickerItem]
+    @Binding var imageDataArray: [Data]
     
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text("Recipe Image")
-                .font(.headline)
+            HStack {
+                Text("Recipe Images")
+                    .font(.headline)
+                Spacer()
+                Text("\(imageDataArray.count)/5")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+            }
             
-            PhotosPicker(selection: $selectedPhoto, matching: .images) {
-                VStack(spacing: 12) {
-                    if let imageData = imageData, let uiImage = UIImage(data: imageData) {
-                        Image(uiImage: uiImage)
-                            .resizable()
-                            .aspectRatio(contentMode: .fit)
-                            .frame(maxHeight: 200)
-                            .cornerRadius(8)
-                    } else {
+            PhotosPicker(selection: $selectedPhotos, maxSelectionCount: 5, matching: .images) {
+                if imageDataArray.isEmpty {
+                    VStack(spacing: 12) {
                         Image(systemName: "camera.fill")
                             .font(.system(size: 40))
                             .foregroundColor(.orange)
                         
-                        Text("Select Recipe Image")
+                        Text("Select Recipe Images")
                             .font(.headline)
                         
-                        Text("Choose a photo of the recipe")
+                        Text("Choose up to 5 photos")
                             .font(.subheadline)
                             .foregroundColor(.secondary)
                     }
-                }
-                .frame(maxWidth: .infinity)
-                .frame(minHeight: 120)
-                .background(Color(.systemGray6))
-                .cornerRadius(8)
-            }
-            .onChange(of: selectedPhoto) { _, newValue in
-                if let newValue = newValue {
-                    Task {
-                        if let data = try? await newValue.loadTransferable(type: Data.self) {
-                            imageData = data
+                    .frame(maxWidth: .infinity)
+                    .frame(minHeight: 120)
+                    .background(Color(.systemGray6))
+                    .cornerRadius(8)
+                } else {
+                    LazyVGrid(columns: Array(repeating: GridItem(.flexible()), count: 2), spacing: 8) {
+                        ForEach(Array(imageDataArray.enumerated()), id: \.offset) { index, imageData in
+                            if let uiImage = UIImage(data: imageData) {
+                                ZStack(alignment: .topTrailing) {
+                                    Image(uiImage: uiImage)
+                                        .resizable()
+                                        .aspectRatio(contentMode: .fill)
+                                        .frame(height: 100)
+                                        .clipped()
+                                        .cornerRadius(8)
+                                    
+                                    Button(action: {
+                                        removeImage(at: index)
+                                    }) {
+                                        Image(systemName: "xmark.circle.fill")
+                                            .foregroundColor(.white)
+                                            .background(Color.black.opacity(0.7))
+                                            .clipShape(Circle())
+                                    }
+                                    .padding(4)
+                                }
+                            }
+                        }
+                        
+                        if imageDataArray.count < 5 {
+                            Button(action: {}) {
+                                VStack {
+                                    Image(systemName: "plus")
+                                        .font(.title2)
+                                        .foregroundColor(.orange)
+                                    Text("Add More")
+                                        .font(.caption)
+                                        .foregroundColor(.secondary)
+                                }
+                                .frame(height: 100)
+                                .frame(maxWidth: .infinity)
+                                .background(Color(.systemGray6))
+                                .cornerRadius(8)
+                            }
                         }
                     }
                 }
             }
+            .onChange(of: selectedPhotos) { _, newPhotos in
+                Task {
+                    var newImageData: [Data] = []
+                    for photo in newPhotos {
+                        if let data = try? await photo.loadTransferable(type: Data.self) {
+                            newImageData.append(data)
+                        }
+                    }
+                    imageDataArray = newImageData
+                }
+            }
             
-            Text("Take a photo or select from your library")
+            Text("Take photos or select from your library (up to 5 images)")
                 .font(.caption)
                 .foregroundColor(.secondary)
         }
+    }
+    
+    private func removeImage(at index: Int) {
+        imageDataArray.remove(at: index)
+        selectedPhotos.remove(at: index)
     }
 }
 
