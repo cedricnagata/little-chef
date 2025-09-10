@@ -24,6 +24,9 @@ struct AddRecipeView: View {
     @State private var parseWarnings: [String] = []
     @State private var showingEditView = false
     @State private var isParsingRecipe = false
+    @State private var showingErrorAlert = false
+    @State private var errorAlertMessage = ""
+    @State private var lastProcessedError: String?
     
     var body: some View {
         NavigationView {
@@ -140,12 +143,23 @@ struct AddRecipeView: View {
                     }
                 }
             }
-            .alert("Error", isPresented: .constant(recipeManager.errorMessage != nil)) {
+            .alert("Error", isPresented: $showingErrorAlert) {
                 Button("OK") {
+                    showingErrorAlert = false
+                    errorAlertMessage = ""
+                    lastProcessedError = nil
                     recipeManager.clearError()
                 }
             } message: {
-                Text(recipeManager.errorMessage ?? "")
+                Text(errorAlertMessage)
+            }
+            .onAppear {
+                // Only clear stale error state when first appearing
+                if !showingErrorAlert && !isParsingRecipe {
+                    lastProcessedError = nil
+                    errorAlertMessage = ""
+                    recipeManager.clearError()
+                }
             }
         }
         .navigationViewStyle(.stack)
@@ -196,6 +210,15 @@ struct AddRecipeView: View {
                 parsedRecipe = result.recipe
                 parseConfidence = result.confidence
                 parseWarnings = result.warnings
+            } else {
+                // Handle parsing failure directly here
+                if let errorMessage = recipeManager.errorMessage {
+                    errorAlertMessage = errorMessage
+                    lastProcessedError = errorMessage
+                    showingErrorAlert = true
+                    // Clear the manager's error immediately so it doesn't interfere
+                    recipeManager.clearError()
+                }
             }
             
             isParsingRecipe = false
