@@ -71,7 +71,7 @@ struct RecipeListView: View {
                     // Recipe list
                     List {
                         ForEach(filteredRecipes) { recipe in
-                            NavigationLink(destination: RecipeDetailView(recipe: recipe)) {
+                            NavigationLink(destination: RecipeDetailView(recipe: recipe).environmentObject(recipeManager)) {
                                 RecipeRowView(recipe: recipe)
                             }
                         }

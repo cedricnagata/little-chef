@@ -38,13 +38,13 @@ class RecipeManager: ObservableObject {
         do {
             let newRecipe = try await apiService.createRecipe(recipe)
             recipes.append(newRecipe)
+            isLoading = false
             return true
         } catch {
             errorMessage = "Failed to create recipe: \(error.localizedDescription)"
+            isLoading = false
             return false
         }
-        
-        isLoading = false
     }
     
     func deleteRecipe(_ recipe: Recipe) async -> Bool {
@@ -54,13 +54,13 @@ class RecipeManager: ObservableObject {
         do {
             try await apiService.deleteRecipe(id: recipe.id)
             recipes.removeAll { $0.id == recipe.id }
+            isLoading = false
             return true
         } catch {
             errorMessage = "Failed to delete recipe: \(error.localizedDescription)"
+            isLoading = false
             return false
         }
-        
-        isLoading = false
     }
     
     // MARK: - Recipe Parsing
