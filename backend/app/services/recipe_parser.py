@@ -57,20 +57,28 @@ class RecipeParser:
             self._prompt_template = ChatPromptTemplate.from_template(RECIPE_PARSING_PROMPT)
         return self._prompt_template
 
-    async def _parse_with_langchain(self, content: str, source_type: str, source_info: str = "") -> Tuple[RecipeBase, float, List[str]]:
+    async def _parse_with_langchain(self, content, source_type: str, source_info: str = "") -> Tuple[RecipeBase, float, List[str]]:
         """Parse recipe content using LangChain with structured output"""
         
         try:
-            # Create the parsing chain
-            chain = self.prompt_template | self.llm | self.parser
+            from langchain_core.messages import HumanMessage
             
-            # Invoke the chain with the content
-            recipe = await chain.ainvoke({
-                "content": content,
-                "source_type": source_type,
-                "source_info": source_info,
-                "format_instructions": self.parser.get_format_instructions()
-            })
+            # For both text and multimodal content, use the chain but construct messages appropriately
+            if isinstance(content, str):
+                # Text content - use prompt template chain normally
+                chain = self.prompt_template | self.llm | self.parser
+                recipe = await chain.ainvoke({
+                    "content": content,
+                    "source_type": source_type,
+                    "source_info": source_info,
+                    "format_instructions": self.parser.get_format_instructions()
+                })
+            else:
+                # Multimodal content - use LLM + parser chain (skip prompt template)
+                # The content already includes the prompt text as the first element
+                message = HumanMessage(content=content)
+                chain = self.llm | self.parser
+                recipe = await chain.ainvoke([message])
             
             # Add source URL if parsing from URL
             if source_type == "url" and source_info:
@@ -87,86 +95,11 @@ class RecipeParser:
             
             return recipe, confidence, warnings
             
+        except json.JSONDecodeError as e:
+            raise RecipeParsingError(f"Failed to parse response as JSON: {str(e)}")
         except Exception as e:
             raise RecipeParsingError(f"LangChain parsing failed: {str(e)}")
 
-    async def _parse_images_with_langchain(self, base64_images: List[str]) -> Tuple[RecipeBase, float, List[str]]:
-        """Parse recipe from multiple images using GPT-5-Mini Vision"""
-        
-        try:
-            from langchain_core.messages import HumanMessage
-            
-            # Create vision-enabled LLM for image processing
-            vision_llm = ChatOpenAI(
-                model="gpt-5-mini",
-                temperature=0.1,
-                openai_api_key=settings.openai_api_key
-            )
-            
-            # Prepare the message content with multiple images
-            content = [{
-                "type": "text",
-                "text": IMAGE_RECIPE_PARSING_PROMPT
-            }]
-            
-            # Add all images to the content
-            for i, base64_image in enumerate(base64_images):
-                content.append({
-                    "type": "image_url",
-                    "image_url": {
-                        "url": f"data:image/jpeg;base64,{base64_image}"
-                    }
-                })
-            
-            image_message = HumanMessage(content=content)
-            
-            # Get response from vision model
-            response = await vision_llm.ainvoke([image_message])
-            response_content = response.content.strip()
-            
-            # Parse the JSON response
-            try:
-                if response_content.startswith("```json"):
-                    response_content = response_content.replace("```json", "").replace("```", "").strip()
-                elif response_content.startswith("```"):
-                    response_content = response_content.replace("```", "").strip()
-                
-                recipe_data = json.loads(response_content)
-                
-                # Create RecipeBase object
-                parsed_recipe = RecipeBase(
-                    title=recipe_data.get("title", "Recipe from Image"),
-                    description=recipe_data.get("description"),
-                    ingredients=recipe_data.get("ingredients", []),
-                    instructions=recipe_data.get("instructions", []),
-                    prep_time=recipe_data.get("prep_time"),
-                    cook_time=recipe_data.get("cook_time"),
-                    servings=recipe_data.get("servings", 4),
-                    difficulty=recipe_data.get("difficulty"),
-                    tags=recipe_data.get("tags", [])
-                )
-                
-                # Calculate confidence based on completeness
-                confidence = 0.9  # High confidence for vision model
-                if not parsed_recipe.ingredients or len(parsed_recipe.ingredients) < 2:
-                    confidence -= 0.2
-                if not parsed_recipe.instructions or len(parsed_recipe.instructions) < 2:
-                    confidence -= 0.2
-                if not parsed_recipe.title or parsed_recipe.title == "Recipe from Image":
-                    confidence -= 0.1
-                
-                warnings = []
-                if confidence < 0.7:
-                    warnings.append("Image quality may be low - please review extracted recipe carefully")
-                
-                return parsed_recipe, confidence, warnings
-                
-            except json.JSONDecodeError as e:
-                # Fallback if JSON parsing fails
-                raise RecipeParsingError(f"Failed to parse vision model response as JSON: {str(e)}")
-            
-        except Exception as e:
-            raise RecipeParsingError(f"Image parsing with GPT-5-Mini Vision failed: {str(e)}")
 
     async def parse_from_url(self, url: str) -> RecipeParseResponse:
         """Parse recipe from a URL using multiple strategies"""
@@ -220,7 +153,26 @@ class RecipeParser:
                 if not self._is_valid_base64_image(base64_image):
                     raise RecipeParsingError(f"Invalid base64 image format for image {i+1}")
             
-            parsed_recipe, confidence, warnings = await self._parse_images_with_langchain(base64_images)
+            # Prepare multimodal content for the LLM
+            multimodal_content = [{
+                "type": "text",
+                "text": IMAGE_RECIPE_PARSING_PROMPT
+            }]
+            
+            # Add all images to the content
+            for base64_image in base64_images:
+                multimodal_content.append({
+                    "type": "image_url",
+                    "image_url": {
+                        "url": f"data:image/jpeg;base64,{base64_image}"
+                    }
+                })
+            
+            # Use the unified parsing method with multimodal content
+            parsed_recipe, confidence, warnings = await self._parse_with_langchain(
+                multimodal_content,
+                source_type="image"
+            )
             
             return RecipeParseResponse(
                 recipe=parsed_recipe,
