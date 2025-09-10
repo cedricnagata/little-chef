@@ -12,6 +12,7 @@ from langchain_core.prompts import ChatPromptTemplate
 
 from app.config import settings
 from app.schemas import RecipeBase, RecipeParseResponse
+from app.prompts import RECIPE_PARSING_PROMPT, IMAGE_RECIPE_PARSING_PROMPT, RECIPE_FORMAT_INSTRUCTIONS
 
 
 class RecipeParsingError(Exception):
@@ -53,33 +54,7 @@ class RecipeParser:
     def prompt_template(self):
         """Lazy initialization of prompt template"""
         if self._prompt_template is None:
-            template = """You are an expert chef and recipe analyzer. Your task is to extract and standardize recipe information from the provided content.
-
-Extract the recipe information according to these guidelines:
-
-1. **Title**: Extract the recipe name/title
-2. **Description**: Brief description if available (optional)
-3. **Servings**: Number of people this recipe serves (default to 4 if unclear)
-4. **Prep Time**: Preparation time in minutes (convert from hours/other units)
-5. **Cook Time**: Cooking time in minutes (convert from hours/other units)
-6. **Ingredients**: 
-   - List each ingredient with quantity and unit
-   - Keep original formatting but ensure clarity
-   - Include all ingredients mentioned
-7. **Instructions**:
-   - Break into clear, sequential steps
-   - Each step should be actionable
-   - Maintain logical cooking order
-8. **Tags**: Add relevant tags like cuisine type, meal category, dietary restrictions
-9. **Cuisine Type**: Identify the cuisine style if apparent
-10. **Difficulty**: Assess as "easy", "medium", or "hard" based on technique complexity
-
-Content to parse:
-{content}
-
-{format_instructions}"""
-            
-            self._prompt_template = ChatPromptTemplate.from_template(template)
+            self._prompt_template = ChatPromptTemplate.from_template(RECIPE_PARSING_PROMPT)
         return self._prompt_template
 
     async def _parse_with_langchain(self, content: str, source_type: str, source_info: str = "") -> Tuple[RecipeBase, float, List[str]]:
@@ -92,6 +67,8 @@ Content to parse:
             # Invoke the chain with the content
             recipe = await chain.ainvoke({
                 "content": content,
+                "source_type": source_type,
+                "source_info": source_info,
                 "format_instructions": self.parser.get_format_instructions()
             })
             
@@ -129,29 +106,7 @@ Content to parse:
             # Prepare the message content with multiple images
             content = [{
                 "type": "text",
-                "text": f"""Analyze these recipe images and extract a complete recipe. If there are multiple images, combine information from all of them. Return ONLY a valid JSON object with this exact structure:
-
-{{
-    "title": "Recipe Title",
-    "description": "Brief description of the dish",
-    "ingredients": ["ingredient 1", "ingredient 2", "..."],
-    "instructions": ["step 1", "step 2", "..."],
-    "prep_time": 15,
-    "cook_time": 30,
-    "servings": 4,
-    "difficulty": "easy",
-    "tags": ["tag1", "tag2"]
-}}
-
-Please:
-- Extract ALL visible ingredients with quantities and units
-- List ALL cooking steps in order
-- Estimate reasonable prep/cook times if not visible
-- Choose difficulty: "easy", "medium", or "hard"
-- Add relevant tags (cuisine type, dietary restrictions, meal type, etc.)
-- If the image is unclear or doesn't contain a recipe, create a generic recipe template
-
-Return ONLY the JSON object, no other text."""
+                "text": IMAGE_RECIPE_PARSING_PROMPT
             }]
             
             # Add all images to the content
