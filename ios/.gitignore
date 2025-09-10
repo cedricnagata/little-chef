@@ -2,3 +2,6 @@
 *.xcuserstate
 *.xcuserdatad/
 build/
+
+# Configuration files with sensitive data
+little-chef/Config.plist

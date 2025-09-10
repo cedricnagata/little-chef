@@ -13,7 +13,7 @@ class APIService {
     private init() {}
     
     // MARK: - Configuration
-    private let baseURL = "http://127.0.0.1:8000"
+    private let baseURL = Config.baseURL
     private let session = URLSession.shared
     
     private var jsonDecoder: JSONDecoder {
