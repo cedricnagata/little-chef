@@ -26,60 +26,71 @@ struct RecipeListView: View {
     
     var body: some View {
         NavigationStack {
-            Group {
-                if recipeManager.isLoading && recipeManager.recipes.isEmpty {
-                    // Loading state
-                    VStack {
-                        ProgressView()
-                            .scaleEffect(1.5)
-                        Text("Loading your recipes...")
-                            .foregroundColor(.secondary)
-                            .padding(.top)
-                    }
-                } else if recipeManager.recipes.isEmpty {
-                    // Empty state
-                    VStack(spacing: 20) {
-                        Image(systemName: "book.fill")
-                            .font(.system(size: 60))
-                            .foregroundColor(.orange)
-                        
-                        Text("No Recipes Yet")
-                            .font(.title2)
-                            .fontWeight(.semibold)
-                        
-                        Text("Add your first recipe to get started with LittleChef!")
-                            .foregroundColor(.secondary)
-                            .multilineTextAlignment(.center)
-                            .padding(.horizontal)
-                        
-                        Button(action: {
-                            showingAddRecipe = true
-                        }) {
-                            HStack {
-                                Image(systemName: "plus")
-                                Text("Add Recipe")
-                            }
-                            .font(.headline)
-                            .foregroundColor(.white)
-                            .padding()
-                            .background(Color.orange)
-                            .cornerRadius(12)
+            VStack(spacing: 0) {
+                // Custom search bar positioned below title
+                if !recipeManager.recipes.isEmpty {
+                    SearchBar(text: $searchText)
+                        .padding(.horizontal, 16)
+                        .padding(.vertical, 8)
+                }
+                
+                // Main content area
+                Group {
+                    if recipeManager.isLoading && recipeManager.recipes.isEmpty {
+                        // Loading state
+                        VStack {
+                            ProgressView()
+                                .scaleEffect(1.5)
+                            Text("Loading your recipes...")
+                                .foregroundColor(.secondary)
+                                .padding(.top)
                         }
-                    }
-                    .padding()
-                } else {
-                    // Recipe list
-                    List {
-                        ForEach(filteredRecipes) { recipe in
-                            NavigationLink(destination: RecipeDetailView(recipe: recipe).environmentObject(recipeManager)) {
-                                RecipeRowView(recipe: recipe)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    } else if recipeManager.recipes.isEmpty {
+                        // Empty state
+                        VStack(spacing: 20) {
+                            Image(systemName: "book.fill")
+                                .font(.system(size: 60))
+                                .foregroundColor(.orange)
+                            
+                            Text("No Recipes Yet")
+                                .font(.title2)
+                                .fontWeight(.semibold)
+                            
+                            Text("Add your first recipe to get started with LittleChef!")
+                                .foregroundColor(.secondary)
+                                .multilineTextAlignment(.center)
+                                .padding(.horizontal)
+                            
+                            Button(action: {
+                                showingAddRecipe = true
+                            }) {
+                                HStack {
+                                    Image(systemName: "plus")
+                                    Text("Add Recipe")
+                                }
+                                .font(.headline)
+                                .foregroundColor(.white)
+                                .padding()
+                                .background(Color.orange)
+                                .cornerRadius(12)
                             }
                         }
-                        .onDelete(perform: deleteRecipes)
-                    }
-                    .searchable(text: $searchText, prompt: "Search recipes, ingredients, or tags")
-                    .refreshable {
-                        await recipeManager.loadRecipes()
+                        .padding()
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    } else {
+                        // Recipe list
+                        List {
+                            ForEach(filteredRecipes) { recipe in
+                                NavigationLink(destination: RecipeDetailView(recipe: recipe).environmentObject(recipeManager)) {
+                                    RecipeRowView(recipe: recipe)
+                                }
+                            }
+                            .onDelete(perform: deleteRecipes)
+                        }
+                        .refreshable {
+                            await recipeManager.loadRecipes()
+                        }
                     }
                 }
             }
@@ -220,6 +231,47 @@ struct DifficultyBadge: View {
             .padding(.vertical, 4)
             .background(badgeColor)
             .cornerRadius(6)
+    }
+}
+
+struct SearchBar: View {
+    @Binding var text: String
+    @State private var isEditing = false
+    
+    var body: some View {
+        HStack {
+            HStack {
+                Image(systemName: "magnifyingglass")
+                    .foregroundColor(.secondary)
+                
+                TextField("Search recipes, ingredients, or tags", text: $text)
+                    .onTapGesture {
+                        isEditing = true
+                    }
+                
+                if !text.isEmpty {
+                    Button(action: {
+                        text = ""
+                    }) {
+                        Image(systemName: "xmark.circle.fill")
+                            .foregroundColor(.secondary)
+                    }
+                }
+            }
+            .padding(8)
+            .background(Color(.systemGray6))
+            .cornerRadius(10)
+            
+            if isEditing {
+                Button("Cancel") {
+                    isEditing = false
+                    text = ""
+                    UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
+                }
+                .foregroundColor(.orange)
+            }
+        }
+        .animation(.easeInOut(duration: 0.2), value: isEditing)
     }
 }
 
