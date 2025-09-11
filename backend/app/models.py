@@ -27,7 +27,6 @@ class User(Base):
     
     # Relationships
     recipes = relationship("Recipe", back_populates="user", cascade="all, delete-orphan")
-    cooking_sessions = relationship("CookingSession", back_populates="user", cascade="all, delete-orphan")
     
     def __repr__(self):
         return f"<User(id={self.id}, email={self.email})>"
@@ -52,20 +51,3 @@ class Recipe(Base):
         return f"<Recipe(id={self.id}, title={title})>"
 
 
-class CookingSession(Base):
-    """Cooking session model for storing session state"""
-    
-    __tablename__ = "cooking_sessions"
-    
-    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    user_id = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False)
-    session_data = Column(JSONB, nullable=False)
-    is_active = Column(Boolean, default=True)
-    created_at = Column(DateTime(timezone=True), server_default=func.now())
-    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
-    
-    # Relationships
-    user = relationship("User", back_populates="cooking_sessions")
-    
-    def __repr__(self):
-        return f"<CookingSession(id={self.id}, user_id={self.user_id}, active={self.is_active})>"

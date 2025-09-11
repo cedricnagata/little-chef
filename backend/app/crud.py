@@ -153,7 +153,7 @@ class UserCRUD:
             if not db_user:
                 return False
             
-            # Delete the user (CASCADE will handle related recipes and cooking_sessions)
+            # Delete the user (CASCADE will handle related recipes)
             db.delete(db_user)
             db.commit()
             return True
