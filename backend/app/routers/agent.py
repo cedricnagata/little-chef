@@ -2,16 +2,20 @@
 Agent router for cooking assistance and recipe intelligence
 """
 
-from fastapi import APIRouter, HTTPException, status
+from fastapi import APIRouter, HTTPException, status, Depends
 
 from app.schemas import AgentQueryRequest, AgentQueryResponse
 from app.services.cooking_agent import cooking_agent
+from app.security import get_current_user_id
 
 router = APIRouter(prefix="/agent", tags=["agent"])
 
 
 @router.post("/chat", response_model=AgentQueryResponse)
-async def chat_with_agent(request: AgentQueryRequest):
+async def chat_with_agent(
+    request: AgentQueryRequest,
+    current_user_id: str = Depends(get_current_user_id)
+):
     """
     Chat with the cooking agent for cooking questions and advice.
     
@@ -61,7 +65,7 @@ async def chat_with_agent(request: AgentQueryRequest):
 
 
 @router.get("/health")
-async def agent_health_check():
+async def agent_health_check(current_user_id: str = Depends(get_current_user_id)):
     """Health check for the agent service"""
     try:
         # Basic check that the agent can be initialized
