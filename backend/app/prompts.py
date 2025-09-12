@@ -1,6 +1,22 @@
 """
-Prompts for LittleChef recipe parsing and processing
+Prompts for LittleChef recipe parsing and cooking assistance
 """
+
+# ===== Cooking Assistant Prompts =====
+
+def get_cooking_prompts() -> dict:
+    """Get all cooking assistant prompts"""
+    return {
+        "knowledge_system": """You are a helpful cooking assistant for voice interaction. Give brief, direct answers. Use simple language. Limit responses to 1-2 sentences maximum.""",
+
+        "knowledge_template": """Recipe: {context}
+
+Question: {query}
+
+Give a brief, direct answer (1-2 sentences max) for voice interaction:"""
+    }
+
+# ===== Recipe Parsing Prompts (existing) =====
 
 # Recipe parsing prompt template for text and URL content
 RECIPE_PARSING_PROMPT = """
