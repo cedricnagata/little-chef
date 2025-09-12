@@ -9,6 +9,7 @@ import SwiftUI
 
 struct MainView: View {
     @EnvironmentObject var authManager: AuthManager
+    @StateObject private var recipeManager = RecipeManager()
     
     var body: some View {
         TabView {
@@ -18,13 +19,15 @@ struct MainView: View {
                     Image(systemName: "book.fill")
                     Text("Recipes")
                 }
+                .environmentObject(recipeManager)
             
             // Cooking Tab
-            CookingView()
+            CookingSessionView()
                 .tabItem {
                     Image(systemName: "flame.fill")
                     Text("Cook")
                 }
+                .environmentObject(recipeManager)
             
             // Profile Tab
             ProfileView()
@@ -34,35 +37,15 @@ struct MainView: View {
                 }
         }
         .accentColor(.orange)
-    }
-}
-
-// MARK: - Temporary Placeholder Views
-
-struct CookingView: View {
-    var body: some View {
-        NavigationStack {
-            VStack {
-                Image(systemName: "flame.fill")
-                    .font(.system(size: 60))
-                    .foregroundColor(.orange)
-                    .padding()
-                
-                Text("Start Cooking")
-                    .font(.title)
-                    .fontWeight(.bold)
-                
-                Text("Select a recipe to begin cooking with AI assistance")
-                    .foregroundColor(.secondary)
-                    .multilineTextAlignment(.center)
-                    .padding()
-                
-                Spacer()
+        .onAppear {
+            Task {
+                await recipeManager.loadRecipes()
             }
-            .navigationTitle("Cook")
         }
     }
 }
+
+// MARK: - Profile View
 
 struct ProfileView: View {
     @EnvironmentObject var authManager: AuthManager

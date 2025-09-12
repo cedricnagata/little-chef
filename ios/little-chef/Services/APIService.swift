@@ -29,13 +29,29 @@ class APIService {
             let container = try decoder.singleValueContainer()
             let dateString = try container.decode(String.self)
             
-            // Try the microseconds format first
+            // Try microseconds format with timezone
+            formatter.dateFormat = "yyyy-MM-dd'T'HH:mm:ss.SSSSSSXXX"
             if let date = formatter.date(from: dateString) {
                 return date
             }
             
-            // Fallback to standard ISO8601
+            // Try microseconds format without timezone (assume UTC)
+            formatter.dateFormat = "yyyy-MM-dd'T'HH:mm:ss.SSSSSS"
+            formatter.timeZone = TimeZone(identifier: "UTC")
+            if let date = formatter.date(from: dateString) {
+                return date
+            }
+            
+            // Try standard format with timezone
             formatter.dateFormat = "yyyy-MM-dd'T'HH:mm:ssXXX"
+            formatter.timeZone = TimeZone(secondsFromGMT: 0)
+            if let date = formatter.date(from: dateString) {
+                return date
+            }
+            
+            // Try standard format without timezone (assume UTC)
+            formatter.dateFormat = "yyyy-MM-dd'T'HH:mm:ss"
+            formatter.timeZone = TimeZone(identifier: "UTC")
             if let date = formatter.date(from: dateString) {
                 return date
             }
@@ -390,6 +406,35 @@ class APIService {
         return try await performRequest(request: urlRequest, responseType: RecipeParseResponse.self)
     }
     
+    // MARK: - Agent Chat Endpoints
+    func sendAgentQuery(cookingSession: CookingSession, query: String) async throws -> AgentQueryResponse {
+        let request = AgentQueryRequest(cookingSession: cookingSession, query: query)
+        let url = URL(string: "\(baseURL)/agent/chat")!
+        
+        var urlRequest = URLRequest(url: url)
+        urlRequest.httpMethod = "POST"
+        urlRequest.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        
+        do {
+            urlRequest.httpBody = try jsonEncoder.encode(request)
+        } catch {
+            print("🔴 Failed to encode agent request: \(error)")
+            throw AuthError.networkError("Failed to encode request: \(error.localizedDescription)")
+        }
+        
+        // Add auth header
+        guard let token = KeychainService.shared.getAccessToken() else {
+            print("🔴 No access token available for agent request")
+            throw AuthError.tokenExpired
+        }
+        urlRequest.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        
+        print("🔵 Sending agent request to: \(url)")
+        print("🔵 Request body size: \(urlRequest.httpBody?.count ?? 0) bytes")
+        
+        return try await performRequest(request: urlRequest, responseType: AgentQueryResponse.self)
+    }
+    
     // MARK: - Generic Request Handler
     private func performRequest<T: Codable>(request: URLRequest, responseType: T.Type) async throws -> T {
         return try await performRequestWithRetry(request: request, responseType: responseType, retryCount: 0)
@@ -406,7 +451,22 @@ class APIService {
             // Handle different status codes
             switch httpResponse.statusCode {
             case 200...299:
-                return try jsonDecoder.decode(responseType, from: data)
+                print("🟢 Received successful response (\(httpResponse.statusCode))")
+                print("🟢 Response data size: \(data.count) bytes")
+                if data.isEmpty {
+                    print("🔴 Response data is empty!")
+                    throw AuthError.networkError("Empty response from server")
+                }
+                
+                do {
+                    return try jsonDecoder.decode(responseType, from: data)
+                } catch {
+                    print("🔴 Failed to decode response: \(error)")
+                    if let responseString = String(data: data, encoding: .utf8) {
+                        print("🔴 Response content: \(responseString)")
+                    }
+                    throw AuthError.decodingError("Failed to decode response: \(error.localizedDescription)")
+                }
             case 401:
                 // Token expired - try to refresh if we haven't already retried
                 if retryCount == 0 {
