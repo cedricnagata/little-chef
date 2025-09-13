@@ -36,6 +36,15 @@ struct CookingSession: Codable, Identifiable {
         self.userPreferences = userPreferences
         self.startedAt = Date()
     }
+    
+    init(recipe: RecipeBase, modifications: RecipeModifications, activeTimers: [Timer], conversationHistory: [Message], userPreferences: UserPreferencesDetailed, startedAt: Date) {
+        self.recipe = recipe
+        self.modifications = modifications
+        self.activeTimers = activeTimers
+        self.conversationHistory = conversationHistory
+        self.userPreferences = userPreferences
+        self.startedAt = startedAt
+    }
 }
 
 struct RecipeBase: Codable {
@@ -90,6 +99,12 @@ struct RecipeModifications: Codable {
         self.servingMultiplier = 1.0
         self.ingredientSubstitutions = [:]
         self.notes = []
+    }
+    
+    init(servingMultiplier: Float, ingredientSubstitutions: [String: String] = [:], notes: [String] = []) {
+        self.servingMultiplier = servingMultiplier
+        self.ingredientSubstitutions = ingredientSubstitutions
+        self.notes = notes
     }
 }
 

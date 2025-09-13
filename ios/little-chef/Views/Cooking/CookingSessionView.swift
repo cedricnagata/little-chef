@@ -185,7 +185,13 @@ struct RecipeDetailsView: View {
                                 CompactInfoCard(title: "Cook", value: "\(cookTime)m", icon: "flame")
                             }
                             
-                            CompactInfoCard(title: "Serves", value: "\(session.recipe.servings)", icon: "person.2")
+                            EditableServingsCard(
+                                originalServings: session.recipe.servings,
+                                currentServings: cookingSessionManager.getCurrentServings(),
+                                onServingsChange: { newServings in
+                                    cookingSessionManager.updateServings(newServings: newServings)
+                                }
+                            )
                             
                             if let difficulty = session.recipe.difficulty {
                                 CompactInfoCard(title: "Level", value: difficulty.capitalized, icon: "star")
@@ -204,13 +210,19 @@ struct RecipeDetailsView: View {
                             
                             Spacer()
                             
-                            Text("\(session.recipe.ingredients.count)")
+                            Text("\(cookingSessionManager.getScaledIngredients().count)")
                                 .font(.caption)
                                 .foregroundColor(.secondary)
+                            
+                            if cookingSessionManager.getServingMultiplier() != 1.0 {
+                                Text("(scaled \(String(format: "%.1f", cookingSessionManager.getServingMultiplier()))x)")
+                                    .font(.caption2)
+                                    .foregroundColor(.orange)
+                            }
                         }
                         
                         LazyVStack(alignment: .leading, spacing: 6) {
-                            ForEach(Array(session.recipe.ingredients.enumerated()), id: \.offset) { index, ingredient in
+                            ForEach(Array(cookingSessionManager.getScaledIngredients().enumerated()), id: \.offset) { index, ingredient in
                                 HStack(alignment: .top, spacing: 8) {
                                     Circle()
                                         .fill(Color.orange.opacity(0.3))
@@ -682,6 +694,76 @@ struct RecipeSelectorView: View {
                 await recipeManager.loadRecipes()
             }
         }
+    }
+}
+
+// MARK: - Editable Servings Card
+
+struct EditableServingsCard: View {
+    let originalServings: Int
+    let currentServings: Int
+    let onServingsChange: (Int) -> Void
+    
+    var body: some View {
+        VStack(spacing: 4) {
+            Image(systemName: "person.2")
+                .font(.caption)
+                .foregroundColor(.orange)
+            
+            // Stepper controls for servings
+            HStack(spacing: 4) {
+                // Decrease button
+                Button(action: {
+                    if currentServings > 1 {
+                        onServingsChange(currentServings - 1)
+                    }
+                }) {
+                    Image(systemName: "minus.circle.fill")
+                        .font(.caption)
+                        .foregroundColor(currentServings > 1 ? .orange : .gray)
+                }
+                .disabled(currentServings <= 1)
+                
+                // Current servings display
+                VStack(spacing: 1) {
+                    Text("\(currentServings)")
+                        .font(.headline)
+                        .fontWeight(.semibold)
+                        .foregroundColor(.primary)
+                        .frame(minWidth: 30)
+                    
+                    if currentServings != originalServings {
+                        Text("(was \(originalServings))")
+                            .font(.caption2)
+                            .foregroundColor(.orange)
+                    }
+                }
+                
+                // Increase button
+                Button(action: {
+                    if currentServings < 50 {
+                        onServingsChange(currentServings + 1)
+                    }
+                }) {
+                    Image(systemName: "plus.circle.fill")
+                        .font(.caption)
+                        .foregroundColor(currentServings < 50 ? .orange : .gray)
+                }
+                .disabled(currentServings >= 50)
+            }
+            
+            Text("Serves")
+                .font(.caption)
+                .foregroundColor(.secondary)
+        }
+        .frame(maxWidth: .infinity)
+        .padding()
+        .background(Color(.systemGray6))
+        .cornerRadius(12)
+        .overlay(
+            RoundedRectangle(cornerRadius: 12)
+                .stroke(currentServings != originalServings ? Color.orange.opacity(0.5) : Color.clear, lineWidth: 1)
+        )
     }
 }
 
