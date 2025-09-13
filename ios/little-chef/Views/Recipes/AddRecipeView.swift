@@ -170,7 +170,8 @@ struct AddRecipeView: View {
         case .url:
             return !urlInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         case .text:
-            return !textInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            let trimmedText = textInput.trimmingCharacters(in: .whitespacesAndNewlines)
+            return trimmedText.count >= 10 && trimmedText.count <= 50000
         case .image:
             return !imageDataArray.isEmpty
         }
@@ -279,20 +280,67 @@ struct URLInputView: View {
 struct TextInputView: View {
     @Binding var textInput: String
     
+    private var trimmedText: String {
+        textInput.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+    
+    private var characterCount: Int {
+        trimmedText.count
+    }
+    
+    private var isValid: Bool {
+        characterCount >= 10 && characterCount <= 50000
+    }
+    
+    private var validationMessage: String? {
+        if trimmedText.isEmpty {
+            return nil
+        } else if characterCount < 10 {
+            return "Text must be at least 10 characters long"
+        } else if characterCount > 50000 {
+            return "Text must be less than 50,000 characters"
+        }
+        return nil
+    }
+    
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text("Recipe Text")
-                .font(.headline)
+            HStack {
+                Text("Recipe Text")
+                    .font(.headline)
+                
+                Spacer()
+                
+                Text("\(characterCount)/50,000")
+                    .font(.caption)
+                    .foregroundColor(isValid || trimmedText.isEmpty ? .secondary : .red)
+            }
             
             TextEditor(text: $textInput)
                 .frame(minHeight: 120)
                 .padding(8)
                 .background(Color(.systemGray6))
                 .cornerRadius(8)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 8)
+                        .stroke(validationMessage != nil ? Color.red : Color.clear, lineWidth: 1)
+                )
             
-            Text("Copy and paste recipe text, or type your own recipe")
-                .font(.caption)
-                .foregroundColor(.secondary)
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Copy and paste recipe text, or type your own recipe")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+                
+                if let validationMessage = validationMessage {
+                    HStack {
+                        Image(systemName: "exclamationmark.circle.fill")
+                            .foregroundColor(.red)
+                        Text(validationMessage)
+                            .foregroundColor(.red)
+                    }
+                    .font(.caption)
+                }
+            }
         }
     }
 }
