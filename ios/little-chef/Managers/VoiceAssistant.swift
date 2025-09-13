@@ -9,6 +9,7 @@ import Foundation
 import Speech
 import AVFoundation
 import SwiftUI
+import AudioToolbox
 
 @MainActor
 class VoiceAssistant: NSObject, ObservableObject {
@@ -38,7 +39,8 @@ class VoiceAssistant: NSObject, ObservableObject {
     // Speech timeout handling
     private var speechTimeoutWorkItem: DispatchWorkItem?
     private var lastSpeechTime: Date?
-    private let speechTimeoutInterval: TimeInterval = 4.0 // 4 seconds of silence
+    private let speechTimeoutInterval: TimeInterval = 3.0 // 3 seconds of silence
+    
     
     override init() {
         super.init()
@@ -83,7 +85,9 @@ class VoiceAssistant: NSObject, ObservableObject {
     private func setupAudioSession() {
         do {
             let audioSession = AVAudioSession.sharedInstance()
-            try audioSession.setCategory(.playAndRecord, mode: .measurement, options: .duckOthers)
+            // Use .mixWithOthers to allow sounds to play while recording
+            // .overrideMutedMicrophoneInterruption ensures sounds play even when mic is active
+            try audioSession.setCategory(.playAndRecord, mode: .default, options: [.mixWithOthers, .defaultToSpeaker, .overrideMutedMicrophoneInterruption])
             try audioSession.setActive(true, options: .notifyOthersOnDeactivation)
         } catch {
             self.error = "Failed to setup audio session: \(error.localizedDescription)"
@@ -202,6 +206,24 @@ class VoiceAssistant: NSObject, ObservableObject {
         recognizedText = ""
     }
     
+    // MARK: - Audio Feedback
+    
+    private func playStartListeningSound() {
+        print("🔊 Playing start listening sound")
+        DispatchQueue.main.async {
+            // Use iOS "Begin Recording" sound - designed for voice recording start
+            AudioServicesPlaySystemSound(1113) // Begin Recording sound
+        }
+    }
+    
+    private func playStopListeningSound() {
+        print("🔊 Playing stop listening sound")
+        DispatchQueue.main.async {
+            // Use iOS "End Recording" sound - designed for voice recording stop
+            AudioServicesPlaySystemSound(1114) // End Recording sound
+        }
+    }
+    
     // MARK: - Hands-Free Mode
     
     func startHandsFreeMode() {
@@ -305,8 +327,14 @@ class VoiceAssistant: NSObject, ObservableObject {
         // Stop wake word listening temporarily
         stopWakeWordListening()
         
-        // Start regular voice listening for the query
-        startHandsFreeVoiceListening()
+        // Play sound to indicate we're now listening for the query
+        playStartListeningSound()
+        
+        // Add a small delay to let the sound play before starting recording
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
+            // Start regular voice listening for the query
+            self.startHandsFreeVoiceListening()
+        }
     }
     
     private func startHandsFreeVoiceListening() {
@@ -411,9 +439,10 @@ class VoiceAssistant: NSObject, ObservableObject {
         print("🎤 Speech timeout detected")
         
         if isListening && !recognizedText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            // We have text, so process it and play the stop sound
             processSpeechResult()
         } else {
-            // No speech detected, just return to wake word listening
+            // No speech detected, just return to wake word listening quietly
             stopListening()
             if isHandsFreeMode {
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
@@ -436,6 +465,9 @@ class VoiceAssistant: NSObject, ObservableObject {
             }
             return
         }
+        
+        // Play sound to indicate we're stopping and sending the message
+        playStopListeningSound()
         
         // Send the query
         onVoiceQueryReady?(query)
