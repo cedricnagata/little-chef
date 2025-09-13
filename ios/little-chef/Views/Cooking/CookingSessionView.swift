@@ -28,6 +28,9 @@ struct CookingSessionView: View {
             .sheet(isPresented: $showingRecipeSelector) {
                 RecipeSelectorView()
             }
+            .task {
+                await recipeManager.loadRecipes()
+            }
         }
     }
 }
@@ -605,6 +608,9 @@ struct RecipeSelectorView: View {
                         dismiss()
                     }
                 }
+            }
+            .task {
+                await recipeManager.loadRecipes()
             }
         }
     }
