@@ -22,9 +22,10 @@ struct LoginView: View {
         VStack(spacing: 24) {
                 // App Logo and Title
                 VStack(spacing: 16) {
-                    Image(systemName: "fork.knife.circle.fill")
-                        .font(.system(size: 80))
-                        .foregroundColor(.orange)
+                    Image("littlechef")
+                        .resizable()
+                        .aspectRatio(contentMode: .fit)
+                        .frame(width: 80, height: 80)
                     
                     Text("LittleChef")
                         .font(.largeTitle)

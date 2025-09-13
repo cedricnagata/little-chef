@@ -178,7 +178,6 @@ struct RegisterView: View {
                     .padding(.horizontal, 32)
                     .padding(.bottom, 20)
             }
-            .navigationTitle("Sign Up")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .navigationBarLeading) {
