@@ -457,6 +457,24 @@ struct InputAreaView: View {
             Divider()
             
             HStack(spacing: 12) {
+                // Hands-free mode toggle
+                Button(action: {
+                    if voiceAssistant.isHandsFreeMode {
+                        voiceAssistant.stopHandsFreeMode()
+                    } else {
+                        startHandsFreeMode()
+                    }
+                }) {
+                    Image(systemName: voiceAssistant.isHandsFreeMode ? "ear.fill" : "ear")
+                        .font(.title2)
+                        .foregroundColor(voiceAssistant.isHandsFreeMode ? .green : .orange)
+                        .scaleEffect(voiceAssistant.isWakeWordListening && isAnimating ? 1.1 : 1.0)
+                        .animation(.easeInOut(duration: 2.0).repeatForever(autoreverses: true), value: isAnimating)
+                }
+                .padding(12)
+                .background(Circle().fill(voiceAssistant.isHandsFreeMode ? Color.green.opacity(0.2) : Color(.systemGray6)))
+                .disabled(!voiceAssistant.isAvailable || cookingSessionManager.isLoading)
+                
                 // Voice button
                 Button(action: {
                     if voiceAssistant.isListening {
@@ -476,13 +494,16 @@ struct InputAreaView: View {
                 }
                 .padding(12)
                 .background(Circle().fill(Color(.systemGray6)))
-                .disabled(!voiceAssistant.isAvailable || cookingSessionManager.isLoading)
+                .disabled(!voiceAssistant.isAvailable || cookingSessionManager.isLoading || voiceAssistant.isHandsFreeMode)
                 .onAppear {
                     if voiceAssistant.isListening {
                         isAnimating = true
                     }
                 }
                 .onChange(of: voiceAssistant.isListening) { listening in
+                    isAnimating = listening
+                }
+                .onChange(of: voiceAssistant.isWakeWordListening) { listening in
                     isAnimating = listening
                 }
                 
@@ -506,8 +527,34 @@ struct InputAreaView: View {
             }
             .padding()
             
-            // Voice recognition display
-            if voiceAssistant.isListening && !voiceAssistant.recognizedText.isEmpty {
+            // Hands-free mode status
+            if voiceAssistant.isHandsFreeMode {
+                VStack {
+                    Divider()
+                    HStack {
+                        Image(systemName: voiceAssistant.isWakeWordListening ? "ear.fill" : "waveform")
+                            .foregroundColor(.green)
+                        
+                        if voiceAssistant.isListening {
+                            Text("Listening: \(voiceAssistant.recognizedText.isEmpty ? "Speak now..." : voiceAssistant.recognizedText)")
+                                .foregroundColor(.primary)
+                        } else if voiceAssistant.isWakeWordListening {
+                            Text("Say \"Hey LittleChef\" to start...")
+                                .foregroundColor(.secondary)
+                        } else {
+                            Text("Hands-free mode active")
+                                .foregroundColor(.secondary)
+                        }
+                        Spacer()
+                    }
+                    .padding(.horizontal)
+                    .padding(.vertical, 8)
+                }
+                .background(Color.green.opacity(0.1))
+            }
+            
+            // Voice recognition display (for manual mode)
+            else if voiceAssistant.isListening && !voiceAssistant.recognizedText.isEmpty {
                 VStack {
                     Divider()
                     HStack {
@@ -579,6 +626,28 @@ struct InputAreaView: View {
                 voiceAssistant.speak(cookingSessionManager.lastResponse)
             }
         }
+    }
+    
+    private func startHandsFreeMode() {
+        // Set up callbacks
+        voiceAssistant.onWakeWordDetected = {
+            print("🎤 Wake word detected - transitioning to listening")
+        }
+        
+        voiceAssistant.onVoiceQueryReady = { [weak cookingSessionManager, weak voiceAssistant] query in
+            print("🎤 Voice query ready: \(query)")
+            
+            Task {
+                await cookingSessionManager?.sendQuery(query)
+                
+                // Auto-speak response for hands-free queries
+                if let response = cookingSessionManager?.lastResponse, !response.isEmpty {
+                    voiceAssistant?.speak(response)
+                }
+            }
+        }
+        
+        voiceAssistant.startHandsFreeMode()
     }
 }
 
