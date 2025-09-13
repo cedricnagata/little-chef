@@ -11,7 +11,9 @@ struct RecipeDetailView: View {
     let recipe: Recipe
     @State private var showingDeleteAlert = false
     @EnvironmentObject var recipeManager: RecipeManager
+    @EnvironmentObject var cookingSessionManager: CookingSessionManager
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.selectedTab) private var selectedTab
     
     var body: some View {
         ScrollView {
@@ -181,7 +183,7 @@ struct RecipeDetailView: View {
                     }
                     
                     Button(action: {
-                        // TODO: Start cooking session
+                        startCookingSession()
                     }) {
                         Label("Start Cooking", systemImage: "flame")
                     }
@@ -211,6 +213,17 @@ struct RecipeDetailView: View {
         } message: {
             Text("Are you sure you want to delete '\(recipe.title)'? This action cannot be undone.")
         }
+    }
+    
+    private func startCookingSession() {
+        // Start the cooking session with this recipe
+        cookingSessionManager.startCookingSession(with: recipe)
+        
+        // Dismiss the current view
+        dismiss()
+        
+        // Switch to the Cook tab (tab index 1)
+        selectedTab.wrappedValue = 1
     }
 }
 

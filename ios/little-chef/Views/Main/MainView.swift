@@ -7,19 +7,36 @@
 
 import SwiftUI
 
+// MARK: - Tab Selection Environment Key
+struct TabSelectionKey: EnvironmentKey {
+    static let defaultValue: Binding<Int> = .constant(0)
+}
+
+extension EnvironmentValues {
+    var selectedTab: Binding<Int> {
+        get { self[TabSelectionKey.self] }
+        set { self[TabSelectionKey.self] = newValue }
+    }
+}
+
 struct MainView: View {
     @EnvironmentObject var authManager: AuthManager
     @StateObject private var recipeManager = RecipeManager()
+    @StateObject private var cookingSessionManager = CookingSessionManager()
+    @StateObject private var voiceAssistant = VoiceAssistant()
+    @State private var selectedTab = 0
     
     var body: some View {
-        TabView {
+        TabView(selection: $selectedTab) {
             // Recipes Tab
             RecipeListView()
                 .tabItem {
                     Image(systemName: "book.fill")
                     Text("Recipes")
                 }
+                .tag(0)
                 .environmentObject(recipeManager)
+                .environmentObject(cookingSessionManager)
             
             // Cooking Tab
             CookingSessionView()
@@ -27,7 +44,10 @@ struct MainView: View {
                     Image(systemName: "flame.fill")
                     Text("Cook")
                 }
+                .tag(1)
                 .environmentObject(recipeManager)
+                .environmentObject(cookingSessionManager)
+                .environmentObject(voiceAssistant)
             
             // Profile Tab
             ProfileView()
@@ -35,8 +55,10 @@ struct MainView: View {
                     Image(systemName: "person.fill")
                     Text("Profile")
                 }
+                .tag(2)
         }
         .accentColor(.orange)
+        .environment(\.selectedTab, $selectedTab)
         .onAppear {
             Task {
                 await recipeManager.loadRecipes()
