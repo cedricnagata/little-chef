@@ -47,6 +47,25 @@ class RecipeManager: ObservableObject {
         }
     }
     
+    func updateRecipe(id: UUID, with update: RecipeUpdate) async -> Bool {
+        isLoading = true
+        errorMessage = nil
+        
+        do {
+            let updatedRecipe = try await apiService.updateRecipe(id: id, recipe: update)
+            // Find and replace the recipe in our local list
+            if let index = recipes.firstIndex(where: { $0.id == id }) {
+                recipes[index] = updatedRecipe
+            }
+            isLoading = false
+            return true
+        } catch {
+            errorMessage = "Failed to update recipe: \(error.localizedDescription)"
+            isLoading = false
+            return false
+        }
+    }
+    
     func deleteRecipe(_ recipe: Recipe) async -> Bool {
         isLoading = true
         errorMessage = nil

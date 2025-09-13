@@ -10,6 +10,7 @@ import SwiftUI
 struct RecipeDetailView: View {
     let recipe: Recipe
     @State private var showingDeleteAlert = false
+    @State private var showingEditSheet = false
     @EnvironmentObject var recipeManager: RecipeManager
     @EnvironmentObject var cookingSessionManager: CookingSessionManager
     @Environment(\.dismiss) private var dismiss
@@ -190,6 +191,12 @@ struct RecipeDetailView: View {
                     
                     Divider()
                     
+                    Button(action: {
+                        showingEditSheet = true
+                    }) {
+                        Label("Edit Recipe", systemImage: "pencil")
+                    }
+                    
                     Button(role: .destructive, action: {
                         showingDeleteAlert = true
                     }) {
@@ -213,6 +220,28 @@ struct RecipeDetailView: View {
         } message: {
             Text("Are you sure you want to delete '\(recipe.title)'? This action cannot be undone.")
         }
+        .sheet(isPresented: $showingEditSheet) {
+            EditRecipeView(
+                recipe: RecipeData(
+                    title: recipe.title,
+                    description: recipe.description,
+                    servings: recipe.servings,
+                    prepTime: recipe.prepTime,
+                    cookTime: recipe.cookTime,
+                    ingredients: recipe.ingredients,
+                    instructions: recipe.instructions,
+                    tags: recipe.tags,
+                    sourceUrl: recipe.sourceUrl,
+                    cuisineType: recipe.cuisineType,
+                    difficulty: recipe.difficulty
+                ),
+                onSave: { updatedRecipe in
+                    Task {
+                        await updateRecipe(updatedRecipe)
+                    }
+                }
+            )
+        }
     }
     
     private func startCookingSession() {
@@ -224,6 +253,29 @@ struct RecipeDetailView: View {
         
         // Switch to the Cook tab (tab index 1)
         selectedTab.wrappedValue = 1
+    }
+    
+    private func updateRecipe(_ updatedRecipe: RecipeCreate) async {
+        // Convert RecipeCreate to RecipeUpdate
+        let recipeUpdate = RecipeUpdate(
+            title: updatedRecipe.title,
+            description: updatedRecipe.description,
+            servings: updatedRecipe.servings,
+            prepTime: updatedRecipe.prepTime,
+            cookTime: updatedRecipe.cookTime,
+            ingredients: updatedRecipe.ingredients,
+            instructions: updatedRecipe.instructions,
+            tags: updatedRecipe.tags,
+            sourceUrl: updatedRecipe.sourceUrl,
+            cuisineType: updatedRecipe.cuisineType,
+            difficulty: updatedRecipe.difficulty
+        )
+        
+        let success = await recipeManager.updateRecipe(id: recipe.id, with: recipeUpdate)
+        if !success {
+            // Handle error - could show an alert
+            print("Failed to update recipe: \(recipeManager.errorMessage ?? "Unknown error")")
+        }
     }
 }
 

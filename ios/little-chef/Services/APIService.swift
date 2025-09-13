@@ -329,6 +329,23 @@ class APIService {
         return try await performRequest(request: request, responseType: Recipe.self)
     }
     
+    func updateRecipe(id: UUID, recipe: RecipeUpdate) async throws -> Recipe {
+        let url = URL(string: "\(baseURL)/recipes/\(id.uuidString)")!
+        
+        var request = URLRequest(url: url)
+        request.httpMethod = "PUT"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try jsonEncoder.encode(recipe)
+        
+        // Add auth header
+        guard let token = KeychainService.shared.getAccessToken() else {
+            throw AuthError.tokenExpired
+        }
+        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        
+        return try await performRequest(request: request, responseType: Recipe.self)
+    }
+    
     func deleteRecipe(id: UUID) async throws {
         let url = URL(string: "\(baseURL)/recipes/\(id.uuidString)")!
         var request = URLRequest(url: url)

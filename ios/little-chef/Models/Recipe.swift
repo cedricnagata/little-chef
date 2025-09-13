@@ -57,6 +57,28 @@ struct RecipeCreate: Codable {
     }
 }
 
+struct RecipeUpdate: Codable {
+    let title: String?
+    let description: String?
+    let servings: Int?
+    let prepTime: Int?
+    let cookTime: Int?
+    let ingredients: [String]?
+    let instructions: [String]?
+    let tags: [String]?
+    let sourceUrl: String?
+    let cuisineType: String?
+    let difficulty: String?
+    
+    enum CodingKeys: String, CodingKey {
+        case title, description, servings, ingredients, instructions, tags, difficulty
+        case prepTime = "prep_time"
+        case cookTime = "cook_time"
+        case sourceUrl = "source_url"
+        case cuisineType = "cuisine_type"
+    }
+}
+
 struct RecipeListResponse: Codable, Identifiable {
     let id: UUID
     let recipeData: RecipeData
