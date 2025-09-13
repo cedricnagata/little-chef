@@ -99,15 +99,37 @@ struct ActiveCookingView: View {
     @State private var showingEndSessionAlert = false
     
     var body: some View {
-        VStack(spacing: 0) {
-            // Header with recipe info
-            RecipeHeaderView()
-            
-            // Chat area
-            ChatAreaView()
-            
-            // Input area
-            InputAreaView(textInput: $textInput)
+        GeometryReader { geometry in
+            if geometry.size.width > geometry.size.height {
+                // Landscape: Side-by-side layout
+                HStack(spacing: 0) {
+                    // Recipe details on the left
+                    RecipeDetailsView()
+                        .frame(width: geometry.size.width * 0.4)
+                        .background(Color(.systemGray6))
+                    
+                    Divider()
+                    
+                    // Conversation on the right
+                    VStack(spacing: 0) {
+                        ChatAreaView()
+                        InputAreaView(textInput: $textInput)
+                    }
+                    .frame(width: geometry.size.width * 0.6)
+                }
+            } else {
+                // Portrait: Original vertical layout
+                VStack(spacing: 0) {
+                    // Header with recipe info
+                    RecipeHeaderView()
+                    
+                    // Chat area
+                    ChatAreaView()
+                    
+                    // Input area
+                    InputAreaView(textInput: $textInput)
+                }
+            }
         }
         .toolbar {
             ToolbarItem(placement: .navigationBarTrailing) {
@@ -125,6 +147,157 @@ struct ActiveCookingView: View {
         } message: {
             Text("Are you sure you want to end this cooking session?")
         }
+    }
+}
+
+// MARK: - Recipe Details View (for side-by-side layout)
+
+struct RecipeDetailsView: View {
+    @EnvironmentObject var cookingSessionManager: CookingSessionManager
+    
+    var body: some View {
+        if let session = cookingSessionManager.currentSession {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 16) {
+                    // Recipe title and basic info
+                    VStack(alignment: .leading, spacing: 12) {
+                        Text(session.recipe.title)
+                            .font(.title2)
+                            .fontWeight(.bold)
+                            .multilineTextAlignment(.leading)
+                        
+                        if let description = session.recipe.description {
+                            Text(description)
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                        }
+                        
+                        // Recipe info
+                        LazyVGrid(columns: Array(repeating: GridItem(.flexible()), count: 2), spacing: 8) {
+                            if let prepTime = session.recipe.prepTime {
+                                CompactInfoCard(title: "Prep", value: "\(prepTime)m", icon: "clock")
+                            }
+                            
+                            if let cookTime = session.recipe.cookTime {
+                                CompactInfoCard(title: "Cook", value: "\(cookTime)m", icon: "flame")
+                            }
+                            
+                            CompactInfoCard(title: "Serves", value: "\(session.recipe.servings)", icon: "person.2")
+                            
+                            if let difficulty = session.recipe.difficulty {
+                                CompactInfoCard(title: "Level", value: difficulty.capitalized, icon: "star")
+                            }
+                        }
+                    }
+                    
+                    Divider()
+                    
+                    // Ingredients
+                    VStack(alignment: .leading, spacing: 8) {
+                        HStack {
+                            Text("Ingredients")
+                                .font(.headline)
+                                .fontWeight(.semibold)
+                            
+                            Spacer()
+                            
+                            Text("\(session.recipe.ingredients.count)")
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                        }
+                        
+                        LazyVStack(alignment: .leading, spacing: 6) {
+                            ForEach(Array(session.recipe.ingredients.enumerated()), id: \.offset) { index, ingredient in
+                                HStack(alignment: .top, spacing: 8) {
+                                    Circle()
+                                        .fill(Color.orange.opacity(0.3))
+                                        .frame(width: 6, height: 6)
+                                        .padding(.top, 6)
+                                    
+                                    Text(ingredient)
+                                        .font(.caption)
+                                        .fixedSize(horizontal: false, vertical: true)
+                                    
+                                    Spacer()
+                                }
+                            }
+                        }
+                    }
+                    
+                    Divider()
+                    
+                    // Instructions
+                    VStack(alignment: .leading, spacing: 8) {
+                        HStack {
+                            Text("Instructions")
+                                .font(.headline)
+                                .fontWeight(.semibold)
+                            
+                            Spacer()
+                            
+                            Text("\(session.recipe.instructions.count) steps")
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                        }
+                        
+                        LazyVStack(alignment: .leading, spacing: 12) {
+                            ForEach(Array(session.recipe.instructions.enumerated()), id: \.offset) { index, instruction in
+                                HStack(alignment: .top, spacing: 8) {
+                                    ZStack {
+                                        Circle()
+                                            .fill(Color.orange)
+                                            .frame(width: 18, height: 18)
+                                        
+                                        Text("\(index + 1)")
+                                            .font(.caption2)
+                                            .fontWeight(.semibold)
+                                            .foregroundColor(.white)
+                                    }
+                                    
+                                    Text(instruction)
+                                        .font(.caption)
+                                        .fixedSize(horizontal: false, vertical: true)
+                                    
+                                    Spacer()
+                                }
+                            }
+                        }
+                    }
+                    
+                    Spacer(minLength: 20)
+                }
+                .padding()
+            }
+        }
+    }
+}
+
+// MARK: - Compact Info Card (for recipe details view)
+
+struct CompactInfoCard: View {
+    let title: String
+    let value: String
+    let icon: String
+    
+    var body: some View {
+        VStack(spacing: 2) {
+            Image(systemName: icon)
+                .font(.caption)
+                .foregroundColor(.orange)
+            
+            Text(value)
+                .font(.caption)
+                .fontWeight(.semibold)
+            
+            Text(title)
+                .font(.caption2)
+                .foregroundColor(.secondary)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 6)
+        .padding(.horizontal, 4)
+        .background(Color(.systemBackground))
+        .cornerRadius(8)
     }
 }
 
