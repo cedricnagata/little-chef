@@ -138,6 +138,7 @@ class CookingAgent:
             response = await knowledge_tools.get_cooking_knowledge(
                 query=state["current_query"],
                 recipe_context=state["cooking_session"].recipe,
+                conversation_history=state["cooking_session"].conversation_history,
                 model=model_name
             )
             

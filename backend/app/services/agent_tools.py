@@ -28,7 +28,7 @@ class KnowledgeTools:
         
         return self._llm_cache[model_name]
     
-    async def get_cooking_knowledge(self, query: str, recipe_context: RecipeBase, model: str) -> str:
+    async def get_cooking_knowledge(self, query: str, recipe_context: RecipeBase, conversation_history: list, model: str) -> str:
         """Get cooking knowledge relevant to the query and recipe"""
         try:
             llm = self._get_llm(model)
@@ -42,10 +42,20 @@ class KnowledgeTools:
             context += f"Cooking time: {recipe_context.cook_time or 'Not specified'} minutes\n"
             context += f"Difficulty: {recipe_context.difficulty or 'Not specified'}"
             
+            # Build conversation history context
+            conversation_context = ""
+            if conversation_history and len(conversation_history) > 0:
+                conversation_context = "\n\nPrevious conversation:\n"
+                # Include the last 10 messages to avoid token limits but maintain context
+                recent_messages = conversation_history[-10:] if len(conversation_history) > 10 else conversation_history
+                for message in recent_messages:
+                    role = "User" if message.role == "user" else "Assistant"
+                    conversation_context += f"{role}: {message.content}\n"
+            
             prompt = ChatPromptTemplate.from_messages([
                 ("system", get_cooking_prompts()["knowledge_system"]),
                 ("human", get_cooking_prompts()["knowledge_template"].format(
-                    context=context,
+                    context=context + conversation_context,
                     query=query
                 ))
             ])
