@@ -31,9 +31,27 @@ class CookingSessionManager: ObservableObject {
     }
     
     func endCookingSession() {
+        // Clear session data
         currentSession = nil
         lastResponse = ""
         error = nil
+        
+        // Clear all timers
+        clearAllTimers()
+        
+        // Reset processed command IDs for clean slate
+        processedCommandIds.removeAll()
+        
+        print("🔴 Ended cooking session - all state reset")
+    }
+    
+    private func clearAllTimers() {
+        // Stop and remove all local timers
+        for timer in localTimers {
+            timer.stop()
+        }
+        localTimers.removeAll()
+        print("🗑️ Cleared all timers")
     }
     
     // MARK: - Agent Communication

@@ -145,6 +145,9 @@ struct ActiveCookingView: View {
         .alert("End Cooking Session", isPresented: $showingEndSessionAlert) {
             Button("Cancel", role: .cancel) { }
             Button("End", role: .destructive) {
+                // Reset voice assistant state
+                voiceAssistant.stopHandsFreeMode()
+                // Reset session state
                 cookingSessionManager.endCookingSession()
             }
         } message: {
