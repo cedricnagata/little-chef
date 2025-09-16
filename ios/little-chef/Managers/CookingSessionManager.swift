@@ -53,7 +53,7 @@ class CookingSessionManager: ObservableObject {
             let updatedSession = CookingSession(
                 recipe: session.recipe,
                 modifications: session.modifications,
-                timerCommands: session.timerCommands,
+                commands: session.commands,
                 timerStatus: getTimerStatusForBackend(), // Current timer status
                 conversationHistory: session.conversationHistory,
                 userPreferences: session.userPreferences,
@@ -65,8 +65,8 @@ class CookingSessionManager: ObservableObject {
                 query: query
             )
             
-            // Process any new timer commands from AI
-            processTimerCommands(from: response.updatedSession)
+            // Process any new commands from AI
+            processCommands(from: response.updatedSession)
             
             // Update the session with the response
             currentSession = response.updatedSession
@@ -122,7 +122,7 @@ class CookingSessionManager: ObservableObject {
         currentSession = CookingSession(
             recipe: session.recipe,
             modifications: modifications,
-            timerCommands: session.timerCommands,
+            commands: session.commands,
             timerStatus: session.timerStatus,
             conversationHistory: session.conversationHistory,
             userPreferences: session.userPreferences,
@@ -222,39 +222,46 @@ class CookingSessionManager: ObservableObject {
     
     @Published var localTimers: [LocalTimer] = []
     
-    func processTimerCommands(from session: CookingSession) {
-        // Process new timer commands from AI
-        let newCommands = session.timerCommands.filter { command in
+    func processCommands(from session: CookingSession) {
+        // Process new commands from AI
+        let newCommands = session.commands.filter { command in
             !processedCommandIds.contains(command.id)
         }
         
         for command in newCommands {
-            switch command.action {
-            case .add:
-                if let duration = command.durationSeconds, let timerId = command.timerId {
-                    addLocalTimer(id: timerId, label: command.label, duration: duration)
-                }
-            case .start:
-                if let timerId = command.timerId {
-                    startLocalTimer(id: timerId)
-                }
-            case .stop:
-                if let timerId = command.timerId {
-                    stopLocalTimer(id: timerId)
-                }
-            case .pause:
-                if let timerId = command.timerId {
-                    pauseLocalTimer(id: timerId)
-                }
-            case .resume:
-                if let timerId = command.timerId {
-                    resumeLocalTimer(id: timerId)
-                }
-            case .remove:
-                if let timerId = command.timerId {
-                    removeLocalTimer(id: timerId)
+            // Handle timer commands
+            if command.commandType == "timer" {
+                switch command.action {
+                case "add":
+                    if let durationSeconds = command.parameters["duration_seconds"]?.value as? Int,
+                       let timerId = command.targetId {
+                        addLocalTimer(id: timerId, label: command.label, duration: durationSeconds)
+                    }
+                case "start":
+                    if let timerId = command.targetId {
+                        startLocalTimer(id: timerId)
+                    }
+                case "stop":
+                    if let timerId = command.targetId {
+                        stopLocalTimer(id: timerId)
+                    }
+                case "pause":
+                    if let timerId = command.targetId {
+                        pauseLocalTimer(id: timerId)
+                    }
+                case "resume":
+                    if let timerId = command.targetId {
+                        resumeLocalTimer(id: timerId)
+                    }
+                case "remove":
+                    if let timerId = command.targetId {
+                        removeLocalTimer(id: timerId)
+                    }
+                default:
+                    print("Unknown timer action: \(command.action)")
                 }
             }
+            // Future: Add handling for other command types here
             
             processedCommandIds.insert(command.id)
         }
@@ -335,22 +342,23 @@ class CookingSessionManager: ObservableObject {
         
         // Also add to session state for AI awareness
         if var session = currentSession {
-            let timerCommand = TimerCommand(
+            let command = Command(
                 id: UUID().uuidString,
-                action: .add,
-                timerId: nil,
+                commandType: "timer",
+                action: "add",
+                targetId: timerId,
                 label: label,
-                durationSeconds: durationSeconds,
+                parameters: ["duration_seconds": FlexibleValue(durationSeconds)],
                 createdAt: Date()
             )
             
-            var updatedCommands = session.timerCommands
-            updatedCommands.append(timerCommand)
+            var updatedCommands = session.commands
+            updatedCommands.append(command)
             
             currentSession = CookingSession(
                 recipe: session.recipe,
                 modifications: session.modifications,
-                timerCommands: updatedCommands,
+                commands: updatedCommands,
                 timerStatus: session.timerStatus,
                 conversationHistory: session.conversationHistory,
                 userPreferences: session.userPreferences,
@@ -370,22 +378,23 @@ class CookingSessionManager: ObservableObject {
         
         // Add remove command to session state for AI awareness
         if var session = currentSession {
-            let removeCommand = TimerCommand(
+            let removeCommand = Command(
                 id: UUID().uuidString,
-                action: .remove,
-                timerId: id,
+                commandType: "timer",
+                action: "remove",
+                targetId: id,
                 label: "Manual timer removal",
-                durationSeconds: nil,
+                parameters: [:],
                 createdAt: Date()
             )
             
-            var updatedCommands = session.timerCommands
+            var updatedCommands = session.commands
             updatedCommands.append(removeCommand)
             
             currentSession = CookingSession(
                 recipe: session.recipe,
                 modifications: session.modifications,
-                timerCommands: updatedCommands,
+                commands: updatedCommands,
                 timerStatus: session.timerStatus,
                 conversationHistory: session.conversationHistory,
                 userPreferences: session.userPreferences,

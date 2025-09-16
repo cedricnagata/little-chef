@@ -12,14 +12,14 @@ from app.config import settings
 
 # Configure logging
 logging.basicConfig(
-    level=logging.INFO,
+    level=logging.WARNING,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     datefmt='%Y-%m-%d %H:%M:%S'
 )
 
-# Set specific loggers
+# Set specific loggers - only show tool calls
 logging.getLogger("app.services.cooking_agent").setLevel(logging.INFO)
-logging.getLogger("uvicorn.access").setLevel(logging.WARNING)  # Reduce uvicorn noise
+logging.getLogger("uvicorn.access").setLevel(logging.WARNING)
 
 # Create FastAPI app instance
 app = FastAPI(

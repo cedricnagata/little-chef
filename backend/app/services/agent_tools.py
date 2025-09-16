@@ -31,6 +31,11 @@ class StopTimerInput(BaseModel):
     timer_id: str = Field(description="ID of the timer to stop")
 
 
+class RemoveTimerInput(BaseModel):
+    """Input schema for removing a timer"""
+    timer_id: str = Field(description="ID of the timer to remove")
+
+
 class CookingQuestionInput(BaseModel):
     """Input schema for cooking guidance questions"""
     question: str = Field(description="Cooking question or request for guidance")
@@ -213,10 +218,15 @@ def create_cooking_tools() -> List[BaseTool]:
         """Stop a running timer."""
         return f"timer_stopped:{timer_id}"
     
+    @tool("remove_timer", args_schema=RemoveTimerInput)
+    def remove_timer(timer_id: str) -> str:
+        """Remove/delete a timer completely."""
+        return f"timer_removed:{timer_id}"
+    
     @tool("get_cooking_guidance", args_schema=CookingQuestionInput)
     def get_cooking_guidance(question: str) -> str:
         """Get cooking advice, techniques, or recipe guidance."""
         # This will be handled by the tool executor calling the actual cooking knowledge
         return f"cooking_guidance_request:{question}"
     
-    return [add_timer, start_timer, stop_timer, get_cooking_guidance]
+    return [add_timer, start_timer, stop_timer, remove_timer, get_cooking_guidance]

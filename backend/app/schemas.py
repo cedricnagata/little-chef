@@ -185,14 +185,18 @@ class RecipeModifications(BaseModel):
     notes: List[str] = Field(default_factory=list)
 
 
-class TimerCommand(BaseModel):
-    """Commands that AI can issue for timer management"""
+class Command(BaseModel):
+    """Universal command structure that AI can issue for various actions"""
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
-    action: Literal["add", "start", "stop", "pause", "resume", "remove"]
-    timer_id: Optional[str] = None  # For start/stop/pause commands
+    command_type: Literal["timer"]  # Extensible to add more types later
+    action: str  # The specific action to take
+    target_id: Optional[str] = None  # ID of the target entity (e.g., timer_id)
     label: str
-    duration_seconds: Optional[int] = Field(None, ge=1)
+    parameters: Dict[str, Any] = Field(default_factory=dict)  # Flexible parameters
     created_at: datetime = Field(default_factory=datetime.now)
+
+# Legacy alias for backward compatibility during transition
+TimerCommand = Command
 
 
 class TimerStatus(BaseModel):
@@ -233,7 +237,7 @@ class CookingSessionBase(BaseModel):
     """Base cooking session schema"""
     recipe: RecipeBase
     modifications: RecipeModifications = Field(default_factory=RecipeModifications)
-    timer_commands: List[TimerCommand] = Field(default_factory=list)
+    commands: List[Command] = Field(default_factory=list)
     timer_status: List[TimerStatus] = Field(default_factory=list)
     conversation_history: List[Message] = Field(default_factory=list)
     user_preferences: UserPreferencesDetailed = Field(default_factory=UserPreferencesDetailed)

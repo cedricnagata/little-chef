@@ -15,7 +15,7 @@ struct CookingSession: Codable, Identifiable {
     
     let recipe: RecipeBase
     let modifications: RecipeModifications
-    let timerCommands: [TimerCommand]
+    let commands: [Command]
     let timerStatus: [TimerStatus]
     let conversationHistory: [Message]
     let userPreferences: UserPreferencesDetailed
@@ -23,7 +23,7 @@ struct CookingSession: Codable, Identifiable {
     
     enum CodingKeys: String, CodingKey {
         case recipe, modifications
-        case timerCommands = "timer_commands"
+        case commands = "commands"
         case timerStatus = "timer_status"
         case conversationHistory = "conversation_history"
         case userPreferences = "user_preferences"
@@ -33,17 +33,17 @@ struct CookingSession: Codable, Identifiable {
     init(recipe: RecipeBase, userPreferences: UserPreferencesDetailed) {
         self.recipe = recipe
         self.modifications = RecipeModifications()
-        self.timerCommands = []
+        self.commands = []
         self.timerStatus = []
         self.conversationHistory = []
         self.userPreferences = userPreferences
         self.startedAt = Date()
     }
     
-    init(recipe: RecipeBase, modifications: RecipeModifications, timerCommands: [TimerCommand], timerStatus: [TimerStatus], conversationHistory: [Message], userPreferences: UserPreferencesDetailed, startedAt: Date) {
+    init(recipe: RecipeBase, modifications: RecipeModifications, commands: [Command], timerStatus: [TimerStatus], conversationHistory: [Message], userPreferences: UserPreferencesDetailed, startedAt: Date) {
         self.recipe = recipe
         self.modifications = modifications
-        self.timerCommands = timerCommands
+        self.commands = commands
         self.timerStatus = timerStatus
         self.conversationHistory = conversationHistory
         self.userPreferences = userPreferences
@@ -112,21 +112,64 @@ struct RecipeModifications: Codable {
     }
 }
 
-struct TimerCommand: Codable, Identifiable {
+// Helper for flexible JSON encoding/decoding
+struct FlexibleValue: Codable {
+    let value: Any
+    
+    init(_ value: Any) {
+        self.value = value
+    }
+    
+    init(from decoder: Decoder) throws {
+        let container = try decoder.singleValueContainer()
+        if let stringValue = try? container.decode(String.self) {
+            value = stringValue
+        } else if let intValue = try? container.decode(Int.self) {
+            value = intValue
+        } else if let doubleValue = try? container.decode(Double.self) {
+            value = doubleValue
+        } else if let boolValue = try? container.decode(Bool.self) {
+            value = boolValue
+        } else {
+            throw DecodingError.typeMismatch(FlexibleValue.self, DecodingError.Context(codingPath: decoder.codingPath, debugDescription: "Unsupported type"))
+        }
+    }
+    
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.singleValueContainer()
+        if let stringValue = value as? String {
+            try container.encode(stringValue)
+        } else if let intValue = value as? Int {
+            try container.encode(intValue)
+        } else if let doubleValue = value as? Double {
+            try container.encode(doubleValue)
+        } else if let boolValue = value as? Bool {
+            try container.encode(boolValue)
+        } else {
+            throw EncodingError.invalidValue(value, EncodingError.Context(codingPath: encoder.codingPath, debugDescription: "Unsupported type"))
+        }
+    }
+}
+
+struct Command: Codable, Identifiable {
     let id: String
-    let action: TimerAction
-    let timerId: String?
+    let commandType: String
+    let action: String
+    let targetId: String?
     let label: String
-    let durationSeconds: Int?
+    let parameters: [String: FlexibleValue]
     let createdAt: Date
     
     enum CodingKeys: String, CodingKey {
-        case id, action, label
-        case timerId = "timer_id"
-        case durationSeconds = "duration_seconds"
+        case id, action, label, parameters
+        case commandType = "command_type"
+        case targetId = "target_id"
         case createdAt = "created_at"
     }
 }
+
+// Legacy alias for backward compatibility during transition
+typealias TimerCommand = Command
 
 struct TimerStatus: Codable, Identifiable {
     let id: String
