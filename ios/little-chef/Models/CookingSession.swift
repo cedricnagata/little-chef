@@ -15,32 +15,36 @@ struct CookingSession: Codable, Identifiable {
     
     let recipe: RecipeBase
     let modifications: RecipeModifications
-    let activeTimers: [Timer]
+    let timerCommands: [TimerCommand]
+    let timerStatus: [TimerStatus]
     let conversationHistory: [Message]
     let userPreferences: UserPreferencesDetailed
     let startedAt: Date
     
     enum CodingKeys: String, CodingKey {
         case recipe, modifications
-        case userPreferences = "user_preferences"
-        case activeTimers = "active_timers"
+        case timerCommands = "timer_commands"
+        case timerStatus = "timer_status"
         case conversationHistory = "conversation_history"
+        case userPreferences = "user_preferences"
         case startedAt = "started_at"
     }
     
     init(recipe: RecipeBase, userPreferences: UserPreferencesDetailed) {
         self.recipe = recipe
         self.modifications = RecipeModifications()
-        self.activeTimers = []
+        self.timerCommands = []
+        self.timerStatus = []
         self.conversationHistory = []
         self.userPreferences = userPreferences
         self.startedAt = Date()
     }
     
-    init(recipe: RecipeBase, modifications: RecipeModifications, activeTimers: [Timer], conversationHistory: [Message], userPreferences: UserPreferencesDetailed, startedAt: Date) {
+    init(recipe: RecipeBase, modifications: RecipeModifications, timerCommands: [TimerCommand], timerStatus: [TimerStatus], conversationHistory: [Message], userPreferences: UserPreferencesDetailed, startedAt: Date) {
         self.recipe = recipe
         self.modifications = modifications
-        self.activeTimers = activeTimers
+        self.timerCommands = timerCommands
+        self.timerStatus = timerStatus
         self.conversationHistory = conversationHistory
         self.userPreferences = userPreferences
         self.startedAt = startedAt
@@ -108,20 +112,48 @@ struct RecipeModifications: Codable {
     }
 }
 
-struct Timer: Codable, Identifiable {
-    let id: UUID
+struct TimerCommand: Codable, Identifiable {
+    let id: String
+    let action: TimerAction
+    let timerId: String?
     let label: String
-    let durationSeconds: Int
-    let remainingSeconds: Int
-    let isActive: Bool
+    let durationSeconds: Int?
     let createdAt: Date
     
     enum CodingKeys: String, CodingKey {
-        case id, label, isActive
+        case id, action, label
+        case timerId = "timer_id"
+        case durationSeconds = "duration_seconds"
+        case createdAt = "created_at"
+    }
+}
+
+struct TimerStatus: Codable, Identifiable {
+    let id: String
+    let label: String
+    let durationSeconds: Int
+    let status: TimerStatusType
+    let remainingSeconds: Int
+    let createdAt: Date
+    let startedAt: Date?
+    let completedAt: Date?
+    
+    enum CodingKeys: String, CodingKey {
+        case id, label, status
         case durationSeconds = "duration_seconds"
         case remainingSeconds = "remaining_seconds"
         case createdAt = "created_at"
+        case startedAt = "started_at"
+        case completedAt = "completed_at"
     }
+}
+
+enum TimerAction: String, Codable {
+    case add, start, stop, pause, resume, remove
+}
+
+enum TimerStatusType: String, Codable {
+    case pending, running, paused, completed, stopped
 }
 
 struct Message: Codable, Identifiable {

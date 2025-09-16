@@ -157,6 +157,7 @@ struct ActiveCookingView: View {
 
 struct RecipeDetailsView: View {
     @EnvironmentObject var cookingSessionManager: CookingSessionManager
+    @State private var showingAddTimer = false
     
     var body: some View {
         if let session = cookingSessionManager.currentSession {
@@ -241,6 +242,45 @@ struct RecipeDetailsView: View {
                     
                     Divider()
                     
+                    // Timers Section
+                    VStack(alignment: .leading, spacing: 8) {
+                        HStack {
+                            Text("Timers")
+                                .font(.headline)
+                                .fontWeight(.semibold)
+                            
+                            Spacer()
+                            
+                            Button(action: {
+                                showingAddTimer = true
+                            }) {
+                                Image(systemName: "plus.circle.fill")
+                                    .font(.title3)
+                                    .foregroundColor(.orange)
+                            }
+                        }
+                        
+                        if cookingSessionManager.localTimers.isEmpty {
+                            Text("No timers yet. Add one above or ask the AI!")
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                                .italic()
+                        } else {
+                            LazyVStack(spacing: 8) {
+                                ForEach(cookingSessionManager.localTimers) { timer in
+                                    TimerCardView(
+                                        timer: timer,
+                                        onDelete: {
+                                            cookingSessionManager.deleteManualTimer(id: timer.id)
+                                        }
+                                    )
+                                }
+                            }
+                        }
+                    }
+                    
+                    Divider()
+                    
                     // Instructions
                     VStack(alignment: .leading, spacing: 8) {
                         HStack {
@@ -282,6 +322,11 @@ struct RecipeDetailsView: View {
                     Spacer(minLength: 20)
                 }
                 .padding()
+            }
+            .sheet(isPresented: $showingAddTimer) {
+                AddTimerView { label, minutes in
+                    cookingSessionManager.addManualTimer(label: label, durationMinutes: minutes)
+                }
             }
         }
     }
@@ -764,6 +809,269 @@ struct EditableServingsCard: View {
             RoundedRectangle(cornerRadius: 12)
                 .stroke(currentServings != originalServings ? Color.orange.opacity(0.5) : Color.clear, lineWidth: 1)
         )
+    }
+}
+
+// MARK: - Timer Card View
+
+struct TimerCardView: View {
+    @ObservedObject var timer: LocalTimer
+    let onDelete: () -> Void
+    
+    var body: some View {
+        HStack(spacing: 12) {
+            // Timer status icon
+            Image(systemName: statusIcon)
+                .font(.title2)
+                .foregroundColor(statusColor)
+                .frame(width: 24)
+            
+            // Timer info
+            VStack(alignment: .leading, spacing: 2) {
+                Text(timer.label)
+                    .font(.subheadline)
+                    .fontWeight(.medium)
+                
+                Text(timer.formattedTime)
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+            }
+            
+            Spacer()
+            
+            // Progress indicator
+            if timer.isActive || timer.status == .completed {
+                CircularProgressView(
+                    progress: timer.progress,
+                    color: statusColor
+                )
+                .frame(width: 20, height: 20)
+            }
+            
+            // Controls
+            HStack(spacing: 8) {
+                // Manual controls (for pending timers)
+                if timer.status == .pending {
+                    Button(action: {
+                        timer.start()
+                    }) {
+                        Image(systemName: "play.circle.fill")
+                            .font(.title3)
+                            .foregroundColor(.green)
+                    }
+                } else if timer.status == .running {
+                    Button(action: {
+                        timer.pause()
+                    }) {
+                        Image(systemName: "pause.circle.fill")
+                            .font(.title3)
+                            .foregroundColor(.orange)
+                    }
+                } else if timer.status == .paused {
+                    Button(action: {
+                        timer.resume()
+                    }) {
+                        Image(systemName: "play.circle.fill")
+                            .font(.title3)
+                            .foregroundColor(.green)
+                    }
+                }
+                
+                // Delete button (always available)
+                Button(action: {
+                    onDelete()
+                }) {
+                    Image(systemName: "trash.circle.fill")
+                        .font(.title3)
+                        .foregroundColor(.red)
+                }
+            }
+        }
+        .padding(12)
+        .background(Color(.systemGray6))
+        .cornerRadius(8)
+        .overlay(
+            RoundedRectangle(cornerRadius: 8)
+                .stroke(statusColor.opacity(0.3), lineWidth: 1)
+        )
+    }
+    
+    private var statusIcon: String {
+        switch timer.status {
+        case .pending:
+            return "clock"
+        case .running:
+            return "timer"
+        case .paused:
+            return "pause.circle"
+        case .completed:
+            return "checkmark.circle.fill"
+        case .stopped:
+            return "stop.circle"
+        }
+    }
+    
+    private var statusColor: Color {
+        switch timer.status {
+        case .pending:
+            return .gray
+        case .running:
+            return .green
+        case .paused:
+            return .orange
+        case .completed:
+            return .blue
+        case .stopped:
+            return .red
+        }
+    }
+}
+
+// MARK: - Circular Progress View
+
+struct CircularProgressView: View {
+    let progress: Double
+    let color: Color
+    
+    var body: some View {
+        ZStack {
+            Circle()
+                .stroke(color.opacity(0.3), lineWidth: 2)
+            
+            Circle()
+                .trim(from: 0, to: progress)
+                .stroke(color, style: StrokeStyle(lineWidth: 2, lineCap: .round))
+                .rotationEffect(.degrees(-90))
+        }
+    }
+}
+
+// MARK: - Add Timer View
+
+struct AddTimerView: View {
+    let onAdd: (String, Int) -> Void
+    
+    @Environment(\.dismiss) private var dismiss
+    @State private var timerLabel = ""
+    @State private var selectedMinutes = 5
+    @State private var selectedSeconds = 0
+    
+    private let minuteOptions = Array(0...59)
+    private let secondOptions = Array(0...59)
+    
+    var body: some View {
+        NavigationView {
+            VStack(spacing: 20) {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Timer Label")
+                        .font(.headline)
+                    
+                    TextField("e.g., Pasta, Chicken, etc.", text: $timerLabel)
+                        .textFieldStyle(RoundedBorderTextFieldStyle())
+                }
+                
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Duration")
+                        .font(.headline)
+                    
+                    HStack {
+                        // Minutes picker
+                        VStack {
+                            Text("Minutes")
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                            
+                            Picker("Minutes", selection: $selectedMinutes) {
+                                ForEach(minuteOptions, id: \.self) { minute in
+                                    Text("\(minute)").tag(minute)
+                                }
+                            }
+                            .pickerStyle(.wheel)
+                            .frame(width: 80, height: 120)
+                        }
+                        
+                        // Seconds picker
+                        VStack {
+                            Text("Seconds")
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                            
+                            Picker("Seconds", selection: $selectedSeconds) {
+                                ForEach(secondOptions, id: \.self) { second in
+                                    Text("\(second)").tag(second)
+                                }
+                            }
+                            .pickerStyle(.wheel)
+                            .frame(width: 80, height: 120)
+                        }
+                        
+                        Spacer()
+                        
+                        // Duration preview
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text("Total Duration")
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                            
+                            Text(formattedDuration)
+                                .font(.title2)
+                                .fontWeight(.semibold)
+                                .foregroundColor(.orange)
+                        }
+                    }
+                }
+                
+                Spacer()
+            }
+            .padding()
+            .navigationTitle("Add Timer")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .navigationBarLeading) {
+                    Button("Cancel") {
+                        dismiss()
+                    }
+                }
+                
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    Button("Add") {
+                        addTimer()
+                    }
+                    .disabled(!isValid)
+                    .fontWeight(.semibold)
+                }
+            }
+        }
+    }
+    
+    private var isValid: Bool {
+        !timerLabel.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty &&
+        (selectedMinutes > 0 || selectedSeconds > 0)
+    }
+    
+    private var totalMinutes: Int {
+        let totalSeconds = selectedMinutes * 60 + selectedSeconds
+        return max(1, (totalSeconds + 59) / 60) // Round up to nearest minute, minimum 1
+    }
+    
+    private var formattedDuration: String {
+        let totalSeconds = selectedMinutes * 60 + selectedSeconds
+        let minutes = totalSeconds / 60
+        let seconds = totalSeconds % 60
+        
+        if minutes > 0 && seconds > 0 {
+            return "\(minutes)m \(seconds)s"
+        } else if minutes > 0 {
+            return "\(minutes)m"
+        } else {
+            return "\(seconds)s"
+        }
+    }
+    
+    private func addTimer() {
+        let label = timerLabel.trimmingCharacters(in: .whitespacesAndNewlines)
+        onAdd(label, totalMinutes)
+        dismiss()
     }
 }
 

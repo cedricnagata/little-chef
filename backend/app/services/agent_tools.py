@@ -2,13 +2,38 @@
 Agent tools for cooking knowledge and assistance.
 """
 
+from typing import List
 from langchain_openai import ChatOpenAI
 from langchain_core.prompts import ChatPromptTemplate
+from langchain_core.tools import BaseTool, tool
+from pydantic import BaseModel, Field
 
 from app.config import settings
 from app.schemas import RecipeBase, RecipeModifications
 from app.prompts import get_cooking_prompts
 import re
+
+
+# Tool input schemas
+class AddTimerInput(BaseModel):
+    """Input schema for adding a timer"""
+    label: str = Field(description="Label for the timer (e.g., 'Boil pasta', 'Rest dough')")
+    duration_minutes: int = Field(description="Duration in minutes for the timer", ge=1)
+
+
+class StartTimerInput(BaseModel):
+    """Input schema for starting a timer"""
+    timer_id: str = Field(description="ID of the timer to start")
+
+
+class StopTimerInput(BaseModel):
+    """Input schema for stopping a timer"""
+    timer_id: str = Field(description="ID of the timer to stop")
+
+
+class CookingQuestionInput(BaseModel):
+    """Input schema for cooking guidance questions"""
+    question: str = Field(description="Cooking question or request for guidance")
 
 
 class KnowledgeTools:
@@ -166,3 +191,32 @@ class KnowledgeTools:
             
         except Exception as e:
             return f"I'd love to help with that cooking question, but I'm having trouble accessing my knowledge right now. Could you try asking again? Error: {str(e)}"
+
+
+def create_cooking_tools() -> List[BaseTool]:
+    """Create and return all cooking-related tools for the agent"""
+    
+    @tool("add_timer", args_schema=AddTimerInput)
+    def add_timer(label: str, duration_minutes: int) -> str:
+        """Add a new cooking timer with specified duration and label."""
+        import uuid
+        timer_id = str(uuid.uuid4())
+        return f"timer_added:{timer_id}:{label}:{duration_minutes * 60}"
+    
+    @tool("start_timer", args_schema=StartTimerInput)
+    def start_timer(timer_id: str) -> str:
+        """Start an existing timer."""
+        return f"timer_started:{timer_id}"
+    
+    @tool("stop_timer", args_schema=StopTimerInput)
+    def stop_timer(timer_id: str) -> str:
+        """Stop a running timer."""
+        return f"timer_stopped:{timer_id}"
+    
+    @tool("get_cooking_guidance", args_schema=CookingQuestionInput)
+    def get_cooking_guidance(question: str) -> str:
+        """Get cooking advice, techniques, or recipe guidance."""
+        # This will be handled by the tool executor calling the actual cooking knowledge
+        return f"cooking_guidance_request:{question}"
+    
+    return [add_timer, start_timer, stop_timer, get_cooking_guidance]

@@ -185,14 +185,26 @@ class RecipeModifications(BaseModel):
     notes: List[str] = Field(default_factory=list)
 
 
-class Timer(BaseModel):
-    """Schema for cooking timers"""
-    id: uuid.UUID = Field(default_factory=uuid.uuid4)
+class TimerCommand(BaseModel):
+    """Commands that AI can issue for timer management"""
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    action: Literal["add", "start", "stop", "pause", "resume", "remove"]
+    timer_id: Optional[str] = None  # For start/stop/pause commands
     label: str
-    duration_seconds: int = Field(..., ge=1)
-    remaining_seconds: int = Field(..., ge=0)
-    is_active: bool = True
+    duration_seconds: Optional[int] = Field(None, ge=1)
     created_at: datetime = Field(default_factory=datetime.now)
+
+
+class TimerStatus(BaseModel):
+    """Current status of a timer (reported by frontend)"""
+    id: str
+    label: str
+    duration_seconds: int
+    status: Literal["pending", "running", "paused", "completed", "stopped"]
+    remaining_seconds: int
+    created_at: datetime
+    started_at: Optional[datetime] = None
+    completed_at: Optional[datetime] = None
 
 
 class Message(BaseModel):
@@ -221,7 +233,8 @@ class CookingSessionBase(BaseModel):
     """Base cooking session schema"""
     recipe: RecipeBase
     modifications: RecipeModifications = Field(default_factory=RecipeModifications)
-    active_timers: List[Timer] = Field(default_factory=list)
+    timer_commands: List[TimerCommand] = Field(default_factory=list)
+    timer_status: List[TimerStatus] = Field(default_factory=list)
     conversation_history: List[Message] = Field(default_factory=list)
     user_preferences: UserPreferencesDetailed = Field(default_factory=UserPreferencesDetailed)
     started_at: datetime = Field(default_factory=datetime.now)

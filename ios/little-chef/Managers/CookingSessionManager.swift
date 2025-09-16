@@ -49,10 +49,24 @@ class CookingSessionManager: ObservableObject {
         isLoading = true
         
         do {
+            // Update session with current timer status before sending
+            let updatedSession = CookingSession(
+                recipe: session.recipe,
+                modifications: session.modifications,
+                timerCommands: session.timerCommands,
+                timerStatus: getTimerStatusForBackend(), // Current timer status
+                conversationHistory: session.conversationHistory,
+                userPreferences: session.userPreferences,
+                startedAt: session.startedAt
+            )
+            
             let response = try await apiService.sendAgentQuery(
-                cookingSession: session,
+                cookingSession: updatedSession,
                 query: query
             )
+            
+            // Process any new timer commands from AI
+            processTimerCommands(from: response.updatedSession)
             
             // Update the session with the response
             currentSession = response.updatedSession
@@ -108,7 +122,8 @@ class CookingSessionManager: ObservableObject {
         currentSession = CookingSession(
             recipe: session.recipe,
             modifications: modifications,
-            activeTimers: session.activeTimers,
+            timerCommands: session.timerCommands,
+            timerStatus: session.timerStatus,
             conversationHistory: session.conversationHistory,
             userPreferences: session.userPreferences,
             startedAt: session.startedAt
@@ -203,14 +218,179 @@ class CookingSessionManager: ObservableObject {
         return ingredient
     }
     
-    // MARK: - Timer Management (Placeholder for future implementation)
+    // MARK: - Timer Management
     
-    func addTimer(duration: TimeInterval, label: String) {
-        // TODO: Implement timer functionality
-        print("Timer added: \(label) for \(duration) seconds")
+    @Published var localTimers: [LocalTimer] = []
+    
+    func processTimerCommands(from session: CookingSession) {
+        // Process new timer commands from AI
+        let newCommands = session.timerCommands.filter { command in
+            !processedCommandIds.contains(command.id)
+        }
+        
+        for command in newCommands {
+            switch command.action {
+            case .add:
+                if let duration = command.durationSeconds, let timerId = command.timerId {
+                    addLocalTimer(id: timerId, label: command.label, duration: duration)
+                }
+            case .start:
+                if let timerId = command.timerId {
+                    startLocalTimer(id: timerId)
+                }
+            case .stop:
+                if let timerId = command.timerId {
+                    stopLocalTimer(id: timerId)
+                }
+            case .pause:
+                if let timerId = command.timerId {
+                    pauseLocalTimer(id: timerId)
+                }
+            case .resume:
+                if let timerId = command.timerId {
+                    resumeLocalTimer(id: timerId)
+                }
+            case .remove:
+                if let timerId = command.timerId {
+                    removeLocalTimer(id: timerId)
+                }
+            }
+            
+            processedCommandIds.insert(command.id)
+        }
     }
     
-    func getActiveTimers() -> [Timer] {
-        return currentSession?.activeTimers ?? []
+    private var processedCommandIds = Set<String>()
+    
+    func getTimerStatusForBackend() -> [TimerStatus] {
+        return localTimers.map { timer in
+            TimerStatus(
+                id: timer.id,
+                label: timer.label,
+                durationSeconds: timer.durationSeconds,
+                status: timer.status,
+                remainingSeconds: timer.remainingSeconds,
+                createdAt: timer.createdAt,
+                startedAt: timer.startedAt,
+                completedAt: timer.completedAt
+            )
+        }
+    }
+    
+    // MARK: - Local Timer Management
+    
+    private func addLocalTimer(id: String, label: String, duration: Int) {
+        let timer = LocalTimer(
+            id: id,
+            label: label,
+            durationSeconds: duration,
+            remainingSeconds: duration,
+            status: .pending,
+            createdAt: Date()
+        )
+        localTimers.append(timer)
+        print("🕐 Added timer: \(label) (\(duration)s)")
+    }
+    
+    private func startLocalTimer(id: String) {
+        if let index = localTimers.firstIndex(where: { $0.id == id }) {
+            localTimers[index].start()
+            print("▶️ Started timer: \(localTimers[index].label)")
+        }
+    }
+    
+    private func stopLocalTimer(id: String) {
+        if let index = localTimers.firstIndex(where: { $0.id == id }) {
+            localTimers[index].stop()
+            print("⏹️ Stopped timer: \(localTimers[index].label)")
+        }
+    }
+    
+    private func pauseLocalTimer(id: String) {
+        if let index = localTimers.firstIndex(where: { $0.id == id }) {
+            localTimers[index].pause()
+            print("⏸️ Paused timer: \(localTimers[index].label)")
+        }
+    }
+    
+    private func resumeLocalTimer(id: String) {
+        if let index = localTimers.firstIndex(where: { $0.id == id }) {
+            localTimers[index].resume()
+            print("▶️ Resumed timer: \(localTimers[index].label)")
+        }
+    }
+    
+    private func removeLocalTimer(id: String) {
+        localTimers.removeAll { $0.id == id }
+        print("🗑️ Removed timer: \(id)")
+    }
+    
+    // MARK: - Manual Timer Management (for UI)
+    
+    func addManualTimer(label: String, durationMinutes: Int) {
+        let timerId = UUID().uuidString
+        let durationSeconds = durationMinutes * 60
+        
+        addLocalTimer(id: timerId, label: label, duration: durationSeconds)
+        
+        // Also add to session state for AI awareness
+        if var session = currentSession {
+            let timerCommand = TimerCommand(
+                id: UUID().uuidString,
+                action: .add,
+                timerId: nil,
+                label: label,
+                durationSeconds: durationSeconds,
+                createdAt: Date()
+            )
+            
+            var updatedCommands = session.timerCommands
+            updatedCommands.append(timerCommand)
+            
+            currentSession = CookingSession(
+                recipe: session.recipe,
+                modifications: session.modifications,
+                timerCommands: updatedCommands,
+                timerStatus: session.timerStatus,
+                conversationHistory: session.conversationHistory,
+                userPreferences: session.userPreferences,
+                startedAt: session.startedAt
+            )
+        }
+    }
+    
+    func deleteManualTimer(id: String) {
+        // Remove from local timers
+        if let timerIndex = localTimers.firstIndex(where: { $0.id == id }) {
+            let timer = localTimers[timerIndex]
+            timer.stop() // Stop the timer if running
+            localTimers.remove(at: timerIndex)
+            print("🗑️ Manually deleted timer: \(timer.label)")
+        }
+        
+        // Add remove command to session state for AI awareness
+        if var session = currentSession {
+            let removeCommand = TimerCommand(
+                id: UUID().uuidString,
+                action: .remove,
+                timerId: id,
+                label: "Manual timer removal",
+                durationSeconds: nil,
+                createdAt: Date()
+            )
+            
+            var updatedCommands = session.timerCommands
+            updatedCommands.append(removeCommand)
+            
+            currentSession = CookingSession(
+                recipe: session.recipe,
+                modifications: session.modifications,
+                timerCommands: updatedCommands,
+                timerStatus: session.timerStatus,
+                conversationHistory: session.conversationHistory,
+                userPreferences: session.userPreferences,
+                startedAt: session.startedAt
+            )
+        }
     }
 }

@@ -3,11 +3,23 @@ LittleChef Backend API
 A FastAPI-based backend for the LittleChef cooking assistant app.
 """
 
+import logging
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.trustedhost import TrustedHostMiddleware
 
 from app.config import settings
+
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    datefmt='%Y-%m-%d %H:%M:%S'
+)
+
+# Set specific loggers
+logging.getLogger("app.services.cooking_agent").setLevel(logging.INFO)
+logging.getLogger("uvicorn.access").setLevel(logging.WARNING)  # Reduce uvicorn noise
 
 # Create FastAPI app instance
 app = FastAPI(
