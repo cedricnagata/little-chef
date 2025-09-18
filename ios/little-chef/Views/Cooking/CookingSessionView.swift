@@ -230,19 +230,13 @@ struct RecipeDetailsView: View {
                             
                             Spacer()
                             
-                            Text("\(cookingSessionManager.getScaledIngredients().count)")
+                            Text("\(session.recipe.ingredients.count)")
                                 .font(.caption)
                                 .foregroundColor(.secondary)
-                            
-                            if cookingSessionManager.getServingMultiplier() != 1.0 {
-                                Text("(scaled \(String(format: "%.1f", cookingSessionManager.getServingMultiplier()))x)")
-                                    .font(.caption2)
-                                    .foregroundColor(.orange)
-                            }
                         }
                         
                         LazyVStack(alignment: .leading, spacing: 6) {
-                            ForEach(Array(cookingSessionManager.getScaledIngredients().enumerated()), id: \.offset) { index, ingredient in
+                            ForEach(Array(session.recipe.ingredients.enumerated()), id: \.offset) { index, ingredient in
                                 HStack(alignment: .top, spacing: 8) {
                                     Circle()
                                         .fill(Color.orange.opacity(0.3))

@@ -195,13 +195,9 @@ class RecipeParseResponse(BaseModel):
     warnings: List[str] = Field(default_factory=list)
 
 
-# ===== Recipe Modifications Schemas =====
-
-class RecipeModifications(BaseModel):
-    """Schema for recipe modifications"""
-    serving_multiplier: float = Field(default=1.0, gt=0.0, le=10.0)
-    ingredient_substitutions: Dict[str, str] = Field(default_factory=dict)
-    notes: List[str] = Field(default_factory=list)
+# ===== Recipe Modifications Schemas ===== 
+# NOTE: Recipe modifications have been removed. Frontend now creates
+# modified RecipeBase objects directly with scaled ingredients and servings.
 
 
 class Command(BaseModel):
@@ -248,7 +244,6 @@ class UserPreferencesDetailed(UserPreferences):
 class CookingSessionBase(BaseModel):
     """Base cooking session schema"""
     recipe: RecipeBase
-    modifications: RecipeModifications = Field(default_factory=RecipeModifications)
     commands: List[Command] = Field(default_factory=list)
     timer_status: List[TimerStatus] = Field(default_factory=list)
     conversation_history: List[Message] = Field(default_factory=list)

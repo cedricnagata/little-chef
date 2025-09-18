@@ -207,7 +207,6 @@ class CookingAgent:
             guidance = await knowledge_tools.get_cooking_knowledge(
                 query=question,
                 recipe_context=state["cooking_session"].recipe,
-                modifications=state["cooking_session"].modifications,
                 conversation_history=state["cooking_session"].conversation_history,
                 model="gpt-4o-mini"
             )

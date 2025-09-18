@@ -66,7 +66,6 @@ class CookingSessionManager: ObservableObject {
             // Update the current session with new preferences
             let updatedSession = CookingSession(
                 recipe: session.recipe,
-                modifications: session.modifications,
                 commands: session.commands,
                 timerStatus: session.timerStatus,
                 conversationHistory: session.conversationHistory,
@@ -133,7 +132,6 @@ class CookingSessionManager: ObservableObject {
             // Update session with current timer status before sending
             let updatedSession = CookingSession(
                 recipe: session.recipe,
-                modifications: session.modifications,
                 commands: session.commands,
                 timerStatus: getTimerStatusForBackend(), // Current timer status
                 conversationHistory: session.conversationHistory,
@@ -183,26 +181,20 @@ class CookingSessionManager: ObservableObject {
         return currentSession?.conversationHistory ?? []
     }
     
-    // MARK: - Recipe Modifications
+    // MARK: - Recipe Servings Management
     
     func updateServings(newServings: Int) {
-        guard var session = currentSession else { return }
+        guard let session = currentSession else { return }
         
         let originalServings = session.recipe.servings
         let multiplier = Float(newServings) / Float(originalServings)
         
-        // Update the modifications in the session
-        var modifications = session.modifications
-        modifications = RecipeModifications(
-            servingMultiplier: multiplier,
-            ingredientSubstitutions: modifications.ingredientSubstitutions,
-            notes: modifications.notes
-        )
+        // Create a new RecipeBase with scaled ingredients and updated servings
+        let scaledRecipe = createScaledRecipe(from: session.recipe, servings: newServings)
         
-        // Create new session with updated modifications
+        // Create new session with the scaled recipe
         currentSession = CookingSession(
-            recipe: session.recipe,
-            modifications: modifications,
+            recipe: scaledRecipe,
             commands: session.commands,
             timerStatus: session.timerStatus,
             conversationHistory: session.conversationHistory,
@@ -214,25 +206,36 @@ class CookingSessionManager: ObservableObject {
     }
     
     func getCurrentServings() -> Int {
-        guard let session = currentSession else { return 0 }
-        return Int(Float(session.recipe.servings) * session.modifications.servingMultiplier)
+        return currentSession?.recipe.servings ?? 0
     }
     
-    func getServingMultiplier() -> Float {
-        return currentSession?.modifications.servingMultiplier ?? 1.0
-    }
-    
-    func getScaledIngredients() -> [String] {
-        guard let session = currentSession else { return [] }
+    private func createScaledRecipe(from recipe: RecipeBase, servings: Int) -> RecipeBase {
+        let originalServings = recipe.servings
+        let multiplier = Float(servings) / Float(originalServings)
         
-        let multiplier = session.modifications.servingMultiplier
         if multiplier == 1.0 {
-            return session.recipe.ingredients
+            return recipe
         }
         
-        return session.recipe.ingredients.map { ingredient in
+        // Scale ingredients
+        let scaledIngredients = recipe.ingredients.map { ingredient in
             scaleIngredient(ingredient, multiplier: multiplier)
         }
+        
+        // Create new RecipeBase with scaled data
+        return RecipeBase(
+            title: recipe.title,
+            description: recipe.description,
+            servings: servings,
+            prepTime: recipe.prepTime,
+            cookTime: recipe.cookTime,
+            ingredients: scaledIngredients,
+            instructions: recipe.instructions,
+            tags: recipe.tags,
+            sourceUrl: recipe.sourceUrl,
+            cuisineType: recipe.cuisineType,
+            difficulty: recipe.difficulty
+        )
     }
     
     private func scaleIngredient(_ ingredient: String, multiplier: Float) -> String {
@@ -438,7 +441,6 @@ class CookingSessionManager: ObservableObject {
             
             currentSession = CookingSession(
                 recipe: session.recipe,
-                modifications: session.modifications,
                 commands: updatedCommands,
                 timerStatus: session.timerStatus,
                 conversationHistory: session.conversationHistory,
@@ -474,7 +476,6 @@ class CookingSessionManager: ObservableObject {
             
             currentSession = CookingSession(
                 recipe: session.recipe,
-                modifications: session.modifications,
                 commands: updatedCommands,
                 timerStatus: session.timerStatus,
                 conversationHistory: session.conversationHistory,

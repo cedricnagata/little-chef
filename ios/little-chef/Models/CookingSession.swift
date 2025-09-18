@@ -14,7 +14,6 @@ struct CookingSession: Codable, Identifiable {
     var id: UUID { UUID() }
     
     let recipe: RecipeBase
-    let modifications: RecipeModifications
     let commands: [Command]
     let timerStatus: [TimerStatus]
     let conversationHistory: [Message]
@@ -22,7 +21,7 @@ struct CookingSession: Codable, Identifiable {
     let startedAt: Date
     
     enum CodingKeys: String, CodingKey {
-        case recipe, modifications
+        case recipe
         case commands = "commands"
         case timerStatus = "timer_status"
         case conversationHistory = "conversation_history"
@@ -32,7 +31,6 @@ struct CookingSession: Codable, Identifiable {
     
     init(recipe: RecipeBase, userPreferences: UserPreferencesDetailed) {
         self.recipe = recipe
-        self.modifications = RecipeModifications()
         self.commands = []
         self.timerStatus = []
         self.conversationHistory = []
@@ -40,9 +38,8 @@ struct CookingSession: Codable, Identifiable {
         self.startedAt = Date()
     }
     
-    init(recipe: RecipeBase, modifications: RecipeModifications, commands: [Command], timerStatus: [TimerStatus], conversationHistory: [Message], userPreferences: UserPreferencesDetailed, startedAt: Date) {
+    init(recipe: RecipeBase, commands: [Command], timerStatus: [TimerStatus], conversationHistory: [Message], userPreferences: UserPreferencesDetailed, startedAt: Date) {
         self.recipe = recipe
-        self.modifications = modifications
         self.commands = commands
         self.timerStatus = timerStatus
         self.conversationHistory = conversationHistory
@@ -72,6 +69,21 @@ struct RecipeBase: Codable {
         case cuisineType = "cuisine_type"
     }
     
+    // Memberwise initializer
+    init(title: String, description: String?, servings: Int, prepTime: Int?, cookTime: Int?, ingredients: [String], instructions: [String], tags: [String], sourceUrl: String?, cuisineType: String?, difficulty: String?) {
+        self.title = title
+        self.description = description
+        self.servings = servings
+        self.prepTime = prepTime
+        self.cookTime = cookTime
+        self.ingredients = ingredients
+        self.instructions = instructions
+        self.tags = tags
+        self.sourceUrl = sourceUrl
+        self.cuisineType = cuisineType
+        self.difficulty = difficulty
+    }
+    
     // Convert from existing Recipe model
     init(from recipe: Recipe) {
         self.title = recipe.title
@@ -88,29 +100,8 @@ struct RecipeBase: Codable {
     }
 }
 
-struct RecipeModifications: Codable {
-    let servingMultiplier: Float
-    let ingredientSubstitutions: [String: String]
-    let notes: [String]
-    
-    enum CodingKeys: String, CodingKey {
-        case servingMultiplier = "serving_multiplier"
-        case ingredientSubstitutions = "ingredient_substitutions"
-        case notes
-    }
-    
-    init() {
-        self.servingMultiplier = 1.0
-        self.ingredientSubstitutions = [:]
-        self.notes = []
-    }
-    
-    init(servingMultiplier: Float, ingredientSubstitutions: [String: String] = [:], notes: [String] = []) {
-        self.servingMultiplier = servingMultiplier
-        self.ingredientSubstitutions = ingredientSubstitutions
-        self.notes = notes
-    }
-}
+// NOTE: RecipeModifications removed. Frontend now modifies RecipeBase directly
+// with scaled ingredients and servings instead of using separate modification objects.
 
 // Helper for flexible JSON encoding/decoding
 struct FlexibleValue: Codable {
