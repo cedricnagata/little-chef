@@ -56,12 +56,31 @@ class UserUpdate(BaseModel):
         exclude_none = True
 
 
+# ===== Voice Settings Schemas =====
+
+class ElevenLabsSettings(BaseModel):
+    """Schema for ElevenLabs voice synthesis settings"""
+    enabled: bool = Field(default=False, description="Whether to use ElevenLabs for TTS")
+    voice_name: str = Field(default="Rachel - calm", description="ElevenLabs voice name (e.g., 'Rachel - calm', 'Josh - intelligent')")
+
+
+class VoiceSettings(BaseModel):
+    """Schema for voice settings"""
+    # Native iOS/System TTS settings
+    speech_rate: float = Field(default=0.5, ge=0.1, le=2.0)
+    voice_identifier: str = Field(default="com.apple.ttsbundle.Samantha-compact")
+    auto_speak_responses: bool = True
+    
+    # ElevenLabs settings
+    elevenlabs: ElevenLabsSettings = Field(default_factory=ElevenLabsSettings)
+
+
 class UserPreferences(BaseModel):
     """Schema for user preferences"""
     llm_model: str = Field("gpt-4.1", pattern="^(gpt-5|gpt-5-mini|gpt-5-nano|gpt-4.1|gpt-4.1-mini|gpt-4.1-nano)$")
     measurement_system: str = Field("imperial", pattern="^(metric|imperial)$")
     dietary_restrictions: list[str] = Field(default_factory=list)
-    voice_settings: Dict[str, Any] = Field(default_factory=dict)
+    voice_settings: VoiceSettings = Field(default_factory=VoiceSettings)
 
 
 class Token(BaseModel):
@@ -217,13 +236,6 @@ class Message(BaseModel):
     role: Literal["user", "assistant"]
     content: str
     timestamp: datetime = Field(default_factory=datetime.now)
-
-
-class VoiceSettings(BaseModel):
-    """Schema for voice settings"""
-    speech_rate: float = Field(default=0.5, ge=0.1, le=2.0)
-    voice_identifier: str = Field(default="com.apple.ttsbundle.Samantha-compact")
-    auto_speak_responses: bool = True
 
 
 class UserPreferencesDetailed(UserPreferences):

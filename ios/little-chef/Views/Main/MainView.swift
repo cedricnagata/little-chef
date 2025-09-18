@@ -56,6 +56,7 @@ struct MainView: View {
                     Text("Profile")
                 }
                 .tag(2)
+                .environmentObject(cookingSessionManager)
         }
         .accentColor(.orange)
         .environment(\.selectedTab, $selectedTab)
@@ -71,6 +72,7 @@ struct MainView: View {
 
 struct ProfileView: View {
     @EnvironmentObject var authManager: AuthManager
+    @EnvironmentObject var cookingSessionManager: CookingSessionManager
     @State private var showingDeleteAlert = false
     @State private var isDeleting = false
     
@@ -98,11 +100,11 @@ struct ProfileView: View {
                 
                 // Settings Options
                 VStack(spacing: 16) {
-                    NavigationLink(destination: ProfileSettingsView()) {
+                    NavigationLink(destination: ProfileSettingsView().environmentObject(cookingSessionManager)) {
                         SettingsOptionRow(
                             icon: "person.circle.fill",
                             title: "Profile Settings",
-                            subtitle: "LLM model, preferences, dietary restrictions"
+                            subtitle: "LLM model, voice settings, ElevenLabs, dietary restrictions"
                         )
                     }
                     .buttonStyle(PlainButtonStyle())

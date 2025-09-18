@@ -22,12 +22,75 @@ class CookingSessionManager: ObservableObject {
     func startCookingSession(with recipe: Recipe) {
         let recipeBase = RecipeBase(from: recipe)
         
-        // Always create fresh user preferences with gpt-5-mini (not reusing old session data)
-        let userPreferences = UserPreferencesDetailed()
+        // Load user preferences from API to get latest settings
+        Task {
+            await loadUserPreferencesAndStartSession(with: recipeBase)
+        }
+    }
+    
+    private func loadUserPreferencesAndStartSession(with recipeBase: RecipeBase) async {
+        var userPreferences: UserPreferencesDetailed
         
-        currentSession = CookingSession(recipe: recipeBase, userPreferences: userPreferences)
-        error = nil
-        print("🔵 Started new cooking session with model: \(userPreferences.llmModel)")
+        do {
+            // Try to get latest preferences from backend
+            let apiPreferences = try await APIService.shared.getPreferences()
+            userPreferences = UserPreferencesDetailed(from: apiPreferences)
+            print("🔵 Loaded user preferences from backend for cooking session")
+        } catch {
+            // Fallback to default preferences if API call fails
+            userPreferences = UserPreferencesDetailed()
+            print("⚠️ Failed to load user preferences, using defaults: \(error)")
+        }
+        
+        await MainActor.run {
+            currentSession = CookingSession(recipe: recipeBase, userPreferences: userPreferences)
+            error = nil
+            print("🔵 Started new cooking session with model: \(userPreferences.llmModel)")
+        }
+    }
+    
+    // MARK: - Preferences Management
+    
+    func updateSessionPreferences() async {
+        await refreshSessionPreferences()
+    }
+    
+    func refreshSessionPreferences() async {
+        guard let session = currentSession else { return }
+        
+        do {
+            // Get updated preferences from backend
+            let apiPreferences = try await APIService.shared.getPreferences()
+            let userPreferences = UserPreferencesDetailed(from: apiPreferences)
+            
+            // Update the current session with new preferences
+            let updatedSession = CookingSession(
+                recipe: session.recipe,
+                modifications: session.modifications,
+                commands: session.commands,
+                timerStatus: session.timerStatus,
+                conversationHistory: session.conversationHistory,
+                userPreferences: userPreferences,
+                startedAt: session.startedAt
+            )
+            
+            await MainActor.run {
+                let oldVoiceSettings = currentSession?.userPreferences.voiceSettings
+                currentSession = updatedSession
+                
+                // Check if voice settings changed
+                let newVoiceSettings = updatedSession.userPreferences.voiceSettings
+                if let old = oldVoiceSettings,
+                   (old.elevenlabs.enabled != newVoiceSettings.elevenlabs.enabled ||
+                    old.elevenlabs.voiceName != newVoiceSettings.elevenlabs.voiceName) {
+                    print("🔄 Voice settings updated in cooking session")
+                }
+                
+                print("🔄 Updated cooking session preferences from backend")
+            }
+        } catch {
+            print("⚠️ Failed to update session preferences: \(error)")
+        }
     }
     
     func endCookingSession() {

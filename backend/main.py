@@ -27,6 +27,10 @@ logging.getLogger("sqlalchemy.orm").setLevel(logging.WARNING)
 logging.getLogger("app.services.cooking_agent").setLevel(logging.INFO)
 logging.getLogger("app.services.agent_tools").setLevel(logging.INFO)
 
+# Enable TTS and ElevenLabs logging
+logging.getLogger("app.services.elevenlabs_service").setLevel(logging.INFO)
+logging.getLogger("app.routers.tts").setLevel(logging.INFO)
+
 # Keep uvicorn access logs quiet
 logging.getLogger("uvicorn.access").setLevel(logging.WARNING)
 
@@ -55,12 +59,13 @@ app.add_middleware(
 )
 
 # Include routers
-from app.routers import auth, users, recipes, agent
+from app.routers import auth, users, recipes, agent, tts
 
 app.include_router(auth.router)
 app.include_router(users.router)
 app.include_router(recipes.router)
 app.include_router(agent.router)
+app.include_router(tts.router)
 
 # Basic health check endpoint
 @app.get("/")

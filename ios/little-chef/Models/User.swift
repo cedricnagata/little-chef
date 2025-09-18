@@ -67,11 +67,64 @@ struct UserUpdate: Codable {
     }
 }
 
+// MARK: - Voice Settings Models
+struct ElevenLabsVoice: Codable, Identifiable {
+    let voiceName: String
+    let voiceId: String
+    
+    var id: String { voiceId }
+    
+    enum CodingKeys: String, CodingKey {
+        case voiceName = "voice_name"
+        case voiceId = "voice_id"
+    }
+}
+
+struct ElevenLabsVoicesResponse: Codable {
+    let voices: [ElevenLabsVoice]
+}
+
+struct ElevenLabsSettings: Codable, Equatable {
+    let enabled: Bool
+    let voiceName: String
+    
+    enum CodingKeys: String, CodingKey {
+        case enabled
+        case voiceName = "voice_name"
+    }
+    
+    static let defaultSettings = ElevenLabsSettings(
+        enabled: false,
+        voiceName: "Rachel - calm"
+    )
+}
+
+struct VoiceSettings: Codable, Equatable {
+    let speechRate: Float
+    let voiceIdentifier: String
+    let autoSpeakResponses: Bool
+    let elevenlabs: ElevenLabsSettings
+    
+    enum CodingKeys: String, CodingKey {
+        case speechRate = "speech_rate"
+        case voiceIdentifier = "voice_identifier"
+        case autoSpeakResponses = "auto_speak_responses"
+        case elevenlabs
+    }
+    
+    static let defaultSettings = VoiceSettings(
+        speechRate: 0.5,
+        voiceIdentifier: "com.apple.ttsbundle.Samantha-compact",
+        autoSpeakResponses: true,
+        elevenlabs: ElevenLabsSettings.defaultSettings
+    )
+}
+
 struct UserPreferences: Codable {
     let llmModel: String
     let measurementSystem: String
     let dietaryRestrictions: [String]
-    let voiceSettings: [String: AnyCodable]
+    let voiceSettings: VoiceSettings
     
     enum CodingKeys: String, CodingKey {
         case llmModel = "llm_model"
@@ -84,7 +137,7 @@ struct UserPreferences: Codable {
         llmModel: "gpt-4.1",
         measurementSystem: "imperial",
         dietaryRestrictions: [],
-        voiceSettings: [:]
+        voiceSettings: VoiceSettings.defaultSettings
     )
 }
 

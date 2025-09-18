@@ -534,4 +534,99 @@ class APIService {
         _ = KeychainService.shared.saveAccessToken(authResponse.accessToken)
         _ = KeychainService.shared.saveRefreshToken(authResponse.refreshToken)
     }
+    
+    // MARK: - TTS Methods
+    
+    func getElevenLabsVoices() async throws -> ElevenLabsVoicesResponse {
+        guard let url = URL(string: "\(baseURL)/tts/voices") else {
+            throw AuthError.networkError("Invalid URL for TTS voices endpoint")
+        }
+        
+        var urlRequest = URLRequest(url: url)
+        urlRequest.httpMethod = "GET"
+        urlRequest.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        
+        if let token = KeychainService.shared.getAccessToken() {
+            urlRequest.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        }
+        
+        print("🔵 Fetching ElevenLabs voices from: \(url)")
+        
+        return try await performRequest(request: urlRequest, responseType: ElevenLabsVoicesResponse.self)
+    }
+    
+    func synthesizeWithElevenLabs(text: String, voiceSettings: ElevenLabsSettings) async throws -> Data {
+        guard let url = URL(string: "\(baseURL)/tts/synthesize") else {
+            throw AuthError.networkError("Invalid URL for TTS synthesize endpoint")
+        }
+        
+        let requestBody: [String: Any] = [
+            "text": text,
+            "voice_settings": [
+                "enabled": voiceSettings.enabled,
+                "voice_name": voiceSettings.voiceName
+            ]
+        ]
+        
+        var urlRequest = URLRequest(url: url)
+        urlRequest.httpMethod = "POST"
+        urlRequest.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        
+        if let token = KeychainService.shared.getAccessToken() {
+            urlRequest.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        }
+        
+        urlRequest.httpBody = try JSONSerialization.data(withJSONObject: requestBody)
+        
+        print("🔵 Synthesizing with ElevenLabs: \(text.prefix(50))...")
+        
+        let (data, response) = try await session.data(for: urlRequest)
+        
+        guard let httpResponse = response as? HTTPURLResponse else {
+            throw AuthError.networkError("Invalid response")
+        }
+        
+        guard httpResponse.statusCode == 200 else {
+            throw AuthError.serverError(httpResponse.statusCode)
+        }
+        
+        print("🟢 Received ElevenLabs TTS audio: \(data.count) bytes")
+        return data
+    }
+    
+    func testElevenLabsVoice(voiceName: String, testText: String = "Hello! This is a test of this voice.") async throws -> Data {
+        guard let url = URL(string: "\(baseURL)/tts/test-voice") else {
+            throw AuthError.networkError("Invalid URL for TTS test-voice endpoint")
+        }
+        
+        let requestBody = [
+            "voice_name": voiceName,
+            "text": testText
+        ]
+        
+        var urlRequest = URLRequest(url: url)
+        urlRequest.httpMethod = "POST"
+        urlRequest.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        
+        if let token = KeychainService.shared.getAccessToken() {
+            urlRequest.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        }
+        
+        urlRequest.httpBody = try JSONSerialization.data(withJSONObject: requestBody)
+        
+        print("🔵 Testing ElevenLabs voice: \(voiceName)")
+        
+        let (data, response) = try await session.data(for: urlRequest)
+        
+        guard let httpResponse = response as? HTTPURLResponse else {
+            throw AuthError.networkError("Invalid response")
+        }
+        
+        guard httpResponse.statusCode == 200 else {
+            throw AuthError.serverError(httpResponse.statusCode)
+        }
+        
+        print("🟢 Received voice test audio: \(data.count) bytes")
+        return data
+    }
 }

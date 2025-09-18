@@ -26,6 +26,9 @@ python-multipart
 aiofiles
 requests
 
+# Text-to-Speech
+elevenlabs
+
 # Development and Testing
 pytest
 pytest-asyncio

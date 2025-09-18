@@ -25,6 +25,10 @@ class Settings(BaseSettings):
     # OpenAI Configuration
     openai_api_key: str = ""  # Will be required when using LLM features
     
+    # ElevenLabs Configuration
+    elevenlabs_api_key: str = ""  # For text-to-speech synthesis
+    elevenlabs_api_url: str = "https://api.elevenlabs.io/v1"  # ElevenLabs API base URL
+    
     # Firecrawl Configuration
     firecrawl_api_key: str = ""  # For web scraping
     firecrawl_api_url: str = "https://api.firecrawl.dev/v2/scrape"  # Firecrawl API endpoint

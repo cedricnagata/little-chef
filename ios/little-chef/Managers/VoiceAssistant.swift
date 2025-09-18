@@ -21,6 +21,9 @@ class VoiceAssistant: NSObject, ObservableObject {
     @Published var isHandsFreeMode = false
     @Published var isWakeWordListening = false
     
+    // Voice preferences
+    private var voiceSettings: VoiceSettings?
+    
     private let speechRecognizer = SFSpeechRecognizer(locale: Locale(identifier: "en-US"))
     private let audioEngine = AVAudioEngine()
     private let synthesizer = AVSpeechSynthesizer()
@@ -173,22 +176,99 @@ class VoiceAssistant: NSObject, ObservableObject {
     
     // MARK: - Text-to-Speech
     
+    func updateVoiceSettings(_ settings: VoiceSettings) {
+        self.voiceSettings = settings
+    }
+    
     func speak(_ text: String) {
         guard !text.isEmpty else { return }
         
         // Stop any current speech
         synthesizer.stopSpeaking(at: .immediate)
         
+        // Check if ElevenLabs is enabled and should be used
+        if let voiceSettings = voiceSettings,
+           voiceSettings.elevenlabs.enabled,
+           voiceSettings.autoSpeakResponses {
+            
+            // Use ElevenLabs TTS
+            speakWithElevenLabs(text)
+        } else {
+            // Use native iOS TTS
+            speakWithNativeTTS(text)
+        }
+    }
+    
+    private func speakWithNativeTTS(_ text: String) {
         let utterance = AVSpeechUtterance(string: text)
-        utterance.rate = 0.5
-        utterance.voice = AVSpeechSynthesisVoice(language: "en-US")
+        
+        // Apply user preferences if available
+        if let voiceSettings = voiceSettings {
+            utterance.rate = voiceSettings.speechRate
+            utterance.voice = AVSpeechSynthesisVoice(identifier: voiceSettings.voiceIdentifier)
+        } else {
+            utterance.rate = 0.5
+            utterance.voice = AVSpeechSynthesisVoice(language: "en-US")
+        }
         
         isSpeaking = true
         synthesizer.speak(utterance)
     }
     
+    private func speakWithElevenLabs(_ text: String) {
+        guard let voiceSettings = voiceSettings else {
+            // Fallback to native TTS if no settings
+            speakWithNativeTTS(text)
+            return
+        }
+        
+        Task {
+            do {
+                let audioData = try await APIService.shared.synthesizeWithElevenLabs(
+                    text: text,
+                    voiceSettings: voiceSettings.elevenlabs
+                )
+                
+                await MainActor.run {
+                    playElevenLabsAudio(data: audioData)
+                }
+            } catch {
+                print("ElevenLabs TTS failed, falling back to native: \(error)")
+                // Fallback to native TTS on error
+                await MainActor.run {
+                    speakWithNativeTTS(text)
+                }
+            }
+        }
+    }
+    
+    private func playElevenLabsAudio(data: Data) {
+        do {
+            let audioPlayer = try AVAudioPlayer(data: data)
+            audioPlayer.delegate = self
+            audioPlayer.prepareToPlay()
+            
+            isSpeaking = true
+            audioPlayer.play()
+            
+            // Store the player to keep it alive during playback
+            // We'll use a simple property for this
+            objc_setAssociatedObject(self, "currentAudioPlayer", audioPlayer, .OBJC_ASSOCIATION_RETAIN_NONATOMIC)
+        } catch {
+            print("Failed to play ElevenLabs audio: \(error)")
+            // Fallback to native TTS
+            speakWithNativeTTS("Error playing audio")
+        }
+    }
+    
     func stopSpeaking() {
         synthesizer.stopSpeaking(at: .immediate)
+        
+        // Stop ElevenLabs audio if playing
+        if let audioPlayer = objc_getAssociatedObject(self, "currentAudioPlayer") as? AVAudioPlayer {
+            audioPlayer.stop()
+        }
+        
         isSpeaking = false
     }
     
@@ -494,6 +574,26 @@ extension VoiceAssistant: AVSpeechSynthesizerDelegate {
     func speechSynthesizer(_ synthesizer: AVSpeechSynthesizer, didCancel utterance: AVSpeechUtterance) {
         DispatchQueue.main.async {
             self.isSpeaking = false
+        }
+    }
+}
+
+// MARK: - AVAudioPlayerDelegate
+
+extension VoiceAssistant: AVAudioPlayerDelegate {
+    func audioPlayerDidFinishPlaying(_ player: AVAudioPlayer, successfully flag: Bool) {
+        DispatchQueue.main.async {
+            self.isSpeaking = false
+            // Clear the stored audio player
+            objc_setAssociatedObject(self, "currentAudioPlayer", nil, .OBJC_ASSOCIATION_RETAIN_NONATOMIC)
+        }
+    }
+    
+    func audioPlayerDecodeErrorDidOccur(_ player: AVAudioPlayer, error: Error?) {
+        DispatchQueue.main.async {
+            self.isSpeaking = false
+            objc_setAssociatedObject(self, "currentAudioPlayer", nil, .OBJC_ASSOCIATION_RETAIN_NONATOMIC)
+            print("ElevenLabs audio decode error: \(error?.localizedDescription ?? "Unknown error")")
         }
     }
 }

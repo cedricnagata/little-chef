@@ -153,6 +153,22 @@ struct ActiveCookingView: View {
         } message: {
             Text("Are you sure you want to end this cooking session?")
         }
+        .onAppear {
+            // Update voice assistant settings when view appears
+            updateVoiceAssistantSettings()
+        }
+        .onChange(of: cookingSessionManager.currentSession?.userPreferences.voiceSettings) { _ in
+            // Update voice assistant settings when voice preferences change
+            updateVoiceAssistantSettings()
+        }
+    }
+    
+    private func updateVoiceAssistantSettings() {
+        // Update voice settings from the current session
+        if let session = cookingSessionManager.currentSession {
+            voiceAssistant.updateVoiceSettings(session.userPreferences.voiceSettings)
+            print("🔄 Updated VoiceAssistant with current session preferences")
+        }
     }
 }
 
@@ -689,6 +705,12 @@ struct InputAreaView: View {
     }
     
     private func startHandsFreeMode() {
+        // Update voice settings from the current session
+        if let session = cookingSessionManager.currentSession {
+            voiceAssistant.updateVoiceSettings(session.userPreferences.voiceSettings)
+            print("🔄 Updated VoiceAssistant with current session preferences")
+        }
+        
         // Set up callbacks
         voiceAssistant.onWakeWordDetected = {
             print("🎤 Wake word detected - transitioning to listening")

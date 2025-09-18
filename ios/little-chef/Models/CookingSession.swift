@@ -223,27 +223,18 @@ struct UserPreferencesDetailed: Codable {
         self.llmModel = "gpt-5-mini"
         self.measurementSystem = "imperial"
         self.dietaryRestrictions = []
-        self.voiceSettings = VoiceSettings()
+        self.voiceSettings = VoiceSettings.defaultSettings
+    }
+    
+    init(from userPreferences: UserPreferences) {
+        self.llmModel = userPreferences.llmModel
+        self.measurementSystem = userPreferences.measurementSystem
+        self.dietaryRestrictions = userPreferences.dietaryRestrictions
+        self.voiceSettings = userPreferences.voiceSettings
     }
 }
 
-struct VoiceSettings: Codable {
-    let speechRate: Float
-    let voiceIdentifier: String
-    let autoSpeakResponses: Bool
-    
-    enum CodingKeys: String, CodingKey {
-        case speechRate = "speech_rate"
-        case voiceIdentifier = "voice_identifier"
-        case autoSpeakResponses = "auto_speak_responses"
-    }
-    
-    init() {
-        self.speechRate = 0.5
-        self.voiceIdentifier = "com.apple.ttsbundle.Samantha-compact"
-        self.autoSpeakResponses = true
-    }
-}
+// Note: VoiceSettings is now defined in User.swift to avoid duplication
 
 // MARK: - Agent Communication Models
 
