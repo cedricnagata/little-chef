@@ -17,8 +17,17 @@ logging.basicConfig(
     datefmt='%Y-%m-%d %H:%M:%S'
 )
 
-# Set specific loggers - only show tool calls
+# Disable SQLAlchemy logging completely
+logging.getLogger("sqlalchemy.engine").setLevel(logging.WARNING)
+logging.getLogger("sqlalchemy.dialects").setLevel(logging.WARNING)
+logging.getLogger("sqlalchemy.pool").setLevel(logging.WARNING)
+logging.getLogger("sqlalchemy.orm").setLevel(logging.WARNING)
+
+# Enable agent workflow logging
 logging.getLogger("app.services.cooking_agent").setLevel(logging.INFO)
+logging.getLogger("app.services.agent_tools").setLevel(logging.INFO)
+
+# Keep uvicorn access logs quiet
 logging.getLogger("uvicorn.access").setLevel(logging.WARNING)
 
 # Create FastAPI app instance

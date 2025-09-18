@@ -84,17 +84,25 @@ class CookingAgent:
         """Determine if agent should continue with tool calls"""
         last_message = state["messages"][-1]
         if isinstance(last_message, AIMessage) and last_message.tool_calls:
+            logger.info("ROUTING: Agent has tool calls to execute -> continuing to TOOLS")
             return "continue"
-        return "end"
+        else:
+            logger.info("ROUTING: No tool calls found -> ending workflow and generating response")
+            return "end"
     
     async def _agent_node(self, state: AgentState) -> AgentState:
         """Main agent node that decides what tools to use"""
+        logger.info("AGENT_NODE: Starting agent processing")
+        
         try:
             # Build context for the agent
             cooking_session = state["cooking_session"]
+            logger.info(f"AGENT_NODE: Processing query: '{state['current_query']}'")
+            logger.info(f"AGENT_NODE: Recipe context: {cooking_session.recipe.title}")
             
             # Create system message with cooking context
             system_context = self._build_system_context(cooking_session)
+            logger.info(f"AGENT_NODE: Built system context with {len(system_context)} characters")
             
             # Get current messages or initialize
             messages = state.get("messages", [])
@@ -103,37 +111,52 @@ class CookingAgent:
                     HumanMessage(content=f"System context: {system_context}"),
                     HumanMessage(content=state["current_query"])
                 ]
+                logger.info("AGENT_NODE: Initialized conversation with system context")
+            else:
+                logger.info(f"AGENT_NODE: Continuing conversation with {len(messages)} existing messages")
             
             # Call LLM with tools
+            logger.info("AGENT_NODE: Calling LLM with tools...")
             response = await self.llm.ainvoke(messages)
             messages.append(response)
             
             # Log tool calls if any
             if hasattr(response, 'tool_calls') and response.tool_calls:
                 tool_names = [tc.get('name', 'unknown') for tc in response.tool_calls]
-                logger.info(f"Tools called: {', '.join(tool_names)}")
+                logger.info(f"AGENT_NODE: LLM decided to call {len(response.tool_calls)} tools: {', '.join(tool_names)}")
+                for i, tc in enumerate(response.tool_calls):
+                    logger.info(f"AGENT_NODE: Tool {i+1}: {tc.get('name', 'unknown')} with args: {tc.get('args', {})}")
+            else:
+                logger.info("AGENT_NODE: LLM provided direct response without tool calls")
             
             state["messages"] = messages
+            logger.info("AGENT_NODE: Agent processing completed successfully")
             
         except Exception as e:
+            logger.error(f"AGENT_NODE: Error during agent processing: {str(e)}")
             state["error"] = f"Agent error: {str(e)}"
         
         return state
     
     async def _tool_node(self, state: AgentState) -> AgentState:
         """Execute tools and update state"""
+        logger.info("TOOL_NODE: Starting tool execution")
+        
         try:
             last_message = state["messages"][-1]
             if isinstance(last_message, AIMessage) and last_message.tool_calls:
+                logger.info(f"TOOL_NODE: Executing {len(last_message.tool_calls)} tool calls")
                 tool_messages = []
                 
-                for tool_call in last_message.tool_calls:
+                for i, tool_call in enumerate(last_message.tool_calls):
                     tool_name = tool_call["name"]
                     tool_id = tool_call["id"]
+                    logger.info(f"TOOL_NODE: Executing tool {i+1}/{len(last_message.tool_calls)}: {tool_name}")
+                    logger.info(f"TOOL_NODE: Tool args: {tool_call.get('args', {})}")
                     
                     # Execute tool and get result
                     if tool_name == "get_cooking_guidance":
-                        # Handle cooking guidance specially
+                        logger.info("TOOL_NODE: Using special cooking guidance handler")
                         tool_result = await self._execute_cooking_guidance(state, tool_call)
                     else:
                         # Execute regular tools by finding the tool and calling it
@@ -144,9 +167,13 @@ class CookingAgent:
                                 break
                         
                         if tool_func:
+                            logger.info(f"TOOL_NODE: Found tool function for {tool_name}, executing...")
                             tool_result = await tool_func.ainvoke(tool_call["args"])
                         else:
+                            logger.error(f"TOOL_NODE: Tool {tool_name} not found in available tools")
                             tool_result = f"Error: Tool {tool_name} not found"
+                    
+                    logger.info(f"TOOL_NODE: Tool {tool_name} result: {str(tool_result)[:200]}...")
                     
                     # Process special tool results (timer commands)
                     self._process_tool_result(state, tool_call, tool_result)
@@ -160,8 +187,12 @@ class CookingAgent:
                     )
                 
                 state["messages"].extend(tool_messages)
+                logger.info(f"TOOL_NODE: All {len(last_message.tool_calls)} tools executed successfully")
+            else:
+                logger.warning("TOOL_NODE: Called but no tool calls found in last message")
                 
         except Exception as e:
+            logger.error(f"TOOL_NODE: Error during tool execution: {str(e)}")
             state["error"] = f"Tool execution error: {str(e)}"
         
         return state
@@ -242,9 +273,12 @@ class CookingAgent:
     
     async def _generate_response_node(self, state: AgentState) -> AgentState:
         """Generate final response for user"""
+        logger.info("RESPONSE_NODE: Starting final response generation")
+        
         try:
             # Create a summary prompt
             messages = state["messages"]
+            logger.info(f"RESPONSE_NODE: Generating response based on {len(messages)} conversation messages")
             
             summary_prompt = HumanMessage(
                 content="""Based on the conversation above, provide a helpful response to the user. 
@@ -261,10 +295,13 @@ class CookingAgent:
                 openai_api_key=settings.openai_api_key
             )
             
+            logger.info("RESPONSE_NODE: Calling LLM for final response synthesis...")
             response = await llm_no_tools.ainvoke(messages_for_summary)
             state["final_response"] = response.content
+            logger.info(f"RESPONSE_NODE: Generated final response: {response.content[:100]}...")
             
         except Exception as e:
+            logger.error(f"RESPONSE_NODE: Error during response generation: {str(e)}")
             state["error"] = f"Response generation error: {str(e)}"
             state["final_response"] = "I apologize, but I encountered an error while processing your request."
         
@@ -316,6 +353,10 @@ class CookingAgent:
     async def process_query(self, cooking_session: CookingSessionBase, query: str) -> Dict[str, Any]:
         """Process a cooking query and return the response with updated session"""
         
+        logger.info("WORKFLOW_START: Beginning agent workflow execution")
+        logger.info(f"WORKFLOW_START: Query: '{query.strip()}'")
+        logger.info(f"WORKFLOW_START: Recipe: {cooking_session.recipe.title}")
+        
         # Initialize agent state
         initial_state: AgentState = {
             "cooking_session": cooking_session,
@@ -327,7 +368,9 @@ class CookingAgent:
         
         try:
             # Run the agent workflow
+            logger.info("WORKFLOW_START: Invoking compiled LangGraph workflow...")
             result = await self.compiled_agent.ainvoke(initial_state)
+            logger.info("WORKFLOW_COMPLETE: Agent workflow completed successfully")
             
             # Update conversation history
             updated_session = result["cooking_session"]
@@ -357,10 +400,11 @@ class CookingAgent:
             }
             
             
+            logger.info(f"WORKFLOW_COMPLETE: Final response: {final_response_data['response'][:100]}...")
             return final_response_data
             
         except Exception as e:
-            print(f"Error in cooking agent: {e}")
+            logger.error(f"WORKFLOW_ERROR: Error in cooking agent workflow: {e}")
             
             # Add error to conversation history
             error_user_message = Message(
@@ -385,7 +429,7 @@ class CookingAgent:
                 "suggested_actions": []
             }
             
-            
+            logger.info("WORKFLOW_ERROR: Returning error response to client")
             return error_response_data
 
 

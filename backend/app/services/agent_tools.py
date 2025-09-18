@@ -2,6 +2,7 @@
 Agent tools for cooking knowledge and assistance.
 """
 
+import logging
 from typing import List
 from langchain_openai import ChatOpenAI
 from langchain_core.prompts import ChatPromptTemplate
@@ -12,6 +13,9 @@ from app.config import settings
 from app.schemas import RecipeBase, RecipeModifications
 from app.prompts import get_cooking_prompts
 import re
+
+# Set up logger
+logger = logging.getLogger(__name__)
 
 
 # Tool input schemas
@@ -151,11 +155,16 @@ class KnowledgeTools:
     
     async def get_cooking_knowledge(self, query: str, recipe_context: RecipeBase, modifications: RecipeModifications, conversation_history: list, model: str) -> str:
         """Get cooking knowledge relevant to the query and recipe"""
+        logger.info(f"KNOWLEDGE: Processing cooking knowledge request with {model}")
+        logger.info(f"KNOWLEDGE: Query: '{query[:100]}...'")
+        logger.info(f"KNOWLEDGE: Recipe: {recipe_context.title}")
+        
         try:
             llm = self._get_llm(model)
             
             # Apply modifications to get the actual recipe being cooked
             modified_recipe = self._apply_recipe_modifications(recipe_context, modifications)
+            logger.info(f"KNOWLEDGE: Applied modifications (serving multiplier: {modifications.serving_multiplier}x)")
             
             # Build context about the recipe (using modified version)
             context = f"Recipe: {modified_recipe.title}\n"
@@ -189,12 +198,15 @@ class KnowledgeTools:
                 ))
             ])
             
+            logger.info("KNOWLEDGE: Built context and prompt, calling LLM for cooking guidance...")
             chain = prompt | llm
             response = await chain.ainvoke({})
             
+            logger.info(f"KNOWLEDGE: Generated cooking guidance: {response.content[:100]}...")
             return response.content
             
         except Exception as e:
+            logger.error(f"KNOWLEDGE: Error getting cooking knowledge: {str(e)}")
             return f"I'd love to help with that cooking question, but I'm having trouble accessing my knowledge right now. Could you try asking again? Error: {str(e)}"
 
 
@@ -206,26 +218,31 @@ def create_cooking_tools() -> List[BaseTool]:
         """Add a new cooking timer with specified duration and label."""
         import uuid
         timer_id = str(uuid.uuid4())
+        logger.info(f"TOOL_add_timer: Creating timer '{label}' for {duration_minutes} minutes (ID: {timer_id})")
         return f"timer_added:{timer_id}:{label}:{duration_minutes * 60}"
     
     @tool("start_timer", args_schema=StartTimerInput)
     def start_timer(timer_id: str) -> str:
         """Start an existing timer."""
+        logger.info(f"TOOL_start_timer: Starting timer {timer_id}")
         return f"timer_started:{timer_id}"
     
     @tool("stop_timer", args_schema=StopTimerInput)
     def stop_timer(timer_id: str) -> str:
         """Stop a running timer."""
+        logger.info(f"TOOL_stop_timer: Stopping timer {timer_id}")
         return f"timer_stopped:{timer_id}"
     
     @tool("remove_timer", args_schema=RemoveTimerInput)
     def remove_timer(timer_id: str) -> str:
         """Remove/delete a timer completely."""
+        logger.info(f"TOOL_remove_timer: Removing timer {timer_id}")
         return f"timer_removed:{timer_id}"
     
     @tool("get_cooking_guidance", args_schema=CookingQuestionInput)
     def get_cooking_guidance(question: str) -> str:
         """Get cooking advice, techniques, or recipe guidance."""
+        logger.info(f"TOOL_get_cooking_guidance: Processing question: '{question[:100]}...'")
         # This will be handled by the tool executor calling the actual cooking knowledge
         return f"cooking_guidance_request:{question}"
     

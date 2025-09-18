@@ -14,11 +14,10 @@ from app.config import settings
 # Use PostgreSQL for development and production
 engine = create_engine(
     settings.database_url,
-    echo=settings.debug,
+    echo=False,  # Disable SQLAlchemy SQL logging
     pool_pre_ping=True,  # Enables pessimistic disconnect handling
     pool_recycle=300,    # Recycle connections every 5 minutes
-    # Security: Disable SQL statement logging in production
-    echo_pool=False if settings.environment == "production" else settings.debug,
+    echo_pool=False,  # Disable connection pool logging
 )
 
 # Create SessionLocal class
