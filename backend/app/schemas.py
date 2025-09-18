@@ -195,11 +195,6 @@ class RecipeParseResponse(BaseModel):
     warnings: List[str] = Field(default_factory=list)
 
 
-# ===== Recipe Modifications Schemas ===== 
-# NOTE: Recipe modifications have been removed. Frontend now creates
-# modified RecipeBase objects directly with scaled ingredients and servings.
-
-
 class Command(BaseModel):
     """Universal command structure that AI can issue for various actions"""
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
@@ -270,14 +265,7 @@ class AgentQueryRequest(BaseModel):
     query: str = Field(..., min_length=1, max_length=1000)
 
 
-class SuggestedAction(BaseModel):
-    """Schema for suggested actions from agent"""
-    type: str
-    description: str
-
-
 class AgentQueryResponse(BaseModel):
     """Schema for agent query response"""
     response: str
     updated_session: CookingSessionBase
-    suggested_actions: List[SuggestedAction] = Field(default_factory=list)

@@ -100,9 +100,6 @@ struct RecipeBase: Codable {
     }
 }
 
-// NOTE: RecipeModifications removed. Frontend now modifies RecipeBase directly
-// with scaled ingredients and servings instead of using separate modification objects.
-
 // Helper for flexible JSON encoding/decoding
 struct FlexibleValue: Codable {
     let value: Any
@@ -225,8 +222,6 @@ struct UserPreferencesDetailed: Codable {
     }
 }
 
-// Note: VoiceSettings is now defined in User.swift to avoid duplication
-
 // MARK: - Agent Communication Models
 
 struct AgentQueryRequest: Codable {
@@ -242,16 +237,9 @@ struct AgentQueryRequest: Codable {
 struct AgentQueryResponse: Codable {
     let response: String
     let updatedSession: CookingSession
-    let suggestedActions: [SuggestedAction]
     
     enum CodingKeys: String, CodingKey {
         case response
         case updatedSession = "updated_session"
-        case suggestedActions = "suggested_actions"
     }
-}
-
-struct SuggestedAction: Codable {
-    let type: String
-    let description: String
 }

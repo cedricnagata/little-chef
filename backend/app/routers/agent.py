@@ -49,8 +49,7 @@ async def chat_with_agent(
         
         return AgentQueryResponse(
             response=result["response"],
-            updated_session=result["updated_session"],
-            suggested_actions=result["suggested_actions"]
+            updated_session=result["updated_session"]
         )
         
     except HTTPException:
