@@ -5,40 +5,13 @@ Prompts for LittleChef recipe parsing and cooking assistance
 # ===== Cooking Assistant Prompts =====
 
 # Main cooking assistant system prompt
-COOKING_ASSISTANT_SYSTEM = """You are a helpful cooking assistant with access to the following recipe context:
+COOKING_ASSISTANT_SYSTEM = """You are a helpful cooking assistant with access to timer tools and recipe knowledge.
+
+Context:
 
 {context}
 
-Keep responses concise and friendly. Use tools when needed."""
-
-# Planning prompt for analyzing user queries
-PLANNING_PROMPT = """You are a cooking assistant planning how to respond to a user query.
-
-{context}
-
-User Query: {query}
-
-Analyze this query and create a plan. Consider:
-1. Does this require timer tools (add_timer, start_timer, stop_timer, remove_timer)?
-2. Does this require answering questions about the recipe?
-3. What is the best order to handle multiple requests?
-
-Create a clear plan for how to handle this query, then execute it step by step."""
-
-# Executor prompt with plan context
-EXECUTOR_SYSTEM = """{assistant_prompt}
-
-Plan: {plan}
-
-Now execute this plan. Use tools when needed and provide helpful responses. When you've completed all necessary actions, indicate you're ready to provide a final comprehensive response."""
-
-# Response synthesis prompt
-RESPONSE_SYNTHESIS = """Based on the conversation above, provide a comprehensive final response to the user.
-
-Original query: {query}
-Tools used: {tools_used}
-
-Synthesize all the information and tool results into a clear, helpful response that addresses all parts of the user's request. Be concise but complete."""
+Be concise and friendly. Use tools when needed."""
 
 # ===== Recipe Parsing Prompts =====
 

@@ -47,7 +47,7 @@ def create_cooking_tools() -> List[BaseTool]:
     
     @tool("add_timer", args_schema=AddTimerInput)
     def add_timer(label: str, duration_minutes: int) -> str:
-        """Add a new cooking timer with specified duration and label."""
+        """Create a new cooking timer. Use this when user wants to add a new timer."""
         import uuid
         timer_id = str(uuid.uuid4())
         logger.info(f"Timer add: '{label}' for {duration_minutes} minutes (ID: {timer_id})")
@@ -55,19 +55,19 @@ def create_cooking_tools() -> List[BaseTool]:
     
     @tool("start_timer", args_schema=StartTimerInput)
     def start_timer(timer_id: str) -> str:
-        """Start an existing timer."""
+        """Start an existing timer. This tool can only be used if the timer already exists."""
         logger.info(f"Timer start: {timer_id}")
         return f"timer_started:{timer_id}"
     
     @tool("stop_timer", args_schema=StopTimerInput)
     def stop_timer(timer_id: str) -> str:
-        """Stop a running timer."""
+        """Stop a running timer. This tool can only be used if the timer already exists."""
         logger.info(f"Timer stop: {timer_id}")
         return f"timer_stopped:{timer_id}"
     
     @tool("remove_timer", args_schema=RemoveTimerInput)
     def remove_timer(timer_id: str) -> str:
-        """Remove/delete a timer completely."""
+        """Remove/delete a timer completely. This tool can only be used if the timer already exists."""
         logger.info(f"Timer remove: {timer_id}")
         return f"timer_removed:{timer_id}"
     
