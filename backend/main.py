@@ -46,7 +46,7 @@ app = FastAPI(
 # Security: Add trusted host middleware
 app.add_middleware(
     TrustedHostMiddleware, 
-    allowed_hosts=["localhost", "127.0.0.1", "*.littlechef.com"] if settings.environment == "production" else ["*"]
+    ["*"]
 )
 
 # Configure CORS for iOS app communication
