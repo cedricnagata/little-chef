@@ -29,9 +29,22 @@
 		8B89282F2E6B467700A3BADD /* little-chefUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = "little-chefUITests.xctest"; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
+/* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
+		8BAB3D812E8B2237001822B4 /* Exceptions for "little-chef" folder in "little-chef" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				Info.plist,
+			);
+			target = 8B8928172E6B467600A3BADD /* little-chef */;
+		};
+/* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
+
 /* Begin PBXFileSystemSynchronizedRootGroup section */
 		8B89281A2E6B467600A3BADD /* little-chef */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
+			exceptions = (
+				8BAB3D812E8B2237001822B4 /* Exceptions for "little-chef" folder in "little-chef" target */,
+			);
 			path = "little-chef";
 			sourceTree = "<group>";
 		};
@@ -401,7 +414,9 @@
 				DEVELOPMENT_TEAM = MJ3P95GLA4;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = "little-chef/Info.plist";
 				INFOPLIST_KEY_CFBundleDisplayName = LittleChef;
+				INFOPLIST_KEY_LSApplicationCategoryType = "";
 				INFOPLIST_KEY_NSMicrophoneUsageDescription = "LittleChef needs microphone access to listen to your voice commands and questions while cooking. This enables hands-free interaction with your AI cooking assistant.";
 				INFOPLIST_KEY_NSSpeechRecognitionUsageDescription = "LittleChef uses speech recognition to provide hands-free cooking assistance. You can ask questions about recipes using your voice while your hands are busy cooking.";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
@@ -433,7 +448,9 @@
 				DEVELOPMENT_TEAM = MJ3P95GLA4;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = "little-chef/Info.plist";
 				INFOPLIST_KEY_CFBundleDisplayName = LittleChef;
+				INFOPLIST_KEY_LSApplicationCategoryType = "";
 				INFOPLIST_KEY_NSMicrophoneUsageDescription = "LittleChef needs microphone access to listen to your voice commands and questions while cooking. This enables hands-free interaction with your AI cooking assistant.";
 				INFOPLIST_KEY_NSSpeechRecognitionUsageDescription = "LittleChef uses speech recognition to provide hands-free cooking assistance. You can ask questions about recipes using your voice while your hands are busy cooking.";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
