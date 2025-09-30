@@ -9,6 +9,7 @@ import SwiftUI
 
 struct EditRecipeView: View {
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.editMode) private var editMode
     
     let originalRecipe: RecipeData
     let onSave: (RecipeCreate) -> Void
@@ -92,14 +93,17 @@ struct EditRecipeView: View {
                                 set: { ingredients[index] = $0 }
                             ))
                             
-                            Button(action: {
-                                ingredients.remove(at: index)
-                            }) {
-                                Image(systemName: "minus.circle.fill")
-                                    .foregroundColor(.red)
+                            if editMode?.wrappedValue.isEditing == true {
+                                Button(action: {
+                                    ingredients.remove(at: index)
+                                }) {
+                                    Image(systemName: "minus.circle.fill")
+                                        .foregroundColor(.red)
+                                }
                             }
                         }
                     }
+                    .onMove(perform: moveIngredients)
                     .onDelete(perform: deleteIngredients)
                     
                     HStack {
@@ -132,14 +136,17 @@ struct EditRecipeView: View {
                             ), axis: .vertical)
                             .lineLimit(2...5)
                             
-                            Button(action: {
-                                instructions.remove(at: index)
-                            }) {
-                                Image(systemName: "minus.circle.fill")
-                                    .foregroundColor(.red)
+                            if editMode?.wrappedValue.isEditing == true {
+                                Button(action: {
+                                    instructions.remove(at: index)
+                                }) {
+                                    Image(systemName: "minus.circle.fill")
+                                        .foregroundColor(.red)
+                                }
                             }
                         }
                     }
+                    .onMove(perform: moveInstructions)
                     .onDelete(perform: deleteInstructions)
                     
                     HStack(alignment: .top) {
@@ -191,10 +198,14 @@ struct EditRecipeView: View {
                 }
                 
                 ToolbarItem(placement: .navigationBarTrailing) {
-                    Button("Save") {
-                        saveRecipe()
+                    HStack(spacing: 12) {
+                        EditButton()
+                        
+                        Button("Save") {
+                            saveRecipe()
+                        }
+                        .disabled(!isValid)
                     }
-                    .disabled(!isValid)
                 }
             }
         }
@@ -220,6 +231,10 @@ struct EditRecipeView: View {
         ingredients.remove(atOffsets: offsets)
     }
     
+    private func moveIngredients(from source: IndexSet, to destination: Int) {
+        ingredients.move(fromOffsets: source, toOffset: destination)
+    }
+    
     private func addInstruction() {
         let trimmed = newInstruction.trimmingCharacters(in: .whitespacesAndNewlines)
         if !trimmed.isEmpty {
@@ -230,6 +245,10 @@ struct EditRecipeView: View {
     
     private func deleteInstructions(offsets: IndexSet) {
         instructions.remove(atOffsets: offsets)
+    }
+    
+    private func moveInstructions(from source: IndexSet, to destination: Int) {
+        instructions.move(fromOffsets: source, toOffset: destination)
     }
     
     private func saveRecipe() {
