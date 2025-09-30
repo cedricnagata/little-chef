@@ -121,16 +121,20 @@ struct ActiveCookingView: View {
                     .frame(width: geometry.size.width * 0.6)
                 }
             } else {
-                // Portrait: Original vertical layout
+                // Portrait: Vertical split layout
                 VStack(spacing: 0) {
-                    // Header with recipe info
-                    RecipeHeaderView()
+                    // Recipe details on top
+                    RecipeDetailsView()
+                        .frame(height: geometry.size.height * 0.45)
+                        .background(Color(.systemGray6))
                     
-                    // Chat area
-                    ChatAreaView()
+                    Divider()
                     
-                    // Input area
-                    InputAreaView(textInput: $textInput)
+                    // Chat area on bottom
+                    VStack(spacing: 0) {
+                        ChatAreaView()
+                        InputAreaView(textInput: $textInput)
+                    }
                 }
             }
         }
