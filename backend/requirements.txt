@@ -5,7 +5,10 @@ uvicorn[standard]
 # Database
 sqlalchemy
 alembic
-psycopg2-binary
+# PostgreSQL driver (only needed for PostgreSQL)
+psycopg2-binary; platform_system != "Windows"
+psycopg2; platform_system == "Windows"
+# SQLite is included with Python, no additional driver needed
 
 # Data validation
 pydantic-settings

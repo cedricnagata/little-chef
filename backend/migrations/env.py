@@ -18,8 +18,8 @@ from app.models import User, Recipe  # Import all models
 # access to the values within the .ini file in use.
 config = context.config
 
-# Set the database URL from our settings
-config.set_main_option("sqlalchemy.url", settings.database_url)
+# Set the database URL from our settings (supports both SQLite and PostgreSQL)
+config.set_main_option("sqlalchemy.url", settings.get_database_url())
 
 # Interpret the config file for Python logging.
 # This line sets up loggers basically.

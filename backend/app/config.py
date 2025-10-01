@@ -20,7 +20,9 @@ class Settings(BaseSettings):
     max_content_length: int = 10 * 1024 * 1024  # 10MB max request size
     
     # Database Configuration
-    database_url: str  # Must be set in environment
+    database_type: str = "postgresql"  # Options: "postgresql" or "sqlite"
+    database_url: str = ""  # PostgreSQL connection string
+    sqlite_db_path: str = "sqlite:///./littlechef.db"  # SQLite database path
     
     # OpenAI Configuration
     openai_api_key: str = ""  # Will be required when using LLM features
@@ -46,10 +48,26 @@ class Settings(BaseSettings):
         env_file = ".env"
         env_file_encoding = "utf-8"
     
+    def get_database_url(self) -> str:
+        """Get the appropriate database URL based on database_type"""
+        if self.database_type == "sqlite":
+            return self.sqlite_db_path
+        elif self.database_type == "postgresql":
+            if not self.database_url:
+                raise ValueError("DATABASE_URL is required when using PostgreSQL")
+            return self.database_url
+        else:
+            raise ValueError(f"Invalid database_type: {self.database_type}. Must be 'sqlite' or 'postgresql'")
+    
     def __post_init__(self):
         """Validate critical settings after initialization"""
-        if not self.database_url:
-            raise ValueError("DATABASE_URL environment variable is required")
+        # Validate database configuration
+        if self.database_type not in ["sqlite", "postgresql"]:
+            raise ValueError("DATABASE_TYPE must be 'sqlite' or 'postgresql'")
+        
+        if self.database_type == "postgresql" and not self.database_url:
+            raise ValueError("DATABASE_URL environment variable is required when using PostgreSQL")
+        
         if not self.jwt_secret_key:
             raise ValueError("JWT_SECRET_KEY environment variable is required")
         
