@@ -3,6 +3,9 @@
 <plist version="1.0">
 <dict>
 	<key>LOCAL_API_URL</key>
-	<string>http://YOUR_LOCAL_IP:8000</string>
+	<string>http://localhost:8000</string>
+	
+	<key>PRODUCTION_API_URL</key>
+	<string>https://your-production-api.com</string>
 </dict>
 </plist>

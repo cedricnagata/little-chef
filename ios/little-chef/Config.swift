@@ -13,30 +13,34 @@ struct Config {
     /// Returns the base URL for the API based on the current environment
     static var baseURL: String {
         #if DEBUG
-            // In debug mode, try to load from local config first, fall back to localhost
-            if let localURL = loadLocalConfig() {
-                return localURL
+            // In debug mode, try to load from Config.plist first, fall back to localhost
+            if let url = loadConfigValue(key: "LOCAL_API_URL") {
+                print("Using local API URL from Config.plist: \(url)")
+                return url
             }
+            print("⚠️ Using default localhost URL")
             return "http://localhost:8000"
         #else
-            // In release mode, use production URL
-            return "https://your-production-api.com"  // Replace with your actual production URL
+            // In release mode, MUST have PRODUCTION_API_URL in Config.plist
+            guard let url = loadConfigValue(key: "PRODUCTION_API_URL") else {
+                fatalError("PRODUCTION_API_URL not found in Config.plist.")
+            }
+            print("📱 Using production API URL from Config.plist: \(url)")
+            return url
         #endif
     }
     
     // MARK: - Private Methods
     
-    /// Loads the local development URL from Config.plist if it exists
-    private static func loadLocalConfig() -> String? {
+    /// Loads a value from Config.plist for the given key
+    private static func loadConfigValue(key: String) -> String? {
         guard let path = Bundle.main.path(forResource: "Config", ofType: "plist"),
               let plist = NSDictionary(contentsOfFile: path),
-              let url = plist["LOCAL_API_URL"] as? String else {
-            print("⚠️ Config.plist not found or LOCAL_API_URL not set. Using default localhost.")
+              let value = plist[key] as? String,
+              !value.isEmpty else {
             return nil
         }
-        
-        print("📱 Using local API URL from Config.plist: \(url)")
-        return url
+        return value
     }
     
     // MARK: - Environment Detection
