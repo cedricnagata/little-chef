@@ -1,11 +1,12 @@
 {
   "images" : [
     {
-      "filename" : "littlechef.png",
+      "filename" : "littlechef_light.png",
       "idiom" : "universal",
       "scale" : "1x"
     },
     {
+      "filename" : "littlechef_dark.png",
       "idiom" : "universal",
       "scale" : "2x"
     },
