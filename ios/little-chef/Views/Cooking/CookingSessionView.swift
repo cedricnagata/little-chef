@@ -742,7 +742,9 @@ struct RecipeSelectorView: View {
         NavigationStack {
             List(recipeManager.recipes) { recipe in
                 Button(action: {
-                    cookingSessionManager.startCookingSession(with: recipe)
+                    Task {
+                        await cookingSessionManager.startCookingSession(with: recipe)
+                    }
                     dismiss()
                 }) {
                     RecipeRowView(recipe: recipe)

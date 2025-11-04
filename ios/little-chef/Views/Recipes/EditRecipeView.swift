@@ -12,7 +12,7 @@ struct EditRecipeView: View {
     @Environment(\.editMode) private var editMode
     
     let originalRecipe: RecipeData
-    let onSave: (RecipeCreate) -> Void
+    let onSave: (RecipeData) -> Void
     
     @State private var title: String
     @State private var description: String
@@ -29,7 +29,7 @@ struct EditRecipeView: View {
     @State private var newIngredient = ""
     @State private var newInstruction = ""
     
-    init(recipe: RecipeData, onSave: @escaping (RecipeCreate) -> Void) {
+    init(recipe: RecipeData, onSave: @escaping (RecipeData) -> Void) {
         self.originalRecipe = recipe
         self.onSave = onSave
         
@@ -256,7 +256,7 @@ struct EditRecipeView: View {
         let cleanedInstructions = instructions.filter { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
         let tagsList = tags.split(separator: ",").map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }.filter { !$0.isEmpty }
         
-        let recipe = RecipeCreate(
+        let recipe = RecipeData(
             title: title.trimmingCharacters(in: .whitespacesAndNewlines),
             description: description.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : description.trimmingCharacters(in: .whitespacesAndNewlines),
             servings: servings,

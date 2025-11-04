@@ -246,32 +246,19 @@ struct RecipeDetailView: View {
     
     private func startCookingSession() {
         // Start the cooking session with this recipe
-        cookingSessionManager.startCookingSession(with: recipe)
-        
+        Task {
+            await cookingSessionManager.startCookingSession(with: recipe)
+        }
+
         // Dismiss the current view
         dismiss()
-        
+
         // Switch to the Cook tab (tab index 1)
         selectedTab.wrappedValue = 1
     }
     
-    private func updateRecipe(_ updatedRecipe: RecipeCreate) async {
-        // Convert RecipeCreate to RecipeUpdate
-        let recipeUpdate = RecipeUpdate(
-            title: updatedRecipe.title,
-            description: updatedRecipe.description,
-            servings: updatedRecipe.servings,
-            prepTime: updatedRecipe.prepTime,
-            cookTime: updatedRecipe.cookTime,
-            ingredients: updatedRecipe.ingredients,
-            instructions: updatedRecipe.instructions,
-            tags: updatedRecipe.tags,
-            sourceUrl: updatedRecipe.sourceUrl,
-            cuisineType: updatedRecipe.cuisineType,
-            difficulty: updatedRecipe.difficulty
-        )
-        
-        let success = await recipeManager.updateRecipe(id: recipe.id, with: recipeUpdate)
+    private func updateRecipe(_ updatedRecipe: RecipeData) async {
+        let success = await recipeManager.updateRecipe(id: recipe.id, with: updatedRecipe)
         if !success {
             // Handle error - could show an alert
             print("Failed to update recipe: \(recipeManager.errorMessage ?? "Unknown error")")

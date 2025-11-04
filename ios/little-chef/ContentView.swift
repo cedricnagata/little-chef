@@ -2,28 +2,68 @@
 //  ContentView.swift
 //  little-chef
 //
-//  Created by Cedric Nagata on 9/5/25.
+//  Updated for local-only operation with MLXLLM
 //
 
 import SwiftUI
 
 struct ContentView: View {
-    @EnvironmentObject var authManager: AuthManager
-    
+    @EnvironmentObject var llmService: MLXLLMService
+    @State private var isLoadingModel = false
+    @State private var loadError: String?
+
     var body: some View {
         Group {
-            if authManager.isAuthenticated {
+            if llmService.isLoaded {
                 MainView()
+            } else if isLoadingModel {
+                VStack(spacing: 20) {
+                    ProgressView()
+                        .scaleEffect(1.5)
+                    Text("Loading AI Model...")
+                        .font(.headline)
+                    if let error = loadError {
+                        Text(error)
+                            .foregroundColor(.red)
+                            .font(.caption)
+                            .padding()
+                    }
+                }
             } else {
-                LoginView()
+                VStack(spacing: 20) {
+                    Text("Welcome to Little Chef")
+                        .font(.largeTitle)
+                        .bold()
+                    Text("AI-powered cooking assistant")
+                        .font(.subheadline)
+                        .foregroundColor(.secondary)
+                    Button("Get Started") {
+                        loadModel()
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .padding()
+                }
             }
         }
-        .onAppear {
-            // Refresh token if needed when app appears
-            if authManager.isAuthenticated {
-                Task {
-                    await authManager.refreshTokenIfNeeded()
-                }
+        .task {
+            // Attempt to load model on launch
+            if !llmService.isLoaded {
+                loadModel()
+            }
+        }
+    }
+
+    private func loadModel() {
+        isLoadingModel = true
+        loadError = nil
+        Task {
+            do {
+                _ = try await llmService.loadLocalModel()
+                isLoadingModel = false
+            } catch {
+                loadError = "Failed to load model: \(error.localizedDescription)"
+                isLoadingModel = false
+                print("❌ ContentView: Failed to load model: \(error)")
             }
         }
     }
@@ -31,5 +71,5 @@ struct ContentView: View {
 
 #Preview {
     ContentView()
-        .environmentObject(AuthManager())
+        .environmentObject(MLXLLMService.shared)
 }

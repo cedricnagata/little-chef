@@ -200,8 +200,8 @@ struct AddRecipeView: View {
                 result = await recipeManager.parseRecipeFromText(textInput.trimmingCharacters(in: .whitespacesAndNewlines))
             case .image:
                 if !imageDataArray.isEmpty {
-                    let base64Images = imageDataArray.map { $0.base64EncodedString() }
-                    result = await recipeManager.parseRecipeFromImages(base64Images)
+                    let uiImages = imageDataArray.compactMap { UIImage(data: $0) }
+                    result = await recipeManager.parseRecipeFromImages(uiImages)
                 } else {
                     result = nil
                 }

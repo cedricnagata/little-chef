@@ -2,7 +2,7 @@
 //  RecipeManager.swift
 //  little-chef
 //
-//  Created by Cedric Nagata on 9/5/25.
+//  Updated to use local storage (LocalDataManager) instead of APIService
 //
 
 import Foundation
@@ -13,31 +13,40 @@ class RecipeManager: ObservableObject {
     @Published var recipes: [Recipe] = []
     @Published var isLoading = false
     @Published var errorMessage: String?
-    
-    private let apiService = APIService.shared
-    
+
+    private var dataManager: LocalDataManager
+    private let recipeParser = LocalRecipeParser()
+
+    init() {
+        do {
+            dataManager = try LocalDataManager()
+        } catch {
+            fatalError("Failed to initialize LocalDataManager: \(error)")
+        }
+    }
+
     // MARK: - Recipe Management
     func loadRecipes() async {
         isLoading = true
         errorMessage = nil
-        
+
         do {
-            let recipeListResponses = try await apiService.getRecipes()
-            recipes = recipeListResponses.map { $0.recipe }
+            let recipeEntities = try dataManager.fetchAllRecipes()
+            recipes = recipeEntities.map { $0.toRecipe() }
         } catch {
             errorMessage = "Failed to load recipes: \(error.localizedDescription)"
         }
-        
+
         isLoading = false
     }
     
-    func createRecipe(_ recipe: RecipeCreate) async -> Bool {
+    func createRecipe(_ recipeData: RecipeData) async -> Bool {
         isLoading = true
         errorMessage = nil
-        
+
         do {
-            let newRecipe = try await apiService.createRecipe(recipe)
-            recipes.append(newRecipe)
+            let recipeEntity = try dataManager.createRecipe(recipeData)
+            recipes.append(recipeEntity.toRecipe())
             isLoading = false
             return true
         } catch {
@@ -46,17 +55,15 @@ class RecipeManager: ObservableObject {
             return false
         }
     }
-    
-    func updateRecipe(id: UUID, with update: RecipeUpdate) async -> Bool {
+
+    func updateRecipe(id: UUID, with recipeData: RecipeData) async -> Bool {
         isLoading = true
         errorMessage = nil
-        
+
         do {
-            let updatedRecipe = try await apiService.updateRecipe(id: id, recipe: update)
-            // Find and replace the recipe in our local list
-            if let index = recipes.firstIndex(where: { $0.id == id }) {
-                recipes[index] = updatedRecipe
-            }
+            try dataManager.updateRecipe(id: id, with: recipeData)
+            // Reload recipes to get updated version
+            await loadRecipes()
             isLoading = false
             return true
         } catch {
@@ -65,13 +72,13 @@ class RecipeManager: ObservableObject {
             return false
         }
     }
-    
+
     func deleteRecipe(_ recipe: Recipe) async -> Bool {
         isLoading = true
         errorMessage = nil
-        
+
         do {
-            try await apiService.deleteRecipe(id: recipe.id)
+            try dataManager.deleteRecipe(id: recipe.id)
             recipes.removeAll { $0.id == recipe.id }
             isLoading = false
             return true
@@ -81,14 +88,45 @@ class RecipeManager: ObservableObject {
             return false
         }
     }
+
+    // MARK: - Search & Filter
+
+    func searchRecipes(query: String) async {
+        isLoading = true
+        errorMessage = nil
+
+        do {
+            let recipeEntities = try dataManager.searchRecipes(query: query)
+            recipes = recipeEntities.map { $0.toRecipe() }
+        } catch {
+            errorMessage = "Failed to search recipes: \(error.localizedDescription)"
+        }
+
+        isLoading = false
+    }
+
+    func fetchRecipes(byTag tag: String) async {
+        isLoading = true
+        errorMessage = nil
+
+        do {
+            let recipeEntities = try dataManager.fetchRecipes(byTag: tag)
+            recipes = recipeEntities.map { $0.toRecipe() }
+        } catch {
+            errorMessage = "Failed to fetch recipes by tag: \(error.localizedDescription)"
+        }
+
+        isLoading = false
+    }
     
     // MARK: - Recipe Parsing
+
     func parseRecipeFromUrl(_ url: String) async -> RecipeParseResponse? {
         isLoading = true
         errorMessage = nil
-        
+
         do {
-            let response = try await apiService.parseRecipeFromUrl(url)
+            let response = try await recipeParser.parseFromURL(url)
             isLoading = false
             return response
         } catch {
@@ -97,13 +135,13 @@ class RecipeManager: ObservableObject {
             return nil
         }
     }
-    
+
     func parseRecipeFromText(_ text: String) async -> RecipeParseResponse? {
         isLoading = true
         errorMessage = nil
-        
+
         do {
-            let response = try await apiService.parseRecipeFromText(text)
+            let response = try await recipeParser.parseFromText(text)
             isLoading = false
             return response
         } catch {
@@ -112,13 +150,13 @@ class RecipeManager: ObservableObject {
             return nil
         }
     }
-    
-    func parseRecipeFromImages(_ base64Images: [String]) async -> RecipeParseResponse? {
+
+    func parseRecipeFromImages(_ images: [UIImage]) async -> RecipeParseResponse? {
         isLoading = true
         errorMessage = nil
-        
+
         do {
-            let response = try await apiService.parseRecipeFromImage(base64Images)
+            let response = try await recipeParser.parseFromImages(images)
             isLoading = false
             return response
         } catch {

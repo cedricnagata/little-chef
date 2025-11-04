@@ -2,16 +2,15 @@
 //  SettingsView.swift
 //  little-chef
 //
-//  Created by Cedric Nagata on 9/5/25.
+//  Simplified for local-only operation
 //
 
 import SwiftUI
 
 struct SettingsView: View {
-    @EnvironmentObject var authManager: AuthManager
-    @State private var showingDeleteAlert = false
+    @State private var showingDeleteDataAlert = false
     @State private var isDeleting = false
-    
+
     var body: some View {
         List {
             // Profile Settings Section
@@ -19,26 +18,26 @@ struct SettingsView: View {
                 NavigationLink(destination: ProfileSettingsView()) {
                     SettingsRowView(
                         icon: "person.circle.fill",
-                        title: "Profile Settings",
-                        subtitle: "LLM model, preferences, dietary restrictions"
+                        title: "Preferences",
+                        subtitle: "Measurement system, dietary restrictions, voice settings"
                     )
                 }
-                
-                NavigationLink(destination: AccountSettingsView()) {
+
+                NavigationLink(destination: ModelManagementView()) {
                     SettingsRowView(
-                        icon: "gear.circle.fill",
-                        title: "Account Settings", 
-                        subtitle: "Email, name, password"
+                        icon: "cpu",
+                        title: "Model Management",
+                        subtitle: "Manage local AI model"
                     )
                 }
             } header: {
                 Text("Settings")
             }
-            
-            // Danger Zone Section
+
+            // Data Management Section
             Section {
                 Button(action: {
-                    showingDeleteAlert = true
+                    showingDeleteDataAlert = true
                 }) {
                     HStack {
                         if isDeleting {
@@ -50,49 +49,54 @@ struct SettingsView: View {
                                 .font(.title2)
                                 .foregroundColor(.red)
                         }
-                        
+
                         VStack(alignment: .leading) {
-                            Text("Delete Account")
+                            Text("Delete All Data")
                                 .foregroundColor(.red)
                                 .font(.body)
-                            Text("Permanently delete your account and data")
+                            Text("Permanently delete all recipes and settings")
                                 .foregroundColor(.secondary)
                                 .font(.caption)
                         }
-                        
+
                         Spacer()
                     }
                     .padding(.vertical, 4)
                 }
                 .disabled(isDeleting)
             } header: {
-                Text("Danger Zone")
+                Text("Data Management")
             }
         }
         .navigationTitle("Settings")
         .navigationBarTitleDisplayMode(.large)
-        .alert("Delete Account", isPresented: $showingDeleteAlert) {
+        .alert("Delete All Data", isPresented: $showingDeleteDataAlert) {
             Button("Cancel", role: .cancel) { }
             Button("Delete", role: .destructive) {
-                deleteAccount()
+                deleteAllData()
             }
         } message: {
-            Text("Are you sure you want to permanently delete your account? This action cannot be undone and will delete all your recipes and data.")
+            Text("Are you sure you want to permanently delete all your recipes and settings? This action cannot be undone.")
         }
     }
-    
-    private func deleteAccount() {
+
+    private func deleteAllData() {
         isDeleting = true
-        
-        // TODO: Implement API call to delete account
-        // For now, just simulate deletion and logout
-        DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
-            isDeleting = false
-            
-            // In a real implementation, this would call the backend API
-            // to permanently delete the user's account and all associated data
-            Task {
-                await authManager.logout()
+
+        Task {
+            do {
+                let dataManager = try LocalDataManager()
+                try dataManager.deleteAllRecipes()
+                try dataManager.resetPreferences()
+
+                await MainActor.run {
+                    isDeleting = false
+                }
+            } catch {
+                print("Failed to delete data: \(error)")
+                await MainActor.run {
+                    isDeleting = false
+                }
             }
         }
     }
@@ -129,6 +133,5 @@ struct SettingsRowView: View {
 #Preview {
     NavigationStack {
         SettingsView()
-            .environmentObject(AuthManager())
     }
 }

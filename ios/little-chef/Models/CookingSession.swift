@@ -12,11 +12,11 @@ import Foundation
 struct CookingSession: Codable, Identifiable {
     // Local-only ID for SwiftUI, not sent to backend
     var id: UUID { UUID() }
-    
+
     let recipe: RecipeBase
     let commands: [Command]
     let timerStatus: [TimerStatus]
-    let conversationHistory: [Message]
+    var conversationHistory: [Message]
     let userPreferences: UserPreferencesDetailed
     let startedAt: Date
     
@@ -198,24 +198,24 @@ struct UserPreferencesDetailed: Codable {
     let llmModel: String
     let measurementSystem: String
     let dietaryRestrictions: [String]
-    let voiceSettings: VoiceSettings
-    
+    let voiceSettings: LocalVoiceSettings
+
     enum CodingKeys: String, CodingKey {
         case llmModel = "llm_model"
         case measurementSystem = "measurement_system"
         case dietaryRestrictions = "dietary_restrictions"
         case voiceSettings = "voice_settings"
     }
-    
+
     init() {
-        self.llmModel = "gpt-5-mini"
+        self.llmModel = "llama-3.2-3b-4bit"
         self.measurementSystem = "imperial"
         self.dietaryRestrictions = []
-        self.voiceSettings = VoiceSettings.defaultSettings
+        self.voiceSettings = LocalVoiceSettings.defaultSettings
     }
-    
-    init(from userPreferences: UserPreferences) {
-        self.llmModel = userPreferences.llmModel
+
+    init(from userPreferences: LocalUserPreferences) {
+        self.llmModel = "llama-3.2-3b-4bit"
         self.measurementSystem = userPreferences.measurementSystem
         self.dietaryRestrictions = userPreferences.dietaryRestrictions
         self.voiceSettings = userPreferences.voiceSettings

@@ -13,11 +13,16 @@ class LocalTimer: ObservableObject, Identifiable {
     let label: String
     let durationSeconds: Int
     let createdAt: Date
-    
+
     @Published var remainingSeconds: Int
     @Published var status: TimerStatusType
     @Published var startedAt: Date?
     @Published var completedAt: Date?
+
+    // Convenience properties for compatibility
+    var name: String { label }
+    var isRunning: Bool { status == .running }
+    var remainingMinutes: Int { remainingSeconds / 60 }
     
     private var timer: Foundation.Timer?
     
