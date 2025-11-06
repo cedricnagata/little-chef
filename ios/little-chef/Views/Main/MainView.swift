@@ -20,9 +20,11 @@ extension EnvironmentValues {
 }
 
 struct MainView: View {
+    @EnvironmentObject var parsingService: MLXLLMService
+    @EnvironmentObject var cookingService: MLXLLMService
+    @EnvironmentObject var cookingSessionManager: CookingSessionManager
+    @EnvironmentObject var voiceAssistant: VoiceAssistant
     @StateObject private var recipeManager = RecipeManager()
-    @StateObject private var cookingSessionManager = CookingSessionManager()
-    @StateObject private var voiceAssistant = VoiceAssistant()
     @State private var selectedTab = 0
     
     var body: some View {
@@ -36,6 +38,7 @@ struct MainView: View {
                 .tag(0)
                 .environmentObject(recipeManager)
                 .environmentObject(cookingSessionManager)
+                .environmentObject(parsingService)
             
             // Cooking Tab
             CookingSessionView()
@@ -47,6 +50,7 @@ struct MainView: View {
                 .environmentObject(recipeManager)
                 .environmentObject(cookingSessionManager)
                 .environmentObject(voiceAssistant)
+                .environmentObject(cookingService)
             
             // Profile Tab
             ProfileView()
@@ -203,4 +207,8 @@ struct SettingsOptionRow: View {
 
 #Preview {
     MainView()
+        .environmentObject(MLXLLMService.parsingService)
+        .environmentObject(MLXLLMService.cookingService)
+        .environmentObject(CookingSessionManager())
+        .environmentObject(VoiceAssistant())
 }

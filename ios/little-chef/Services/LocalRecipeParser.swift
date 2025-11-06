@@ -24,7 +24,7 @@ class LocalRecipeParser: ObservableObject {
     // MARK: - Initialization
 
     init(
-        llmService: MLXLLMService = .shared,
+        llmService: MLXLLMService = .parsingService,
         webScraper: WebScraperService = .shared,
         ocrService: OCRService = .shared
     ) {

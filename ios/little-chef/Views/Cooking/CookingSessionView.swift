@@ -9,6 +9,7 @@ import SwiftUI
 
 struct CookingSessionView: View {
     @EnvironmentObject var cookingSessionManager: CookingSessionManager
+    @EnvironmentObject var cookingService: MLXLLMService
     @EnvironmentObject var voiceAssistant: VoiceAssistant
     @EnvironmentObject var recipeManager: RecipeManager
     @State private var showingRecipeSelector = false
@@ -30,6 +31,14 @@ struct CookingSessionView: View {
             }
             .task {
                 await recipeManager.loadRecipes()
+            }
+            .overlay {
+                if cookingSessionManager.isLoading {
+                    ModelLoadingOverlay(
+                        modelName: "Cooking Assistant Model",
+                        progress: cookingService.loadProgress
+                    )
+                }
             }
         }
     }
@@ -1105,4 +1114,5 @@ struct AddTimerView: View {
         .environmentObject(CookingSessionManager())
         .environmentObject(VoiceAssistant())
         .environmentObject(RecipeManager())
+        .environmentObject(MLXLLMService.cookingService)
 }

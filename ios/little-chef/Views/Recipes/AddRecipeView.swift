@@ -11,7 +11,8 @@ import PhotosUI
 struct AddRecipeView: View {
     @Environment(\.dismiss) private var dismiss
     @EnvironmentObject var recipeManager: RecipeManager
-    
+    @EnvironmentObject var parsingService: MLXLLMService
+
     @State private var selectedInputType: RecipeInputType = .url
     @State private var urlInput = ""
     @State private var textInput = ""
@@ -154,6 +155,17 @@ struct AddRecipeView: View {
                 Text(errorAlertMessage)
             }
             .onAppear {
+                // Load parsing model into memory when entering add recipe tab
+                Task {
+                    do {
+                        print("📥 Loading parsing model for Add Recipe tab...")
+                        _ = try await parsingService.loadLocalModel()
+                        print("✅ Parsing model loaded")
+                    } catch {
+                        print("⚠️ Failed to load parsing model: \(error)")
+                    }
+                }
+
                 // Only clear stale error state when first appearing
                 if !showingErrorAlert && !isParsingRecipe {
                     lastProcessedError = nil
@@ -161,8 +173,21 @@ struct AddRecipeView: View {
                     recipeManager.clearError()
                 }
             }
+            .onDisappear {
+                // Unload parsing model from memory when leaving add recipe tab
+                parsingService.unloadModel()
+                print("🗑️ Parsing model unloaded when leaving Add Recipe tab")
+            }
         }
         .navigationViewStyle(.stack)
+        .overlay {
+            if parsingService.isLoadingModel {
+                ModelLoadingOverlay(
+                    modelName: "Recipe Parsing Model",
+                    progress: parsingService.loadProgress
+                )
+            }
+        }
     }
     
     private var canParseRecipe: Bool {
@@ -554,4 +579,5 @@ struct ParsedRecipePreview: View {
 #Preview {
     AddRecipeView()
         .environmentObject(RecipeManager())
+        .environmentObject(MLXLLMService.parsingService)
 }

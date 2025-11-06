@@ -24,7 +24,7 @@ class LocalCookingAgent: ObservableObject {
 
     // MARK: - Initialization
 
-    init(llmService: MLXLLMService = .shared, timerManager: TimerManager) {
+    init(llmService: MLXLLMService = .cookingService, timerManager: TimerManager) {
         self.llmService = llmService
         self.timerManager = timerManager
     }
@@ -54,122 +54,28 @@ class LocalCookingAgent: ObservableObject {
             messages = [systemMessage] + Array(messages.suffix(maxHistoryLength - 1))
         }
 
-        // Generate response with tools
+        // Create cooking tools (timer tools only)
+        let cookingTools = CookingTools(timerManager: timerManager)
+
+        // Generate response - LLM will decide which tools to use
         let response = try await llmService.generateChatCompletion(
             messages: messages,
-            tools: ToolDefinition.allTools
+            cookingTools: cookingTools
         )
 
-        // Check if response contains a tool call
-        if let toolCall = response.parseToolCall() {
-            // Execute the tool
-            let toolResult = ToolExecutor.execute(toolCall, timerManager: timerManager)
+        // Tool calls are now handled automatically within generateChatCompletion
+        // Just add to history and return response
+        conversationHistory.append(ChatMessage(role: .user, content: userMessage))
+        conversationHistory.append(ChatMessage(role: .assistant, content: response))
 
-            // Add tool execution to history
-            conversationHistory.append(ChatMessage(role: .user, content: userMessage))
-            conversationHistory.append(ChatMessage(role: .assistant, content: response))
-
-            // Generate follow-up response acknowledging tool execution
-            let toolResultMessage = ChatMessage(
-                role: .user,
-                content: "Tool execution result: \(toolResult.message)"
-            )
-
-            let followUpMessages = [systemMessage] + conversationHistory + [toolResultMessage]
-
-            let followUpResponse = try await llmService.generateChatCompletion(
-                messages: followUpMessages,
-                tools: nil // No tools for follow-up to avoid loops
-            )
-
-            // Update history
-            conversationHistory.append(ChatMessage(role: .assistant, content: followUpResponse))
-
-            // Trim history if needed
-            if conversationHistory.count > maxHistoryLength {
-                conversationHistory = Array(conversationHistory.suffix(maxHistoryLength))
-            }
-
-            return followUpResponse
-
-        } else {
-            // No tool call, just add to history and return response
-            conversationHistory.append(ChatMessage(role: .user, content: userMessage))
-            conversationHistory.append(ChatMessage(role: .assistant, content: response))
-
-            // Trim history if needed
-            if conversationHistory.count > maxHistoryLength {
-                conversationHistory = Array(conversationHistory.suffix(maxHistoryLength))
-            }
-
-            return response
+        // Trim history if needed
+        if conversationHistory.count > maxHistoryLength {
+            conversationHistory = Array(conversationHistory.suffix(maxHistoryLength))
         }
+
+        return response
     }
 
-    /// Process query with streaming response
-    func processQueryStreaming(
-        userMessage: String,
-        recipe: Recipe?,
-        conversationContext: [Message],
-        onToken: @escaping (String) -> Void
-    ) async throws {
-        isProcessing = true
-        defer { isProcessing = false }
-
-        // Build system message with context
-        let systemMessage = buildSystemMessage(recipe: recipe, conversationContext: conversationContext)
-
-        // Add user message
-        let userChatMessage = ChatMessage(role: .user, content: userMessage)
-
-        // Build messages array
-        var messages: [ChatMessage] = [systemMessage] + conversationHistory + [userChatMessage]
-
-        // Limit conversation history
-        if messages.count > maxHistoryLength {
-            messages = [systemMessage] + Array(messages.suffix(maxHistoryLength - 1))
-        }
-
-        // Accumulate response for tool call detection
-        var fullResponse = ""
-
-        // Stream response
-        try await llmService.streamChatCompletion(
-            messages: messages,
-            tools: ToolDefinition.allTools
-        ) { token in
-            fullResponse += token
-            onToken(token)
-        }
-
-        // Check if response contains a tool call
-        if let toolCall = fullResponse.parseToolCall() {
-            // Execute the tool
-            let toolResult = ToolExecutor.execute(toolCall, timerManager: timerManager)
-
-            // Notify about tool execution
-            onToken("\n\n[\(toolResult.message)]")
-
-            // Update history
-            conversationHistory.append(ChatMessage(role: .user, content: userMessage))
-            conversationHistory.append(ChatMessage(role: .assistant, content: fullResponse))
-
-            // Trim history if needed
-            if conversationHistory.count > maxHistoryLength {
-                conversationHistory = Array(conversationHistory.suffix(maxHistoryLength))
-            }
-
-        } else {
-            // No tool call, just update history
-            conversationHistory.append(ChatMessage(role: .user, content: userMessage))
-            conversationHistory.append(ChatMessage(role: .assistant, content: fullResponse))
-
-            // Trim history if needed
-            if conversationHistory.count > maxHistoryLength {
-                conversationHistory = Array(conversationHistory.suffix(maxHistoryLength))
-            }
-        }
-    }
 
     /// Clear conversation history
     func clearHistory() {
@@ -186,14 +92,18 @@ class LocalCookingAgent: ObservableObject {
 
     private func buildSystemMessage(recipe: Recipe?, conversationContext: [Message]) -> ChatMessage {
         var systemPrompt = """
-        You are LittleChef, a friendly and helpful AI cooking assistant. You help users cook recipes by:
-        - Answering questions about recipes, ingredients, and cooking techniques
-        - Managing cooking timers
-        - Providing step-by-step guidance
-        - Offering substitution suggestions
-        - Scaling recipe quantities
+        You are LittleChef, a friendly and helpful AI cooking assistant.
 
-        You have access to timer management tools. When users ask about timers, use the appropriate tool.
+        IMPORTANT: You have timer management tools available. Use them ONLY when the user explicitly asks to:
+        - Set/create a timer: "set a timer for 10 minutes", "create a timer for the marinade"
+        - Start a timer: "start the timer", "start the pasta timer"
+        - Stop a timer: "stop the timer", "pause the chicken timer"
+        - Remove a timer: "delete the timer", "remove the pasta timer"
+
+        For ALL other requests (cooking questions, recipe advice, techniques, measurements, etc.):
+        - Answer directly and conversationally
+        - Do NOT use tools
+        - Examples: "how much salt?", "what temperature?", "how long to cook?", "can I substitute?"
 
         Be concise, friendly, and practical. Focus on helping the user cook successfully.
         """

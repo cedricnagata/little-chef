@@ -15,9 +15,12 @@ class RecipeManager: ObservableObject {
     @Published var errorMessage: String?
 
     private var dataManager: LocalDataManager
-    private let recipeParser = LocalRecipeParser()
+    private let recipeParser: LocalRecipeParser
+    private let parsingService: MLXLLMService
 
-    init() {
+    init(parsingService: MLXLLMService = .parsingService) {
+        self.parsingService = parsingService
+        self.recipeParser = LocalRecipeParser(llmService: parsingService)
         do {
             dataManager = try LocalDataManager()
         } catch {
@@ -126,6 +129,7 @@ class RecipeManager: ObservableObject {
         errorMessage = nil
 
         do {
+            // Model is already loaded by AddRecipeView.onAppear
             let response = try await recipeParser.parseFromURL(url)
             isLoading = false
             return response
@@ -141,6 +145,7 @@ class RecipeManager: ObservableObject {
         errorMessage = nil
 
         do {
+            // Model is already loaded by AddRecipeView.onAppear
             let response = try await recipeParser.parseFromText(text)
             isLoading = false
             return response
@@ -156,6 +161,7 @@ class RecipeManager: ObservableObject {
         errorMessage = nil
 
         do {
+            // Model is already loaded by AddRecipeView.onAppear
             let response = try await recipeParser.parseFromImages(images)
             isLoading = false
             return response

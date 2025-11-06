@@ -8,31 +8,23 @@
 import SwiftUI
 
 struct ModelManagementView: View {
-    @EnvironmentObject var llmService: MLXLLMService
+    @EnvironmentObject var parsingService: MLXLLMService
+    @EnvironmentObject var cookingService: MLXLLMService
 
     var body: some View {
         Form {
-            // Model Info Section
+            // Cooking Model Section
             Section {
-                if let modelInfo = llmService.getModelInfo() {
+                if let modelInfo = cookingService.getModelInfo() {
                     InfoRow(label: "Name", value: modelInfo.name)
-                    InfoRow(label: "Parameters", value: modelInfo.parameters)
+                    InfoRow(label: "Model", value: modelInfo.parameters)
                     InfoRow(label: "Quantization", value: modelInfo.quantization)
-                    InfoRow(label: "Context Length", value: "\(modelInfo.contextLength) tokens")
-                } else {
-                    Text("Model not loaded")
-                        .foregroundColor(.secondary)
                 }
-            } header: {
-                Text("Model Information")
-            }
 
-            // Model Status Section
-            Section {
                 HStack {
                     Text("Status")
                     Spacer()
-                    if llmService.isLoaded {
+                    if cookingService.isLoaded {
                         Label("Loaded", systemImage: "checkmark.circle.fill")
                             .foregroundColor(.green)
                     } else {
@@ -41,46 +33,68 @@ struct ModelManagementView: View {
                     }
                 }
             } header: {
-                Text("Status")
+                Text("Cooking Assistant Model (Qwen)")
+            }
+
+            // Parsing Model Section
+            Section {
+                if let modelInfo = parsingService.getModelInfo() {
+                    InfoRow(label: "Name", value: modelInfo.name)
+                    InfoRow(label: "Model", value: modelInfo.parameters)
+                    InfoRow(label: "Quantization", value: modelInfo.quantization)
+                }
+
+                HStack {
+                    Text("Status")
+                    Spacer()
+                    if parsingService.isLoaded {
+                        Label("Loaded", systemImage: "checkmark.circle.fill")
+                            .foregroundColor(.green)
+                    } else {
+                        Label("Not Loaded", systemImage: "xmark.circle.fill")
+                            .foregroundColor(.red)
+                    }
+                }
+            } header: {
+                Text("Recipe Parsing Model (Llama)")
             }
 
             // Model Actions Section
             Section {
-                if !llmService.isLoaded {
-                    Button(action: {
-                        loadModel()
-                    }) {
-                        Label("Load Model", systemImage: "arrow.down.circle")
-                    }
-                } else {
-                    Button(action: {
-                        unloadModel()
-                    }) {
-                        Label("Unload Model", systemImage: "arrow.up.circle")
-                    }
+                Button(action: loadModels) {
+                    Label("Load All Models", systemImage: "arrow.down.circle")
                 }
+                .disabled(parsingService.isLoaded && cookingService.isLoaded)
+
+                Button(action: unloadModels) {
+                    Label("Unload All Models", systemImage: "arrow.up.circle")
+                }
+                .disabled(!parsingService.isLoaded && !cookingService.isLoaded)
             } header: {
                 Text("Actions")
             } footer: {
-                Text("Unloading the model frees up memory. You can reload it anytime. The model is managed automatically by the app.")
+                Text("Little Chef uses two specialized models: Qwen for cooking assistance with tool calling support, and Llama for recipe parsing. Models are managed automatically by the app.")
             }
         }
         .navigationTitle("Model Management")
         .navigationBarTitleDisplayMode(.large)
     }
 
-    private func loadModel() {
+    private func loadModels() {
         Task {
             do {
-                _ = try await llmService.loadLocalModel()
+                async let parsing = parsingService.loadLocalModel()
+                async let cooking = cookingService.loadLocalModel()
+                _ = try await (parsing, cooking)
             } catch {
-                print("Failed to load model: \(error)")
+                print("Failed to load models: \(error)")
             }
         }
     }
 
-    private func unloadModel() {
-        llmService.unloadModel()
+    private func unloadModels() {
+        parsingService.unloadModel()
+        cookingService.unloadModel()
     }
 }
 
@@ -101,6 +115,7 @@ struct InfoRow: View {
 #Preview {
     NavigationStack {
         ModelManagementView()
-            .environmentObject(MLXLLMService.shared)
+            .environmentObject(MLXLLMService.parsingService)
+            .environmentObject(MLXLLMService.cookingService)
     }
 }

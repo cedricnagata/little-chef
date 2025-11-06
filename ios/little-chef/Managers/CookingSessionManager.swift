@@ -18,9 +18,10 @@ class CookingSessionManager: ObservableObject, TimerManager {
 
     private var dataManager: LocalDataManager
     private var cookingAgent: LocalCookingAgent?
-    private let llmService = MLXLLMService.shared
+    private let cookingService: MLXLLMService
 
-    init() {
+    init(cookingService: MLXLLMService = .cookingService) {
+        self.cookingService = cookingService
         do {
             dataManager = try LocalDataManager()
         } catch {
@@ -31,18 +32,31 @@ class CookingSessionManager: ObservableObject, TimerManager {
     // MARK: - Session Management
 
     func startCookingSession(with recipe: Recipe) async {
-        // Load user preferences from local storage
-        let preferences = await loadLocalPreferences()
+        isLoading = true
+        defer { isLoading = false }
 
-        let recipeBase = RecipeBase(from: recipe)
+        do {
+            // Load cooking model into memory before starting session
+            print("🔵 Loading cooking model for session...")
+            _ = try await cookingService.loadLocalModel()
+            print("✅ Cooking model loaded, starting session")
 
-        currentSession = CookingSession(recipe: recipeBase, userPreferences: preferences)
+            // Load user preferences from local storage
+            let preferences = await loadLocalPreferences()
 
-        // Initialize cooking agent with timer manager
-        cookingAgent = LocalCookingAgent(llmService: llmService, timerManager: self)
+            let recipeBase = RecipeBase(from: recipe)
 
-        error = nil
-        print("🔵 Started new cooking session locally")
+            currentSession = CookingSession(recipe: recipeBase, userPreferences: preferences)
+
+            // Initialize cooking agent with timer manager (uses Qwen model by default)
+            cookingAgent = LocalCookingAgent(timerManager: self)
+
+            error = nil
+            print("🔵 Started new cooking session locally")
+        } catch {
+            self.error = "Failed to load cooking model: \(error.localizedDescription)"
+            print("❌ Failed to start cooking session: \(error)")
+        }
     }
 
     private func loadLocalPreferences() async -> UserPreferencesDetailed {
@@ -68,7 +82,10 @@ class CookingSessionManager: ObservableObject, TimerManager {
         // Clear all timers
         clearAllTimers()
 
-        print("🔴 Ended cooking session - all state reset")
+        // Unload cooking model from memory
+        cookingService.unloadModel()
+
+        print("🔴 Ended cooking session, unloaded model, and reset state")
     }
 
     private func clearAllTimers() {
@@ -167,8 +184,6 @@ class CookingSessionManager: ObservableObject, TimerManager {
             )
         )
 
-        var fullResponse = ""
-
         do {
             // Convert session to Recipe for agent
             let recipe = createRecipeFromSession(session)
@@ -176,15 +191,15 @@ class CookingSessionManager: ObservableObject, TimerManager {
             // Convert conversation history
             let conversationContext = session.conversationHistory
 
-            // Process query with streaming
-            try await agent.processQueryStreaming(
+            // Process query (no streaming - get full response)
+            let fullResponse = try await agent.processQuery(
                 userMessage: query,
                 recipe: recipe,
                 conversationContext: conversationContext
-            ) { token in
-                fullResponse += token
-                onToken(token)
-            }
+            )
+
+            // Send full response via onToken callback
+            onToken(fullResponse)
 
             // Add assistant response to history
             updatedSession.conversationHistory.append(

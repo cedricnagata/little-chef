@@ -6,248 +6,123 @@
 //
 
 import Foundation
+import MLXLMCommon
 
-/// Represents a tool that the LLM can call
-struct ToolDefinition: Codable {
+// MARK: - Timer Manager Protocol
+
+/// Protocol for managing timers (implemented by CookingSessionManager)
+protocol TimerManager {
+    func addTimer(name: String, durationMinutes: Int) throws
+    func startTimer(name: String) throws
+    func stopTimer(name: String) throws
+    func removeTimer(name: String) throws
+    func getTimer(name: String) -> LocalTimer?
+}
+
+// MARK: - Timer Tool Types
+
+/// Timer tool input/output types
+struct AddTimerInput: Codable {
     let name: String
-    let description: String
-    let parameters: ToolParameters
-
-    /// Convert to JSON schema format for LLM prompt
-    func toJSONSchema() -> String {
-        let encoder = JSONEncoder()
-        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-
-        guard let data = try? encoder.encode(self),
-              let jsonString = String(data: data, encoding: .utf8) else {
-            return "{}"
-        }
-
-        return jsonString
-    }
-
-    // TODO: Re-implement tool schema conversion once we understand the MLXLLM Tool API better
-    // For now, tools are not passed to the LLM
+    let minutes: Int
 }
 
-/// Tool parameter schema
-struct ToolParameters: Codable {
-    let type: String
-    let properties: [String: PropertySchema]
-    let required: [String]
-}
-
-/// Property schema for tool parameters
-struct PropertySchema: Codable {
-    let type: String
-    let description: String
-    let enumValues: [String]?
-
-    enum CodingKeys: String, CodingKey {
-        case type, description
-        case enumValues = "enum"
-    }
-}
-
-// MARK: - Predefined Tools
-
-extension ToolDefinition {
-    /// Add timer tool
-    static let addTimer = ToolDefinition(
-        name: "add_timer",
-        description: "Creates a new cooking timer with a specified name and duration in minutes",
-        parameters: ToolParameters(
-            type: "object",
-            properties: [
-                "name": PropertySchema(
-                    type: "string",
-                    description: "Descriptive name for the timer (e.g., 'boil pasta', 'marinate chicken')",
-                    enumValues: nil
-                ),
-                "minutes": PropertySchema(
-                    type: "number",
-                    description: "Duration in minutes for the timer",
-                    enumValues: nil
-                )
-            ],
-            required: ["name", "minutes"]
-        )
-    )
-
-    /// Start timer tool
-    static let startTimer = ToolDefinition(
-        name: "start_timer",
-        description: "Starts a timer that was previously created",
-        parameters: ToolParameters(
-            type: "object",
-            properties: [
-                "name": PropertySchema(
-                    type: "string",
-                    description: "Name of the timer to start",
-                    enumValues: nil
-                )
-            ],
-            required: ["name"]
-        )
-    )
-
-    /// Stop timer tool
-    static let stopTimer = ToolDefinition(
-        name: "stop_timer",
-        description: "Stops a currently running timer",
-        parameters: ToolParameters(
-            type: "object",
-            properties: [
-                "name": PropertySchema(
-                    type: "string",
-                    description: "Name of the timer to stop",
-                    enumValues: nil
-                )
-            ],
-            required: ["name"]
-        )
-    )
-
-    /// Remove timer tool
-    static let removeTimer = ToolDefinition(
-        name: "remove_timer",
-        description: "Removes/deletes a timer completely",
-        parameters: ToolParameters(
-            type: "object",
-            properties: [
-                "name": PropertySchema(
-                    type: "string",
-                    description: "Name of the timer to remove",
-                    enumValues: nil
-                )
-            ],
-            required: ["name"]
-        )
-    )
-
-    /// All available tools
-    static let allTools: [ToolDefinition] = [
-        addTimer,
-        startTimer,
-        stopTimer,
-        removeTimer
-    ]
-}
-
-// MARK: - Tool Call Response
-
-/// Represents a tool call made by the LLM
-struct ToolCall: Codable {
+struct StartTimerInput: Codable {
     let name: String
-    let arguments: [String: Any]
+}
 
-    enum CodingKeys: String, CodingKey {
-        case name, arguments
-    }
+struct StopTimerInput: Codable {
+    let name: String
+}
 
-    init(name: String, arguments: [String: Any]) {
-        self.name = name
-        self.arguments = arguments
-    }
+struct RemoveTimerInput: Codable {
+    let name: String
+}
 
-    init(from decoder: Decoder) throws {
-        let container = try decoder.container(keyedBy: CodingKeys.self)
-        name = try container.decode(String.self, forKey: .name)
+struct TimerOutput: Codable {
+    let success: Bool
+    let message: String
+}
 
-        // Decode arguments as flexible JSON
-        let argsContainer = try container.nestedContainer(keyedBy: DynamicCodingKeys.self, forKey: .arguments)
-        var args: [String: Any] = [:]
+// MARK: - Cooking Tools
 
-        for key in argsContainer.allKeys {
-            if let stringValue = try? argsContainer.decode(String.self, forKey: key) {
-                args[key.stringValue] = stringValue
-            } else if let intValue = try? argsContainer.decode(Int.self, forKey: key) {
-                args[key.stringValue] = intValue
-            } else if let doubleValue = try? argsContainer.decode(Double.self, forKey: key) {
-                args[key.stringValue] = doubleValue
-            } else if let boolValue = try? argsContainer.decode(Bool.self, forKey: key) {
-                args[key.stringValue] = boolValue
+/// Timer tools for cooking assistant using MLXLLM Tool format
+struct CookingTools {
+    let addTimer: Tool<AddTimerInput, TimerOutput>
+    let startTimer: Tool<StartTimerInput, TimerOutput>
+    let stopTimer: Tool<StopTimerInput, TimerOutput>
+    let removeTimer: Tool<RemoveTimerInput, TimerOutput>
+
+    init(timerManager: TimerManager) {
+        // Add Timer Tool
+        addTimer = Tool<AddTimerInput, TimerOutput>(
+            name: "add_timer",
+            description: "Creates a new cooking timer with a specified name and duration in minutes",
+            parameters: [
+                .required("name", type: .string, description: "Descriptive name for the timer (e.g., 'boil pasta', 'marinate chicken')"),
+                .required("minutes", type: .int, description: "Duration in minutes for the timer")
+            ]
+        ) { input in
+            do {
+                try timerManager.addTimer(name: input.name, durationMinutes: input.minutes)
+                return TimerOutput(success: true, message: "Timer '\(input.name)' added for \(input.minutes) minutes")
+            } catch {
+                return TimerOutput(success: false, message: "Failed to add timer: \(error.localizedDescription)")
             }
         }
 
-        arguments = args
-    }
+        // Start Timer Tool
+        startTimer = Tool<StartTimerInput, TimerOutput>(
+            name: "start_timer",
+            description: "Starts a timer that was previously created",
+            parameters: [
+                .required("name", type: .string, description: "Name of the timer to start")
+            ]
+        ) { input in
+            do {
+                try timerManager.startTimer(name: input.name)
+                return TimerOutput(success: true, message: "Timer '\(input.name)' started")
+            } catch {
+                return TimerOutput(success: false, message: "Failed to start timer: \(error.localizedDescription)")
+            }
+        }
 
-    func encode(to encoder: Encoder) throws {
-        var container = encoder.container(keyedBy: CodingKeys.self)
-        try container.encode(name, forKey: .name)
+        // Stop Timer Tool
+        stopTimer = Tool<StopTimerInput, TimerOutput>(
+            name: "stop_timer",
+            description: "Stops a currently running timer",
+            parameters: [
+                .required("name", type: .string, description: "Name of the timer to stop")
+            ]
+        ) { input in
+            do {
+                try timerManager.stopTimer(name: input.name)
+                return TimerOutput(success: true, message: "Timer '\(input.name)' stopped")
+            } catch {
+                return TimerOutput(success: false, message: "Failed to stop timer: \(error.localizedDescription)")
+            }
+        }
 
-        var argsContainer = container.nestedContainer(keyedBy: DynamicCodingKeys.self, forKey: .arguments)
-
-        for (key, value) in arguments {
-            let codingKey = DynamicCodingKeys(stringValue: key)!
-
-            if let stringValue = value as? String {
-                try argsContainer.encode(stringValue, forKey: codingKey)
-            } else if let intValue = value as? Int {
-                try argsContainer.encode(intValue, forKey: codingKey)
-            } else if let doubleValue = value as? Double {
-                try argsContainer.encode(doubleValue, forKey: codingKey)
-            } else if let boolValue = value as? Bool {
-                try argsContainer.encode(boolValue, forKey: codingKey)
+        // Remove Timer Tool
+        removeTimer = Tool<RemoveTimerInput, TimerOutput>(
+            name: "remove_timer",
+            description: "Removes/deletes a timer completely",
+            parameters: [
+                .required("name", type: .string, description: "Name of the timer to remove")
+            ]
+        ) { input in
+            do {
+                try timerManager.removeTimer(name: input.name)
+                return TimerOutput(success: true, message: "Timer '\(input.name)' removed")
+            } catch {
+                return TimerOutput(success: false, message: "Failed to remove timer: \(error.localizedDescription)")
             }
         }
     }
-}
 
-/// Wrapper for tool call response from LLM
-struct ToolCallResponse: Codable {
-    let toolCall: ToolCall
-
-    enum CodingKeys: String, CodingKey {
-        case toolCall = "tool_call"
+    /// Get all tool schemas for passing to UserInput
+    var allSchemas: [[String: Any]] {
+        [addTimer.schema, startTimer.schema, stopTimer.schema, removeTimer.schema]
     }
 }
 
-// MARK: - Dynamic Coding Keys
-
-struct DynamicCodingKeys: CodingKey {
-    var stringValue: String
-    var intValue: Int?
-
-    init?(stringValue: String) {
-        self.stringValue = stringValue
-        self.intValue = nil
-    }
-
-    init?(intValue: Int) {
-        self.stringValue = "\(intValue)"
-        self.intValue = intValue
-    }
-}
-
-// MARK: - Tool Call Parser
-
-extension String {
-    /// Try to parse tool call from LLM response
-    func parseToolCall() -> ToolCall? {
-        // Look for JSON object in the response
-        guard let jsonStart = self.firstIndex(of: "{"),
-              let jsonEnd = self.lastIndex(of: "}") else {
-            return nil
-        }
-
-        let jsonString = String(self[jsonStart...jsonEnd])
-
-        guard let data = jsonString.data(using: .utf8) else {
-            return nil
-        }
-
-        // Try to parse as ToolCallResponse
-        if let toolCallResponse = try? JSONDecoder().decode(ToolCallResponse.self, from: data) {
-            return toolCallResponse.toolCall
-        }
-
-        // Try to parse as direct ToolCall
-        if let toolCall = try? JSONDecoder().decode(ToolCall.self, from: data) {
-            return toolCall
-        }
-
-        return nil
-    }
-}
