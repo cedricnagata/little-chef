@@ -32,11 +32,8 @@ class CookingSessionManager: ObservableObject, TimerManager {
     // MARK: - Session Management
 
     func startCookingSession(with recipe: Recipe) async {
-        isLoading = true
-        defer { isLoading = false }
-
         do {
-            // Load cooking model into memory before starting session
+            // Load cooking model into memory when starting session
             print("🔵 Loading cooking model for session...")
             _ = try await cookingService.loadLocalModel()
             print("✅ Cooking model loaded, starting session")
@@ -82,7 +79,7 @@ class CookingSessionManager: ObservableObject, TimerManager {
         // Clear all timers
         clearAllTimers()
 
-        // Unload cooking model from memory
+        // Unload cooking model from memory when ending session
         cookingService.unloadModel()
 
         print("🔴 Ended cooking session, unloaded model, and reset state")

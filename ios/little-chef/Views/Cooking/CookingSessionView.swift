@@ -33,7 +33,7 @@ struct CookingSessionView: View {
                 await recipeManager.loadRecipes()
             }
             .overlay {
-                if cookingSessionManager.isLoading {
+                if cookingService.isLoadingModel {
                     ModelLoadingOverlay(
                         modelName: "Cooking Assistant Model",
                         progress: cookingService.loadProgress
