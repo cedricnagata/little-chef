@@ -32,27 +32,31 @@ class CookingSessionManager: ObservableObject, TimerManager {
     // MARK: - Session Management
 
     func startCookingSession(with recipe: Recipe) async {
+        // Load user preferences from local storage
+        let preferences = await loadLocalPreferences()
+        let recipeBase = RecipeBase(from: recipe)
+
+        // Create session immediately (navigation will happen)
+        currentSession = CookingSession(recipe: recipeBase, userPreferences: preferences)
+
+        error = nil
+        print("🔵 Started new cooking session locally (model will load on page)")
+    }
+
+    func loadModelForSession() async {
         do {
-            // Load cooking model into memory when starting session
+            // Load cooking model into memory after navigating to session page
             print("🔵 Loading cooking model for session...")
             _ = try await cookingService.loadLocalModel()
-            print("✅ Cooking model loaded, starting session")
-
-            // Load user preferences from local storage
-            let preferences = await loadLocalPreferences()
-
-            let recipeBase = RecipeBase(from: recipe)
-
-            currentSession = CookingSession(recipe: recipeBase, userPreferences: preferences)
+            print("✅ Cooking model loaded")
 
             // Initialize cooking agent with timer manager (uses Qwen model by default)
             cookingAgent = LocalCookingAgent(timerManager: self)
 
             error = nil
-            print("🔵 Started new cooking session locally")
         } catch {
             self.error = "Failed to load cooking model: \(error.localizedDescription)"
-            print("❌ Failed to start cooking session: \(error)")
+            print("❌ Failed to load cooking model: \(error)")
         }
     }
 

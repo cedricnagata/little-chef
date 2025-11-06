@@ -15,12 +15,21 @@ struct CookingSessionView: View {
     @State private var showingRecipeSelector = false
     @State private var textInput = ""
     @State private var isAnimating = false
-    
+    @State private var isLoadingCookingModel = false
+
     var body: some View {
         NavigationStack {
             ZStack {
                 if cookingSessionManager.hasActiveSession() {
-                    ActiveCookingView()
+                    ActiveCookingView(isLoadingModel: $isLoadingCookingModel)
+                    .overlay {
+                        if isLoadingCookingModel {
+                            ModelLoadingOverlay(
+                                modelName: "Cooking Assistant Model",
+                                progress: cookingService.loadProgress
+                            )
+                        }
+                    }
                 } else {
                     StartCookingView(showingRecipeSelector: $showingRecipeSelector)
                 }
@@ -31,14 +40,6 @@ struct CookingSessionView: View {
             }
             .task {
                 await recipeManager.loadRecipes()
-            }
-            .overlay {
-                if cookingService.isLoadingModel {
-                    ModelLoadingOverlay(
-                        modelName: "Cooking Assistant Model",
-                        progress: cookingService.loadProgress
-                    )
-                }
             }
         }
     }
@@ -109,7 +110,8 @@ struct ActiveCookingView: View {
     @EnvironmentObject var voiceAssistant: VoiceAssistant
     @State private var textInput = ""
     @State private var showingEndSessionAlert = false
-    
+    @Binding var isLoadingModel: Bool
+
     var body: some View {
         GeometryReader { geometry in
             if geometry.size.width > geometry.size.height {
@@ -167,6 +169,13 @@ struct ActiveCookingView: View {
             Text("Are you sure you want to end this cooking session?")
         }
         .onAppear {
+            // Load cooking model when view appears
+            Task {
+                isLoadingModel = true
+                await cookingSessionManager.loadModelForSession()
+                isLoadingModel = false
+            }
+
             // Update voice assistant settings when view appears
             updateVoiceAssistantSettings()
         }
