@@ -216,18 +216,28 @@ class MLXLLMService: ObservableObject {
     private func handleToolCall(_ toolCall: ToolCall, cookingTools: CookingTools) async throws -> String {
         print("🔧 Tool called: \(toolCall.function.name)")
 
+        let toolResultJSON: String
         switch toolCall.function.name {
-        case "add_timer":
-            return try await toolCall.execute(with: cookingTools.addTimer).toolResult
+        case "set_timer":
+            toolResultJSON = try await toolCall.execute(with: cookingTools.setTimer).toolResult
         case "start_timer":
-            return try await toolCall.execute(with: cookingTools.startTimer).toolResult
-        case "stop_timer":
-            return try await toolCall.execute(with: cookingTools.stopTimer).toolResult
-        case "remove_timer":
-            return try await toolCall.execute(with: cookingTools.removeTimer).toolResult
+            toolResultJSON = try await toolCall.execute(with: cookingTools.startTimer).toolResult
+        case "pause_timer":
+            toolResultJSON = try await toolCall.execute(with: cookingTools.pauseTimer).toolResult
+        case "delete_timer":
+            toolResultJSON = try await toolCall.execute(with: cookingTools.deleteTimer).toolResult
         default:
             return "Error: Unknown tool '\(toolCall.function.name)'"
         }
+
+        // Parse the JSON to extract just the message
+        if let data = toolResultJSON.data(using: .utf8),
+           let timerOutput = try? JSONDecoder().decode(TimerOutput.self, from: data) {
+            return timerOutput.message
+        }
+
+        // Fallback to raw result if parsing fails
+        return toolResultJSON
     }
 
     // MARK: - Helper Methods

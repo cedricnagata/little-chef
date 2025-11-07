@@ -90,9 +90,6 @@ class CookingSessionManager: ObservableObject, TimerManager {
     }
 
     private func clearAllTimers() {
-        for timer in localTimers {
-            timer.stop()
-        }
         localTimers.removeAll()
         print("🗑️ Cleared all timers")
     }
@@ -382,7 +379,13 @@ class CookingSessionManager: ObservableObject, TimerManager {
 
     // MARK: - TimerManager Protocol Implementation
 
-    func addTimer(name: String, durationMinutes: Int) {
+    func setTimer(name: String, durationMinutes: Int) {
+        // Check if timer with this name already exists
+        if localTimers.contains(where: { $0.label == name }) {
+            print("⚠️ Timer '\(name)' already exists, not creating duplicate")
+            return
+        }
+
         let timerId = UUID().uuidString
         let durationSeconds = durationMinutes * 60
 
@@ -391,46 +394,62 @@ class CookingSessionManager: ObservableObject, TimerManager {
             label: name,
             durationSeconds: durationSeconds,
             remainingSeconds: durationSeconds,
-            status: .pending,
+            status: .new,
             createdAt: Date()
         )
         localTimers.append(timer)
-        print("🕐 Added timer: \(name) (\(durationMinutes)min)")
+        print("🕐 Set timer: \(name) (\(durationMinutes)min)")
+
+        // Automatically start the timer - dispatch to next RunLoop cycle
+        DispatchQueue.main.async {
+            timer.start()
+            print("▶️ Timer started automatically")
+        }
     }
 
     func startTimer(name: String) {
         if let index = localTimers.firstIndex(where: { $0.label == name }) {
-            localTimers[index].start()
-            print("▶️ Started timer: \(name)")
+            // Dispatch to next RunLoop cycle to ensure proper timing
+            DispatchQueue.main.async { [weak self] in
+                self?.localTimers[index].start()
+                print("▶️ Started timer: \(name)")
+            }
+        } else {
+            print("⚠️ Timer '\(name)' not found, cannot start")
         }
     }
 
-    func stopTimer(name: String) {
+    func pauseTimer(name: String) {
         if let index = localTimers.firstIndex(where: { $0.label == name }) {
-            localTimers[index].stop()
-            print("⏹️ Stopped timer: \(name)")
+            localTimers[index].pause()
+            print("⏸️ Paused timer: \(name)")
+        } else {
+            print("⚠️ Timer '\(name)' not found, cannot pause")
         }
     }
 
-    func removeTimer(name: String) {
+    func deleteTimer(name: String) {
         localTimers.removeAll { $0.label == name }
-        print("🗑️ Removed timer: \(name)")
+        print("🗑️ Deleted timer: \(name)")
     }
 
     func getTimer(name: String) -> LocalTimer? {
         return localTimers.first { $0.label == name }
     }
 
+    func getAllTimers() -> [LocalTimer] {
+        return localTimers
+    }
+
     // MARK: - Manual Timer Management (for UI)
 
     func addManualTimer(label: String, durationMinutes: Int) {
-        addTimer(name: label, durationMinutes: durationMinutes)
+        setTimer(name: label, durationMinutes: durationMinutes)
     }
 
     func deleteManualTimer(id: String) {
         if let timerIndex = localTimers.firstIndex(where: { $0.id == id }) {
             let timer = localTimers[timerIndex]
-            timer.stop()
             localTimers.remove(at: timerIndex)
             print("🗑️ Manually deleted timer: \(timer.label)")
         }

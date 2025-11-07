@@ -177,7 +177,7 @@ struct TimerStatus: Codable, Identifiable {
 }
 
 enum TimerStatusType: String, Codable {
-    case pending, running, paused, completed, stopped
+    case new, running, paused, ended
 }
 
 struct Message: Codable, Identifiable {

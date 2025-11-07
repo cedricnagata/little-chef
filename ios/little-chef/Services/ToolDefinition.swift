@@ -12,17 +12,18 @@ import MLXLMCommon
 
 /// Protocol for managing timers (implemented by CookingSessionManager)
 protocol TimerManager {
-    func addTimer(name: String, durationMinutes: Int) throws
+    func setTimer(name: String, durationMinutes: Int) throws
     func startTimer(name: String) throws
-    func stopTimer(name: String) throws
-    func removeTimer(name: String) throws
+    func pauseTimer(name: String) throws
+    func deleteTimer(name: String) throws
     func getTimer(name: String) -> LocalTimer?
+    func getAllTimers() -> [LocalTimer]
 }
 
 // MARK: - Timer Tool Types
 
 /// Timer tool input/output types
-struct AddTimerInput: Codable {
+struct SetTimerInput: Codable {
     let name: String
     let minutes: Int
 }
@@ -31,11 +32,11 @@ struct StartTimerInput: Codable {
     let name: String
 }
 
-struct StopTimerInput: Codable {
+struct PauseTimerInput: Codable {
     let name: String
 }
 
-struct RemoveTimerInput: Codable {
+struct DeleteTimerInput: Codable {
     let name: String
 }
 
@@ -48,33 +49,33 @@ struct TimerOutput: Codable {
 
 /// Timer tools for cooking assistant using MLXLLM Tool format
 struct CookingTools {
-    let addTimer: Tool<AddTimerInput, TimerOutput>
+    let setTimer: Tool<SetTimerInput, TimerOutput>
     let startTimer: Tool<StartTimerInput, TimerOutput>
-    let stopTimer: Tool<StopTimerInput, TimerOutput>
-    let removeTimer: Tool<RemoveTimerInput, TimerOutput>
+    let pauseTimer: Tool<PauseTimerInput, TimerOutput>
+    let deleteTimer: Tool<DeleteTimerInput, TimerOutput>
 
     init(timerManager: TimerManager) {
-        // Add Timer Tool
-        addTimer = Tool<AddTimerInput, TimerOutput>(
-            name: "add_timer",
-            description: "Creates a new cooking timer with a specified name and duration in minutes",
+        // Set Timer Tool - creates and starts a timer
+        setTimer = Tool<SetTimerInput, TimerOutput>(
+            name: "set_timer",
+            description: "Creates and starts a new cooking timer with a specified name and duration in minutes",
             parameters: [
                 .required("name", type: .string, description: "Descriptive name for the timer (e.g., 'boil pasta', 'marinate chicken')"),
                 .required("minutes", type: .int, description: "Duration in minutes for the timer")
             ]
         ) { input in
             do {
-                try timerManager.addTimer(name: input.name, durationMinutes: input.minutes)
-                return TimerOutput(success: true, message: "Timer '\(input.name)' added for \(input.minutes) minutes")
+                try timerManager.setTimer(name: input.name, durationMinutes: input.minutes)
+                return TimerOutput(success: true, message: "Timer '\(input.name)' set for \(input.minutes) minutes and started")
             } catch {
-                return TimerOutput(success: false, message: "Failed to add timer: \(error.localizedDescription)")
+                return TimerOutput(success: false, message: "Failed to set timer: \(error.localizedDescription)")
             }
         }
 
-        // Start Timer Tool
+        // Start Timer Tool - starts a new or paused timer
         startTimer = Tool<StartTimerInput, TimerOutput>(
             name: "start_timer",
-            description: "Starts a timer that was previously created",
+            description: "Starts a timer that is in 'new' or 'paused' state (use this to resume paused timers)",
             parameters: [
                 .required("name", type: .string, description: "Name of the timer to start")
             ]
@@ -87,42 +88,42 @@ struct CookingTools {
             }
         }
 
-        // Stop Timer Tool
-        stopTimer = Tool<StopTimerInput, TimerOutput>(
-            name: "stop_timer",
-            description: "Stops a currently running timer",
+        // Pause Timer Tool
+        pauseTimer = Tool<PauseTimerInput, TimerOutput>(
+            name: "pause_timer",
+            description: "Pauses a currently running timer (can be resumed with start_timer)",
             parameters: [
-                .required("name", type: .string, description: "Name of the timer to stop")
+                .required("name", type: .string, description: "Name of the timer to pause")
             ]
         ) { input in
             do {
-                try timerManager.stopTimer(name: input.name)
-                return TimerOutput(success: true, message: "Timer '\(input.name)' stopped")
+                try timerManager.pauseTimer(name: input.name)
+                return TimerOutput(success: true, message: "Timer '\(input.name)' paused")
             } catch {
-                return TimerOutput(success: false, message: "Failed to stop timer: \(error.localizedDescription)")
+                return TimerOutput(success: false, message: "Failed to pause timer: \(error.localizedDescription)")
             }
         }
 
-        // Remove Timer Tool
-        removeTimer = Tool<RemoveTimerInput, TimerOutput>(
-            name: "remove_timer",
+        // Delete Timer Tool
+        deleteTimer = Tool<DeleteTimerInput, TimerOutput>(
+            name: "delete_timer",
             description: "Removes/deletes a timer completely",
             parameters: [
-                .required("name", type: .string, description: "Name of the timer to remove")
+                .required("name", type: .string, description: "Name of the timer to delete")
             ]
         ) { input in
             do {
-                try timerManager.removeTimer(name: input.name)
-                return TimerOutput(success: true, message: "Timer '\(input.name)' removed")
+                try timerManager.deleteTimer(name: input.name)
+                return TimerOutput(success: true, message: "Timer '\(input.name)' deleted")
             } catch {
-                return TimerOutput(success: false, message: "Failed to remove timer: \(error.localizedDescription)")
+                return TimerOutput(success: false, message: "Failed to delete timer: \(error.localizedDescription)")
             }
         }
     }
 
     /// Get all tool schemas for passing to UserInput
     var allSchemas: [[String: Any]] {
-        [addTimer.schema, startTimer.schema, stopTimer.schema, removeTimer.schema]
+        [setTimer.schema, startTimer.schema, pauseTimer.schema, deleteTimer.schema]
     }
 }
 

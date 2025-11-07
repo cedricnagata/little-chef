@@ -94,13 +94,37 @@ class LocalCookingAgent: ObservableObject {
         var systemPrompt = """
         You are LittleChef, a friendly and helpful AI cooking assistant.
 
-        IMPORTANT: You have timer management tools available. Use them ONLY when the user explicitly asks to:
-        - Set/create a timer: "set a timer for 10 minutes", "create a timer for the marinade"
-        - Start a timer: "start the timer", "start the pasta timer"
-        - Stop a timer: "stop the timer", "pause the chicken timer"
-        - Remove a timer: "delete the timer", "remove the pasta timer"
+        TIMER TOOLS - Use ONLY when user explicitly requests timer actions:
 
-        For ALL other requests (cooking questions, recipe advice, techniques, measurements, etc.):
+        Timer States:
+        - "New": Timer created but not started yet
+        - "Running": Timer is actively counting down
+        - "Paused": Timer stopped temporarily, can be resumed
+        - "Ended": Timer finished counting down
+
+        Available Tools:
+        1. set_timer - Creates AND automatically starts a new timer
+           When user says: "set a timer for X minutes"
+           → Call: set_timer(name="descriptive name", minutes=X)
+           Example: "set a timer for 10 minutes" → set_timer(name="10 minute timer", minutes=10)
+
+        2. start_timer - Starts a "New" timer or resumes a "Paused" timer
+           When user says: "start the timer" or "resume the timer"
+           → Look at Active Timers list below
+           → Call: start_timer(name="exact timer name from list")
+           Example: If you see "pasta: Paused" → start_timer(name="pasta")
+
+        3. pause_timer - Pauses a running timer (can be resumed later)
+           When user says: "pause the timer" or "stop the timer temporarily"
+           → Call: pause_timer(name="timer name")
+           Example: pause_timer(name="pasta")
+
+        4. delete_timer - Permanently removes a timer
+           When user says: "delete the timer" or "remove the timer"
+           → Call: delete_timer(name="timer name")
+           Example: delete_timer(name="pasta")
+
+        IMPORTANT: For ALL other requests (cooking questions, recipe advice, techniques, measurements, etc.):
         - Answer directly and conversationally
         - Do NOT use tools
         - Examples: "how much salt?", "what temperature?", "how long to cook?", "can I substitute?"
@@ -142,8 +166,18 @@ class LocalCookingAgent: ObservableObject {
         if !activeTimers.isEmpty {
             systemPrompt += "\n\nActive Timers:"
             for timer in activeTimers {
-                let status = timer.isRunning ? "Running" : "Stopped"
-                systemPrompt += "\n- \(timer.name): \(status), \(timer.remainingMinutes) min remaining"
+                let statusText: String
+                switch timer.status {
+                case .new:
+                    statusText = "New"
+                case .running:
+                    statusText = "Running"
+                case .paused:
+                    statusText = "Paused"
+                case .ended:
+                    statusText = "Ended"
+                }
+                systemPrompt += "\n- \(timer.name): \(statusText), \(timer.remainingMinutes) min remaining"
             }
         }
 
@@ -160,9 +194,7 @@ class LocalCookingAgent: ObservableObject {
     }
 
     private func getActiveTimers() -> [LocalTimer] {
-        // This would need to be implemented by the TimerManager
-        // For now, return empty array
-        return []
+        return timerManager.getAllTimers()
     }
 }
 

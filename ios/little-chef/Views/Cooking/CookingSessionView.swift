@@ -883,7 +883,7 @@ struct TimerCardView: View {
             Spacer()
             
             // Progress indicator
-            if timer.isActive || timer.status == .completed {
+            if timer.isActive || timer.status == .ended {
                 CircularProgressView(
                     progress: timer.progress,
                     color: statusColor
@@ -893,8 +893,8 @@ struct TimerCardView: View {
             
             // Controls
             HStack(spacing: 8) {
-                // Manual controls (for pending timers)
-                if timer.status == .pending {
+                // Manual controls (for new timers)
+                if timer.status == .new {
                     Button(action: {
                         timer.start()
                     }) {
@@ -912,7 +912,7 @@ struct TimerCardView: View {
                     }
                 } else if timer.status == .paused {
                     Button(action: {
-                        timer.resume()
+                        timer.start()
                     }) {
                         Image(systemName: "play.circle.fill")
                             .font(.title3)
@@ -941,31 +941,27 @@ struct TimerCardView: View {
     
     private var statusIcon: String {
         switch timer.status {
-        case .pending:
+        case .new:
             return "clock"
         case .running:
             return "timer"
         case .paused:
             return "pause.circle"
-        case .completed:
+        case .ended:
             return "checkmark.circle.fill"
-        case .stopped:
-            return "stop.circle"
         }
     }
-    
+
     private var statusColor: Color {
         switch timer.status {
-        case .pending:
+        case .new:
             return .gray
         case .running:
             return .green
         case .paused:
             return .orange
-        case .completed:
+        case .ended:
             return .blue
-        case .stopped:
-            return .red
         }
     }
 }
