@@ -156,9 +156,6 @@ struct Command: Codable, Identifiable {
     }
 }
 
-// Legacy alias for backward compatibility during transition
-typealias TimerCommand = Command
-
 struct TimerStatus: Codable, Identifiable {
     let id: String
     let label: String
@@ -177,10 +174,6 @@ struct TimerStatus: Codable, Identifiable {
         case startedAt = "started_at"
         case completedAt = "completed_at"
     }
-}
-
-enum TimerAction: String, Codable {
-    case add, start, stop, pause, resume, remove
 }
 
 enum TimerStatusType: String, Codable {
@@ -219,27 +212,5 @@ struct UserPreferencesDetailed: Codable {
         self.measurementSystem = userPreferences.measurementSystem
         self.dietaryRestrictions = userPreferences.dietaryRestrictions
         self.voiceSettings = userPreferences.voiceSettings
-    }
-}
-
-// MARK: - Agent Communication Models
-
-struct AgentQueryRequest: Codable {
-    let cookingSession: CookingSession
-    let query: String
-    
-    enum CodingKeys: String, CodingKey {
-        case cookingSession = "cooking_session"
-        case query
-    }
-}
-
-struct AgentQueryResponse: Codable {
-    let response: String
-    let updatedSession: CookingSession
-    
-    enum CodingKeys: String, CodingKey {
-        case response
-        case updatedSession = "updated_session"
     }
 }
