@@ -32,9 +32,9 @@ struct CookingSessionView: View {
                     }
                 } else {
                     StartCookingView(showingRecipeSelector: $showingRecipeSelector)
+                        .navigationTitle("Cook with LittleChef")
                 }
             }
-            .navigationTitle("Cook with LittleChef")
             .sheet(isPresented: $showingRecipeSelector) {
                 RecipeSelectorView()
             }
@@ -110,53 +110,47 @@ struct ActiveCookingView: View {
     @EnvironmentObject var voiceAssistant: VoiceAssistant
     @State private var textInput = ""
     @State private var showingEndSessionAlert = false
+    @State private var isRecipeExpanded = false
+    @FocusState private var isTextFieldFocused: Bool
     @Binding var isLoadingModel: Bool
 
     var body: some View {
-        GeometryReader { geometry in
-            if geometry.size.width > geometry.size.height {
-                // Landscape: Side-by-side layout
-                HStack(spacing: 0) {
-                    // Recipe details on the left
-                    RecipeDetailsView()
-                        .frame(width: geometry.size.width * 0.4)
-                        .background(Color(.systemGray6))
-                    
-                    Divider()
-                    
-                    // Conversation on the right
-                    VStack(spacing: 0) {
-                        ChatAreaView()
-                        InputAreaView(textInput: $textInput)
-                    }
-                    .frame(width: geometry.size.width * 0.6)
-                }
-            } else {
-                // Portrait: Vertical split layout
-                VStack(spacing: 0) {
-                    // Recipe details on top
-                    RecipeDetailsView()
-                        .frame(height: geometry.size.height * 0.45)
-                        .background(Color(.systemGray6))
-                    
-                    Divider()
-                    
-                    // Chat area on bottom
-                    VStack(spacing: 0) {
-                        ChatAreaView()
-                        InputAreaView(textInput: $textInput)
-                    }
-                }
-            }
-        }
-        .toolbar {
-            ToolbarItem(placement: .navigationBarTrailing) {
-                Button("End") {
+        VStack(spacing: 0) {
+            // Collapsible recipe header
+            CollapsibleRecipeHeader(
+                isExpanded: $isRecipeExpanded,
+                onEndSession: {
                     showingEndSessionAlert = true
                 }
-                .foregroundColor(.red)
+            )
+            .onTapGesture {
+                isTextFieldFocused = false
             }
+
+            // Main content: either recipe OR chat history
+            if isRecipeExpanded {
+                // Show full recipe view
+                RecipeDetailsView()
+                    .transition(.move(edge: .top))
+                    .contentShape(Rectangle())
+                    .onTapGesture {
+                        isTextFieldFocused = false
+                    }
+            } else {
+                // Show chat history
+                ChatAreaView()
+                    .transition(.move(edge: .bottom))
+                    .contentShape(Rectangle())
+                    .onTapGesture {
+                        isTextFieldFocused = false
+                    }
+            }
+
+            // Input area always visible at bottom
+            InputAreaView(textInput: $textInput, isTextFieldFocused: $isTextFieldFocused)
         }
+        .ignoresSafeArea(.container, edges: .bottom)
+        .animation(.easeInOut(duration: 0.3), value: isRecipeExpanded)
         .alert("End Cooking Session", isPresented: $showingEndSessionAlert) {
             Button("Cancel", role: .cancel) { }
             Button("End", role: .destructive) {
@@ -184,12 +178,83 @@ struct ActiveCookingView: View {
             updateVoiceAssistantSettings()
         }
     }
-    
+
     private func updateVoiceAssistantSettings() {
         // Update voice settings from the current session
         if let session = cookingSessionManager.currentSession {
             voiceAssistant.updateVoiceSettings(session.userPreferences.voiceSettings)
             print("🔄 Updated VoiceAssistant with current session preferences")
+        }
+    }
+}
+
+// MARK: - Collapsible Recipe Header
+
+struct CollapsibleRecipeHeader: View {
+    @EnvironmentObject var cookingSessionManager: CookingSessionManager
+    @Binding var isExpanded: Bool
+    let onEndSession: () -> Void
+
+    var body: some View {
+        if let session = cookingSessionManager.currentSession {
+            HStack(spacing: 0) {
+                // Back button
+                Button(action: onEndSession) {
+                    Image(systemName: "chevron.left")
+                        .font(.title3)
+                        .foregroundColor(.orange)
+                        .frame(width: 44, height: 44)
+                }
+                .buttonStyle(PlainButtonStyle())
+
+                // Tappable recipe header area (centered)
+                Button(action: {
+                    isExpanded.toggle()
+                }) {
+                    HStack(spacing: 8) {
+                        Spacer()
+
+                        VStack(alignment: .center, spacing: 4) {
+                            Text(session.recipe.title)
+                                .font(.headline)
+                                .fontWeight(.semibold)
+                                .foregroundColor(.primary)
+                                .lineLimit(1)
+
+                            if !isExpanded {
+                                HStack(spacing: 12) {
+                                    if let prepTime = session.recipe.prepTime {
+                                        Label("\(prepTime)m", systemImage: "clock")
+                                            .font(.caption)
+                                    }
+
+                                    if let cookTime = session.recipe.cookTime {
+                                        Label("\(cookTime)m", systemImage: "flame")
+                                            .font(.caption)
+                                    }
+
+                                    Label("\(session.recipe.servings)", systemImage: "person.2")
+                                        .font(.caption)
+                                }
+                                .foregroundColor(.secondary)
+                            }
+                        }
+
+                        Spacer()
+
+                        Image(systemName: isExpanded ? "chevron.up" : "chevron.down")
+                            .font(.title3)
+                            .foregroundColor(.orange)
+                            .frame(width: 44, height: 44)
+                    }
+                }
+                .buttonStyle(PlainButtonStyle())
+            }
+            .padding(.vertical, 12)
+            .padding(.horizontal, 8)
+            .background(Color(.systemGray6))
+
+            Divider()
         }
     }
 }
@@ -540,17 +605,19 @@ struct MessageBubbleView: View {
 
 struct InputAreaView: View {
     @Binding var textInput: String
+    @FocusState.Binding var isTextFieldFocused: Bool
     @EnvironmentObject var cookingSessionManager: CookingSessionManager
     @EnvironmentObject var voiceAssistant: VoiceAssistant
     @State private var isAnimating = false
-    
+
     var body: some View {
         VStack(spacing: 0) {
             Divider()
-            
+
             HStack(spacing: 12) {
                 // Hands-free mode toggle
                 Button(action: {
+                    isTextFieldFocused = false
                     if voiceAssistant.isHandsFreeMode {
                         voiceAssistant.stopHandsFreeMode()
                     } else {
@@ -566,9 +633,10 @@ struct InputAreaView: View {
                 .padding(12)
                 .background(Circle().fill(voiceAssistant.isHandsFreeMode ? Color.green.opacity(0.2) : Color(.systemGray6)))
                 .disabled(!voiceAssistant.isAvailable || cookingSessionManager.isLoading)
-                
+
                 // Voice button
                 Button(action: {
+                    isTextFieldFocused = false
                     if voiceAssistant.isListening {
                         voiceAssistant.stopListening()
                         if voiceAssistant.hasRecognizedText() {
@@ -598,15 +666,17 @@ struct InputAreaView: View {
                 .onChange(of: voiceAssistant.isWakeWordListening) { listening in
                     isAnimating = listening
                 }
-                
+
                 // Text input
                 TextField("Ask about cooking...", text: $textInput)
                     .textFieldStyle(RoundedBorderTextFieldStyle())
+                    .focused($isTextFieldFocused)
+                    .submitLabel(.send)
                     .disabled(cookingSessionManager.isLoading)
                     .onSubmit {
                         sendTextQuery()
                     }
-                
+
                 // Send button
                 Button(action: {
                     sendTextQuery()
@@ -689,12 +759,13 @@ struct InputAreaView: View {
     private func sendTextQuery() {
         let query = textInput.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !query.isEmpty else { return }
-        
+
         textInput = ""
-        
+        isTextFieldFocused = false  // Dismiss keyboard
+
         Task {
             await cookingSessionManager.sendQuery(query)
-            
+
             // Auto-speak response if enabled
             if let session = cookingSessionManager.currentSession,
                session.userPreferences.voiceSettings.autoSpeakResponses,

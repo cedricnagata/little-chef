@@ -26,8 +26,29 @@ struct MainView: View {
     @EnvironmentObject var voiceAssistant: VoiceAssistant
     @StateObject private var recipeManager = RecipeManager()
     @State private var selectedTab = 0
-    
+
     var body: some View {
+        Group {
+            if cookingSessionManager.currentSession != nil {
+                // Show cooking session without TabView
+                CookingSessionView()
+                    .environmentObject(recipeManager)
+                    .environmentObject(cookingSessionManager)
+                    .environmentObject(voiceAssistant)
+                    .environmentObject(cookingService)
+            } else {
+                // Show normal TabView when not in cooking session
+                mainTabView
+            }
+        }
+        .onAppear {
+            Task {
+                await recipeManager.loadRecipes()
+            }
+        }
+    }
+
+    private var mainTabView: some View {
         TabView(selection: $selectedTab) {
             // Recipes Tab
             RecipeListView()
@@ -63,11 +84,6 @@ struct MainView: View {
         }
         .accentColor(.orange)
         .environment(\.selectedTab, $selectedTab)
-        .onAppear {
-            Task {
-                await recipeManager.loadRecipes()
-            }
-        }
     }
 }
 
