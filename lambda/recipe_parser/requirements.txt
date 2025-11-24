@@ -1,0 +1,14 @@
+# Core dependencies
+pydantic>=2.0.0
+
+# LangChain and LLM
+langchain
+langchain-openai
+langchain-core
+openai
+
+# HTTP requests for Firecrawl
+requests
+
+# AWS Lambda runtime helpers
+boto3

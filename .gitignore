@@ -1,13 +1,21 @@
 # IDE
 .vscode
 
-# Environment files
-.env
-.env.local
-
 # OS
 .DS_Store
 Thumbs.db
 
 # Logs
 *.log
+
+# iOS
+ios/little-chef/Config.plist
+
+# Lambda / AWS SAM
+lambda/.aws-sam/
+lambda/**/__pycache__/
+lambda/**/*.pyc
+lambda/**/venv/
+lambda/**/.venv/
+.aws-sam/
+samconfig.toml

@@ -2,7 +2,7 @@
 //  CookingSessionManager.swift
 //  little-chef
 //
-//  Created by Cedric Nagata on 9/12/25.
+//  Updated for serverless architecture with local preferences
 //
 
 import Foundation
@@ -14,99 +14,44 @@ class CookingSessionManager: ObservableObject {
     @Published var isLoading = false
     @Published var error: String?
     @Published var lastResponse: String = ""
-    
+    @Published var lastAudioData: Data? = nil  // NEW: Store audio from Lambda
+
     private let apiService = APIService.shared
-    
+    private let preferencesManager: PreferencesManager
+
+    init(preferencesManager: PreferencesManager = PreferencesManager()) {
+        self.preferencesManager = preferencesManager
+    }
+
     // MARK: - Session Management
-    
+
     func startCookingSession(with recipe: Recipe) {
         let recipeBase = RecipeBase(from: recipe)
-        
-        // Load user preferences from API to get latest settings
-        Task {
-            await loadUserPreferencesAndStartSession(with: recipeBase)
-        }
+
+        // Load preferences from local PreferencesManager
+        let userPreferences = UserPreferencesDetailed(from: preferencesManager.preferences)
+
+        currentSession = CookingSession(recipe: recipeBase, userPreferences: userPreferences)
+        error = nil
+        print("🔵 Started new cooking session with model: \(userPreferences.llmModel)")
     }
-    
-    private func loadUserPreferencesAndStartSession(with recipeBase: RecipeBase) async {
-        var userPreferences: UserPreferencesDetailed
-        
-        do {
-            // Try to get latest preferences from backend
-            let apiPreferences = try await APIService.shared.getPreferences()
-            userPreferences = UserPreferencesDetailed(from: apiPreferences)
-            print("🔵 Loaded user preferences from backend for cooking session")
-        } catch {
-            // Fallback to default preferences if API call fails
-            userPreferences = UserPreferencesDetailed()
-            print("⚠️ Failed to load user preferences, using defaults: \(error)")
-        }
-        
-        await MainActor.run {
-            currentSession = CookingSession(recipe: recipeBase, userPreferences: userPreferences)
-            error = nil
-            print("🔵 Started new cooking session with model: \(userPreferences.llmModel)")
-        }
-    }
-    
-    // MARK: - Preferences Management
-    
-    func updateSessionPreferences() async {
-        await refreshSessionPreferences()
-    }
-    
-    func refreshSessionPreferences() async {
-        guard let session = currentSession else { return }
-        
-        do {
-            // Get updated preferences from backend
-            let apiPreferences = try await APIService.shared.getPreferences()
-            let userPreferences = UserPreferencesDetailed(from: apiPreferences)
-            
-            // Update the current session with new preferences
-            let updatedSession = CookingSession(
-                recipe: session.recipe,
-                commands: session.commands,
-                timerStatus: session.timerStatus,
-                conversationHistory: session.conversationHistory,
-                userPreferences: userPreferences,
-                startedAt: session.startedAt
-            )
-            
-            await MainActor.run {
-                let oldVoiceSettings = currentSession?.userPreferences.voiceSettings
-                currentSession = updatedSession
-                
-                // Check if voice settings changed
-                let newVoiceSettings = updatedSession.userPreferences.voiceSettings
-                if let old = oldVoiceSettings,
-                   (old.elevenlabs.enabled != newVoiceSettings.elevenlabs.enabled ||
-                    old.elevenlabs.voiceName != newVoiceSettings.elevenlabs.voiceName) {
-                    print("🔄 Voice settings updated in cooking session")
-                }
-                
-                print("🔄 Updated cooking session preferences from backend")
-            }
-        } catch {
-            print("⚠️ Failed to update session preferences: \(error)")
-        }
-    }
-    
+
     func endCookingSession() {
         // Clear session data
         currentSession = nil
         lastResponse = ""
+        lastAudioData = nil
         error = nil
-        
+
         // Clear all timers
         clearAllTimers()
-        
+
         // Reset processed command IDs for clean slate
         processedCommandIds.removeAll()
-        
+
         print("🔴 Ended cooking session - all state reset")
     }
-    
+
     private func clearAllTimers() {
         // Stop and remove all local timers
         for timer in localTimers {
@@ -115,19 +60,19 @@ class CookingSessionManager: ObservableObject {
         localTimers.removeAll()
         print("🗑️ Cleared all timers")
     }
-    
+
     // MARK: - Agent Communication
-    
+
     func sendQuery(_ query: String) async {
         guard var session = currentSession else {
             error = "No active cooking session"
             return
         }
-        
+
         // Clear any previous errors
         error = nil
         isLoading = true
-        
+
         do {
             // Update session with current timer status before sending
             let updatedSession = CookingSession(
@@ -138,29 +83,42 @@ class CookingSessionManager: ObservableObject {
                 userPreferences: session.userPreferences,
                 startedAt: session.startedAt
             )
-            
+
             let response = try await apiService.sendAgentQuery(
                 cookingSession: updatedSession,
                 query: query
             )
-            
+
             // Process any new commands from AI
             processCommands(from: response.updatedSession)
-            
+
             // Update the session with the response
             currentSession = response.updatedSession
             lastResponse = response.response
-            
+
+            // Handle audio response if present (from ElevenLabs via Lambda)
+            if let audioBase64 = response.audio {
+                if let audioData = Data(base64Encoded: audioBase64) {
+                    lastAudioData = audioData
+                    print("🔊 Received audio from Lambda (\(audioData.count) bytes)")
+                } else {
+                    print("⚠️ Failed to decode audio from Lambda")
+                    lastAudioData = nil
+                }
+            } else {
+                lastAudioData = nil
+            }
+
         } catch {
             self.error = "Failed to get response: \(error.localizedDescription)"
             print("Agent query error: \(error)")
         }
-        
+
         isLoading = false
     }
-    
+
     // MARK: - Voice Interaction Helpers
-    
+
     func getLastMessage() -> String {
         guard let session = currentSession,
               let lastMessage = session.conversationHistory.last else {
@@ -168,30 +126,30 @@ class CookingSessionManager: ObservableObject {
         }
         return lastMessage.content
     }
-    
+
     func hasActiveSession() -> Bool {
         return currentSession != nil
     }
-    
+
     func getRecipeTitle() -> String {
         return currentSession?.recipe.title ?? ""
     }
-    
+
     func getConversationHistory() -> [Message] {
         return currentSession?.conversationHistory ?? []
     }
-    
+
     // MARK: - Recipe Servings Management
-    
+
     func updateServings(newServings: Int) {
         guard let session = currentSession else { return }
-        
+
         let originalServings = session.recipe.servings
         let multiplier = Float(newServings) / Float(originalServings)
-        
+
         // Create a new RecipeBase with scaled ingredients and updated servings
         let scaledRecipe = createScaledRecipe(from: session.recipe, servings: newServings)
-        
+
         // Create new session with the scaled recipe
         currentSession = CookingSession(
             recipe: scaledRecipe,
@@ -201,27 +159,27 @@ class CookingSessionManager: ObservableObject {
             userPreferences: session.userPreferences,
             startedAt: session.startedAt
         )
-        
+
         print("🔄 Updated servings from \(originalServings) to \(newServings) (multiplier: \(multiplier))")
     }
-    
+
     func getCurrentServings() -> Int {
         return currentSession?.recipe.servings ?? 0
     }
-    
+
     private func createScaledRecipe(from recipe: RecipeBase, servings: Int) -> RecipeBase {
         let originalServings = recipe.servings
         let multiplier = Float(servings) / Float(originalServings)
-        
+
         if multiplier == 1.0 {
             return recipe
         }
-        
+
         // Scale ingredients
         let scaledIngredients = recipe.ingredients.map { ingredient in
             scaleIngredient(ingredient, multiplier: multiplier)
         }
-        
+
         // Create new RecipeBase with scaled data
         return RecipeBase(
             title: recipe.title,
@@ -237,29 +195,29 @@ class CookingSessionManager: ObservableObject {
             difficulty: recipe.difficulty
         )
     }
-    
+
     private func scaleIngredient(_ ingredient: String, multiplier: Float) -> String {
         if multiplier == 1.0 {
             return ingredient
         }
-        
+
         // Common patterns for numbers in ingredients
         // Examples: "2 cups flour", "1/2 teaspoon salt", "1.5 pounds chicken"
         let patterns = [
             "([0-9]+\\.?[0-9]*\\/[0-9]+)\\s+(\\w+)",  // "1/2 teaspoon"
             "([0-9]+\\.?[0-9]*)\\s+(\\w+)"           // "2 cups", "1.5 pounds"
         ]
-        
+
         for pattern in patterns {
             if let regex = try? NSRegularExpression(pattern: pattern, options: []),
                let match = regex.firstMatch(in: ingredient, options: [], range: NSRange(location: 0, length: ingredient.count)) {
-                
+
                 let amountRange = Range(match.range(at: 1), in: ingredient)!
                 let amountStr = String(ingredient[amountRange])
-                
+
                 do {
                     var amount: Float
-                    
+
                     // Handle fractions like "1/2"
                     if amountStr.contains("/") {
                         let parts = amountStr.split(separator: "/")
@@ -275,10 +233,10 @@ class CookingSessionManager: ObservableObject {
                         guard let parsed = Float(amountStr) else { continue }
                         amount = parsed
                     }
-                    
+
                     // Scale the amount
                     let scaledAmount = amount * multiplier
-                    
+
                     // Format the scaled amount nicely
                     let scaledStr: String
                     if scaledAmount == Float(Int(scaledAmount)) {
@@ -286,7 +244,7 @@ class CookingSessionManager: ObservableObject {
                     } else {
                         scaledStr = String(format: "%.2f", scaledAmount).replacingOccurrences(of: "\\.?0+$", with: "", options: .regularExpression)
                     }
-                    
+
                     // Replace in the original string
                     return ingredient.replacingOccurrences(of: amountStr, with: scaledStr)
                 } catch {
@@ -294,24 +252,24 @@ class CookingSessionManager: ObservableObject {
                 }
             }
         }
-        
+
         // If no number pattern found, return original ingredient with note
         if multiplier != 1.0 {
             return "\(ingredient) (scale by \(String(format: "%.1f", multiplier))x)"
         }
         return ingredient
     }
-    
+
     // MARK: - Timer Management
-    
+
     @Published var localTimers: [LocalTimer] = []
-    
+
     func processCommands(from session: CookingSession) {
         // Process new commands from AI
         let newCommands = session.commands.filter { command in
             !processedCommandIds.contains(command.id)
         }
-        
+
         for command in newCommands {
             // Handle timer commands
             if command.commandType == "timer" {
@@ -346,13 +304,13 @@ class CookingSessionManager: ObservableObject {
                 }
             }
             // Future: Add handling for other command types here
-            
+
             processedCommandIds.insert(command.id)
         }
     }
-    
+
     private var processedCommandIds = Set<String>()
-    
+
     func getTimerStatusForBackend() -> [TimerStatus] {
         return localTimers.map { timer in
             TimerStatus(
@@ -367,9 +325,9 @@ class CookingSessionManager: ObservableObject {
             )
         }
     }
-    
+
     // MARK: - Local Timer Management
-    
+
     private func addLocalTimer(id: String, label: String, duration: Int) {
         let timer = LocalTimer(
             id: id,
@@ -382,48 +340,48 @@ class CookingSessionManager: ObservableObject {
         localTimers.append(timer)
         print("🕐 Added timer: \(label) (\(duration)s)")
     }
-    
+
     private func startLocalTimer(id: String) {
         if let index = localTimers.firstIndex(where: { $0.id == id }) {
             localTimers[index].start()
             print("▶️ Started timer: \(localTimers[index].label)")
         }
     }
-    
+
     private func stopLocalTimer(id: String) {
         if let index = localTimers.firstIndex(where: { $0.id == id }) {
             localTimers[index].stop()
             print("⏹️ Stopped timer: \(localTimers[index].label)")
         }
     }
-    
+
     private func pauseLocalTimer(id: String) {
         if let index = localTimers.firstIndex(where: { $0.id == id }) {
             localTimers[index].pause()
             print("⏸️ Paused timer: \(localTimers[index].label)")
         }
     }
-    
+
     private func resumeLocalTimer(id: String) {
         if let index = localTimers.firstIndex(where: { $0.id == id }) {
             localTimers[index].resume()
             print("▶️ Resumed timer: \(localTimers[index].label)")
         }
     }
-    
+
     private func removeLocalTimer(id: String) {
         localTimers.removeAll { $0.id == id }
         print("🗑️ Removed timer: \(id)")
     }
-    
+
     // MARK: - Manual Timer Management (for UI)
-    
+
     func addManualTimer(label: String, durationMinutes: Int) {
         let timerId = UUID().uuidString
         let durationSeconds = durationMinutes * 60
-        
+
         addLocalTimer(id: timerId, label: label, duration: durationSeconds)
-        
+
         // Also add to session state for AI awareness
         if var session = currentSession {
             let command = Command(
@@ -435,10 +393,10 @@ class CookingSessionManager: ObservableObject {
                 parameters: ["duration_seconds": FlexibleValue(durationSeconds)],
                 createdAt: Date()
             )
-            
+
             var updatedCommands = session.commands
             updatedCommands.append(command)
-            
+
             currentSession = CookingSession(
                 recipe: session.recipe,
                 commands: updatedCommands,
@@ -449,7 +407,7 @@ class CookingSessionManager: ObservableObject {
             )
         }
     }
-    
+
     func deleteManualTimer(id: String) {
         // Remove from local timers
         if let timerIndex = localTimers.firstIndex(where: { $0.id == id }) {
@@ -458,7 +416,7 @@ class CookingSessionManager: ObservableObject {
             localTimers.remove(at: timerIndex)
             print("🗑️ Manually deleted timer: \(timer.label)")
         }
-        
+
         // Add remove command to session state for AI awareness
         if var session = currentSession {
             let removeCommand = Command(
@@ -470,10 +428,10 @@ class CookingSessionManager: ObservableObject {
                 parameters: [:],
                 createdAt: Date()
             )
-            
+
             var updatedCommands = session.commands
             updatedCommands.append(removeCommand)
-            
+
             currentSession = CookingSession(
                 recipe: session.recipe,
                 commands: updatedCommands,

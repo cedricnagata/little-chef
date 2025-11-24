@@ -1,0 +1,16 @@
+# Core dependencies
+pydantic>=2.0.0
+pydantic-settings
+
+# LangChain and LLM
+langchain
+langgraph
+langchain-openai
+langchain-core
+openai
+
+# ElevenLabs TTS
+elevenlabs
+
+# AWS Lambda runtime helpers
+boto3

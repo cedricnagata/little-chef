@@ -180,23 +180,27 @@ class VoiceAssistant: NSObject, ObservableObject {
         self.voiceSettings = settings
     }
     
-    func speak(_ text: String) {
+    // MARK: - TTS with optional audio data from Lambda
+
+    /// Speak text using either provided audio data (from Lambda) or native TTS
+    func speak(_ text: String, audioData: Data? = nil) {
         guard !text.isEmpty else { return }
-        
+
         // Stop any current speech
         synthesizer.stopSpeaking(at: .immediate)
-        
-        // Check if ElevenLabs is enabled and should be used
-        if let voiceSettings = voiceSettings,
-           voiceSettings.elevenlabs.enabled,
-           voiceSettings.autoSpeakResponses {
-            
-            // Use ElevenLabs TTS
-            speakWithElevenLabs(text)
+
+        // If audio data provided (from Lambda/ElevenLabs), use it
+        if let audio = audioData {
+            playAudio(data: audio)
         } else {
             // Use native iOS TTS
             speakWithNativeTTS(text)
         }
+    }
+
+    /// Play audio data directly (from Lambda ElevenLabs response)
+    func playAudio(data: Data) {
+        playElevenLabsAudio(data: data)
     }
     
     private func speakWithNativeTTS(_ text: String) {
@@ -215,33 +219,8 @@ class VoiceAssistant: NSObject, ObservableObject {
         synthesizer.speak(utterance)
     }
     
-    private func speakWithElevenLabs(_ text: String) {
-        guard let voiceSettings = voiceSettings else {
-            // Fallback to native TTS if no settings
-            speakWithNativeTTS(text)
-            return
-        }
-        
-        Task {
-            do {
-                let audioData = try await APIService.shared.synthesizeWithElevenLabs(
-                    text: text,
-                    voiceSettings: voiceSettings.elevenlabs
-                )
-                
-                await MainActor.run {
-                    playElevenLabsAudio(data: audioData)
-                }
-            } catch {
-                print("ElevenLabs TTS failed, falling back to native: \(error)")
-                // Fallback to native TTS on error
-                await MainActor.run {
-                    speakWithNativeTTS(text)
-                }
-            }
-        }
-    }
-    
+    // Removed: speakWithElevenLabs() - audio now comes from Lambda response
+
     private func playElevenLabsAudio(data: Data) {
         do {
             let audioPlayer = try AVAudioPlayer(data: data)

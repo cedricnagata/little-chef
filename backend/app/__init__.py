@@ -1,1 +1,0 @@
-# LittleChef Backend Application Package

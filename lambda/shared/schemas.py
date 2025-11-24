@@ -1,59 +1,12 @@
 """
-Pydantic schemas for request/response models
+Pydantic schemas for Lambda functions
+Contains only schemas needed for recipe parsing and cooking assistant
 """
 
-from pydantic import BaseModel, EmailStr, Field, validator
+from pydantic import BaseModel, Field, validator
 from typing import Optional, Dict, Any, List, Literal
 from datetime import datetime
 import uuid
-
-
-class UserBase(BaseModel):
-    """Base user schema"""
-    email: EmailStr
-    name: str = Field(..., min_length=1, max_length=255)
-
-
-class UserCreate(UserBase):
-    """Schema for user registration"""
-    password: str = Field(..., min_length=8, max_length=128)
-    
-    
-    @validator('password')
-    def validate_password(cls, v):
-        """Validate password strength"""
-        if len(v) < 8:
-            raise ValueError('Password must be at least 8 characters long')
-        return v
-
-
-class UserLogin(BaseModel):
-    """Schema for user login"""
-    email: EmailStr
-    password: str
-
-
-class UserResponse(UserBase):
-    """Schema for user response (excludes sensitive data)"""
-    id: uuid.UUID
-    is_active: bool
-    preferences: Dict[str, Any]
-    created_at: datetime
-    updated_at: datetime
-    
-    class Config:
-        from_attributes = True
-
-
-class UserUpdate(BaseModel):
-    """Schema for user updates"""
-    name: Optional[str] = Field(None, min_length=1, max_length=255)
-    email: Optional[EmailStr] = None
-    preferences: Optional[Dict[str, Any]] = None
-    
-    class Config:
-        # This ensures that None values are excluded from model_dump
-        exclude_none = True
 
 
 # ===== Voice Settings Schemas =====
@@ -70,7 +23,7 @@ class VoiceSettings(BaseModel):
     speech_rate: float = Field(default=0.5, ge=0.1, le=2.0)
     voice_identifier: str = Field(default="com.apple.ttsbundle.Samantha-compact")
     auto_speak_responses: bool = True
-    
+
     # ElevenLabs settings
     elevenlabs: ElevenLabsSettings = Field(default_factory=ElevenLabsSettings)
 
@@ -83,31 +36,9 @@ class UserPreferences(BaseModel):
     voice_settings: VoiceSettings = Field(default_factory=VoiceSettings)
 
 
-class Token(BaseModel):
-    """Schema for authentication token response"""
-    access_token: str
-    refresh_token: str
-    token_type: str = "bearer"
-    expires_in: int
-    user: UserResponse
-
-
-class TokenRefresh(BaseModel):
-    """Schema for token refresh request"""
-    refresh_token: str
-
-
-class PasswordChange(BaseModel):
-    """Schema for password change"""
-    current_password: str
-    new_password: str = Field(..., min_length=8, max_length=128)
-    
-    @validator('new_password')
-    def validate_new_password(cls, v):
-        """Validate new password strength"""
-        if len(v) < 8:
-            raise ValueError('Password must be at least 8 characters long')
-        return v
+class UserPreferencesDetailed(UserPreferences):
+    """Extended user preferences with voice settings"""
+    voice_settings: VoiceSettings = Field(default_factory=VoiceSettings)
 
 
 # ===== Recipe Schemas =====
@@ -127,64 +58,23 @@ class RecipeBase(BaseModel):
     difficulty: Optional[str] = Field(None, pattern="^(easy|medium|hard)$")
 
 
-class RecipeCreate(RecipeBase):
-    """Schema for creating a new recipe"""
-    pass
-
-
-class RecipeUpdate(BaseModel):
-    """Schema for updating an existing recipe"""
-    title: Optional[str] = Field(None, min_length=1, max_length=255)
-    description: Optional[str] = None
-    servings: Optional[int] = Field(None, ge=1, le=100)
-    prep_time: Optional[int] = Field(None, ge=0, le=1440)
-    cook_time: Optional[int] = Field(None, ge=0, le=1440)
-    ingredients: Optional[List[str]] = Field(None, min_items=1)
-    instructions: Optional[List[str]] = Field(None, min_items=1)
-    tags: Optional[List[str]] = None
-    source_url: Optional[str] = None
-    cuisine_type: Optional[str] = None
-    difficulty: Optional[str] = Field(None, pattern="^(easy|medium|hard)$")
-
-    class Config:
-        exclude_none = True
-
-
-class RecipeResponse(RecipeBase):
-    """Schema for recipe response"""
-    id: uuid.UUID
-    created_at: datetime
-    updated_at: datetime
-
-    class Config:
-        from_attributes = True
-
-
-class RecipeListResponse(BaseModel):
-    """Schema for recipe list response"""
-    id: uuid.UUID
-    recipe_data: RecipeBase
-    created_at: datetime
-    updated_at: datetime
-
-    class Config:
-        from_attributes = True
-
-
 # ===== Recipe Parsing Schemas =====
 
 class RecipeParseUrlRequest(BaseModel):
     """Schema for URL parsing request"""
+    type: Literal["url"] = "url"
     url: str = Field(..., pattern=r'^https?://.+')
 
 
 class RecipeParseTextRequest(BaseModel):
     """Schema for text parsing request"""
+    type: Literal["text"] = "text"
     text: str = Field(..., min_length=10, max_length=50000)
 
 
 class RecipeParseImageRequest(BaseModel):
     """Schema for image parsing request"""
+    type: Literal["image"] = "image"
     images: List[str] = Field(..., description="List of base64 encoded images", min_items=1, max_items=5)
 
 
@@ -195,6 +85,8 @@ class RecipeParseResponse(BaseModel):
     warnings: List[str] = Field(default_factory=list)
 
 
+# ===== Cooking Session Schemas =====
+
 class Command(BaseModel):
     """Universal command structure that AI can issue for various actions"""
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
@@ -204,9 +96,6 @@ class Command(BaseModel):
     label: str
     parameters: Dict[str, Any] = Field(default_factory=dict)  # Flexible parameters
     created_at: datetime = Field(default_factory=datetime.now)
-
-# Legacy alias for backward compatibility during transition
-TimerCommand = Command
 
 
 class TimerStatus(BaseModel):
@@ -229,13 +118,6 @@ class Message(BaseModel):
     timestamp: datetime = Field(default_factory=datetime.now)
 
 
-class UserPreferencesDetailed(UserPreferences):
-    """Extended user preferences with voice settings"""
-    voice_settings: VoiceSettings = Field(default_factory=VoiceSettings)
-
-
-# ===== Cooking Session Schemas =====
-
 class CookingSessionBase(BaseModel):
     """Base cooking session schema"""
     recipe: RecipeBase
@@ -244,19 +126,6 @@ class CookingSessionBase(BaseModel):
     conversation_history: List[Message] = Field(default_factory=list)
     user_preferences: UserPreferencesDetailed = Field(default_factory=UserPreferencesDetailed)
     started_at: datetime = Field(default_factory=datetime.now)
-
-
-class CookingSessionCreate(CookingSessionBase):
-    """Schema for creating a cooking session"""
-    pass
-
-
-class CookingSessionResponse(CookingSessionBase):
-    """Schema for cooking session response"""
-    id: uuid.UUID
-
-    class Config:
-        from_attributes = True
 
 
 class AgentQueryRequest(BaseModel):
@@ -269,3 +138,4 @@ class AgentQueryResponse(BaseModel):
     """Schema for agent query response"""
     response: str
     updated_session: CookingSessionBase
+    audio: Optional[str] = Field(None, description="Base64 encoded MP3 audio (if ElevenLabs enabled)")

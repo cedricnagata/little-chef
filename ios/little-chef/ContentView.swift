@@ -2,34 +2,18 @@
 //  ContentView.swift
 //  little-chef
 //
-//  Created by Cedric Nagata on 9/5/25.
+//  No authentication - goes straight to MainView
 //
 
 import SwiftUI
 
 struct ContentView: View {
-    @EnvironmentObject var authManager: AuthManager
-    
     var body: some View {
-        Group {
-            if authManager.isAuthenticated {
-                MainView()
-            } else {
-                LoginView()
-            }
-        }
-        .onAppear {
-            // Refresh token if needed when app appears
-            if authManager.isAuthenticated {
-                Task {
-                    await authManager.refreshTokenIfNeeded()
-                }
-            }
-        }
+        MainView()
     }
 }
 
 #Preview {
     ContentView()
-        .environmentObject(AuthManager())
+        .environment(\.managedObjectContext, PersistenceController.preview.container.viewContext)
 }

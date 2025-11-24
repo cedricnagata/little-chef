@@ -1,0 +1,134 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: LittleChef Serverless Backend - Cooking Assistant and Recipe Parser
+
+Globals:
+  Function:
+    Timeout: 300
+    MemorySize: 512
+    Runtime: python3.11
+    Environment:
+      Variables:
+        LOG_LEVEL: INFO
+    Architectures:
+      - x86_64
+
+Parameters:
+  Environment:
+    Type: String
+    Default: dev
+    AllowedValues:
+      - dev
+      - prod
+    Description: Environment name (dev or prod)
+
+  AllowedOrigins:
+    Type: String
+    Default: "*"
+    Description: Comma-separated list of allowed CORS origins (use * for dev)
+
+Resources:
+  # ===== API Gateway =====
+
+  LittleChefApi:
+    Type: AWS::Serverless::HttpApi
+    Properties:
+      CorsConfiguration:
+        AllowOrigins:
+          - !Ref AllowedOrigins
+        AllowHeaders:
+          - Content-Type
+          - X-Api-Key
+          - Authorization
+        AllowMethods:
+          - GET
+          - POST
+          - OPTIONS
+        MaxAge: 600
+      StageName: !Ref Environment
+
+  # ===== Lambda Functions =====
+
+  CookingAssistantFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub 'littlechef-cooking-assistant-${Environment}'
+      CodeUri: cooking_assistant/
+      Handler: handler.lambda_handler
+      Description: LangGraph-based cooking assistant with timer tools
+      Timeout: 300
+      MemorySize: 1024
+      Environment:
+        Variables:
+          # NOTE: Set these via AWS Console or use --parameter-overrides during deployment
+          # Example: sam deploy --parameter-overrides OpenAIKey=sk-xxx ElevenLabsKey=xxx
+          OPENAI_API_KEY: placeholder-update-after-deployment
+          ELEVENLABS_API_KEY: placeholder-update-after-deployment
+          ENVIRONMENT: !Ref Environment
+      Events:
+        CookingAssistantApi:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref LittleChefApi
+            Path: /v1/assistant
+            Method: POST
+
+  RecipeParserFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub 'littlechef-recipe-parser-${Environment}'
+      CodeUri: recipe_parser/
+      Handler: handler.lambda_handler
+      Description: Recipe parser supporting URL, text, and image inputs
+      Timeout: 180
+      MemorySize: 1024
+      Environment:
+        Variables:
+          # NOTE: Set these via AWS Console or use --parameter-overrides during deployment
+          OPENAI_API_KEY: placeholder-update-after-deployment
+          FIRECRAWL_API_KEY: placeholder-update-after-deployment
+          FIRECRAWL_API_URL: https://api.firecrawl.dev/v1/scrape
+          ENVIRONMENT: !Ref Environment
+      Events:
+        RecipeParserApi:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref LittleChefApi
+            Path: /v1/parse
+            Method: POST
+
+  # ===== Lambda Layer for Shared Code =====
+
+  SharedLayer:
+    Type: AWS::Serverless::LayerVersion
+    Properties:
+      LayerName: !Sub 'littlechef-shared-${Environment}'
+      Description: Shared schemas and utilities
+      ContentUri: shared/
+      CompatibleRuntimes:
+        - python3.11
+    Metadata:
+      BuildMethod: python3.11
+
+Outputs:
+  ApiGatewayUrl:
+    Description: API Gateway endpoint URL
+    Value: !Sub 'https://${LittleChefApi}.execute-api.${AWS::Region}.amazonaws.com/${Environment}'
+    Export:
+      Name: !Sub '${AWS::StackName}-ApiUrl'
+
+  CookingAssistantEndpoint:
+    Description: Cooking Assistant endpoint
+    Value: !Sub 'https://${LittleChefApi}.execute-api.${AWS::Region}.amazonaws.com/${Environment}/v1/assistant'
+
+  RecipeParserEndpoint:
+    Description: Recipe Parser endpoint
+    Value: !Sub 'https://${LittleChefApi}.execute-api.${AWS::Region}.amazonaws.com/${Environment}/v1/parse'
+
+  CookingAssistantFunctionArn:
+    Description: Cooking Assistant Lambda Function ARN
+    Value: !GetAtt CookingAssistantFunction.Arn
+
+  RecipeParserFunctionArn:
+    Description: Recipe Parser Lambda Function ARN
+    Value: !GetAtt RecipeParserFunction.Arn

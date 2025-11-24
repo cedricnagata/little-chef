@@ -2,42 +2,65 @@
 //  RecipeManager.swift
 //  little-chef
 //
-//  Created by Cedric Nagata on 9/5/25.
+//  Manages recipes using Core Data with CloudKit sync
+//  No backend CRUD - all data stored locally
 //
 
 import Foundation
 import SwiftUI
+import CoreData
 
 @MainActor
 class RecipeManager: ObservableObject {
     @Published var recipes: [Recipe] = []
     @Published var isLoading = false
     @Published var errorMessage: String?
-    
+
     private let apiService = APIService.shared
-    
-    // MARK: - Recipe Management
+    private let context: NSManagedObjectContext
+
+    init(context: NSManagedObjectContext = PersistenceController.shared.container.viewContext) {
+        self.context = context
+    }
+
+    // MARK: - Recipe Management (Core Data)
+
     func loadRecipes() async {
         isLoading = true
         errorMessage = nil
-        
+
         do {
-            let recipeListResponses = try await apiService.getRecipes()
-            recipes = recipeListResponses.map { $0.recipe }
+            let request: NSFetchRequest<RecipeEntity> = RecipeEntity.fetchRequest()
+            request.sortDescriptors = [NSSortDescriptor(keyPath: \RecipeEntity.updatedAt, ascending: false)]
+
+            let entities = try context.fetch(request)
+            recipes = entities.compactMap { $0.toRecipe() }
         } catch {
             errorMessage = "Failed to load recipes: \(error.localizedDescription)"
         }
-        
+
         isLoading = false
     }
-    
-    func createRecipe(_ recipe: RecipeCreate) async -> Bool {
+
+    func createRecipe(_ recipeBase: RecipeBase) async -> Bool {
         isLoading = true
         errorMessage = nil
-        
+
         do {
-            let newRecipe = try await apiService.createRecipe(recipe)
-            recipes.append(newRecipe)
+            let recipe = Recipe(
+                id: UUID(),
+                recipe_data: recipeBase,
+                created_at: Date(),
+                updated_at: Date()
+            )
+
+            _ = RecipeEntity.create(from: recipe, in: context)
+
+            try context.save()
+
+            // Reload recipes to include the new one
+            await loadRecipes()
+
             isLoading = false
             return true
         } catch {
@@ -46,17 +69,39 @@ class RecipeManager: ObservableObject {
             return false
         }
     }
-    
-    func updateRecipe(id: UUID, with update: RecipeUpdate) async -> Bool {
+
+    func updateRecipe(id: UUID, with recipeBase: RecipeBase) async -> Bool {
         isLoading = true
         errorMessage = nil
-        
+
         do {
-            let updatedRecipe = try await apiService.updateRecipe(id: id, recipe: update)
-            // Find and replace the recipe in our local list
-            if let index = recipes.firstIndex(where: { $0.id == id }) {
-                recipes[index] = updatedRecipe
+            let request: NSFetchRequest<RecipeEntity> = RecipeEntity.fetchRequest()
+            request.predicate = NSPredicate(format: "id == %@", id as CVarArg)
+            request.fetchLimit = 1
+
+            guard let entity = try context.fetch(request).first else {
+                errorMessage = "Recipe not found"
+                isLoading = false
+                return false
             }
+
+            // Update entity
+            entity.title = recipeBase.title
+            entity.updatedAt = Date()
+
+            // Encode recipe_data to JSON
+            let encoder = JSONEncoder()
+            encoder.dateEncodingStrategy = .iso8601
+            if let data = try? encoder.encode(recipeBase),
+               let jsonString = String(data: data, encoding: .utf8) {
+                entity.recipeDataJSON = jsonString
+            }
+
+            try context.save()
+
+            // Reload recipes
+            await loadRecipes()
+
             isLoading = false
             return true
         } catch {
@@ -65,14 +110,28 @@ class RecipeManager: ObservableObject {
             return false
         }
     }
-    
+
     func deleteRecipe(_ recipe: Recipe) async -> Bool {
         isLoading = true
         errorMessage = nil
-        
+
         do {
-            try await apiService.deleteRecipe(id: recipe.id)
+            let request: NSFetchRequest<RecipeEntity> = RecipeEntity.fetchRequest()
+            request.predicate = NSPredicate(format: "id == %@", recipe.id as CVarArg)
+            request.fetchLimit = 1
+
+            guard let entity = try context.fetch(request).first else {
+                errorMessage = "Recipe not found"
+                isLoading = false
+                return false
+            }
+
+            context.delete(entity)
+            try context.save()
+
+            // Remove from local array
             recipes.removeAll { $0.id == recipe.id }
+
             isLoading = false
             return true
         } catch {
@@ -81,14 +140,15 @@ class RecipeManager: ObservableObject {
             return false
         }
     }
-    
-    // MARK: - Recipe Parsing
+
+    // MARK: - Recipe Parsing (Lambda API)
+
     func parseRecipeFromUrl(_ url: String) async -> RecipeParseResponse? {
         isLoading = true
         errorMessage = nil
-        
+
         do {
-            let response = try await apiService.parseRecipeFromUrl(url)
+            let response = try await apiService.parseRecipeFromUrl(url: url)
             isLoading = false
             return response
         } catch {
@@ -97,13 +157,13 @@ class RecipeManager: ObservableObject {
             return nil
         }
     }
-    
+
     func parseRecipeFromText(_ text: String) async -> RecipeParseResponse? {
         isLoading = true
         errorMessage = nil
-        
+
         do {
-            let response = try await apiService.parseRecipeFromText(text)
+            let response = try await apiService.parseRecipeFromText(text: text)
             isLoading = false
             return response
         } catch {
@@ -112,13 +172,13 @@ class RecipeManager: ObservableObject {
             return nil
         }
     }
-    
+
     func parseRecipeFromImages(_ base64Images: [String]) async -> RecipeParseResponse? {
         isLoading = true
         errorMessage = nil
-        
+
         do {
-            let response = try await apiService.parseRecipeFromImage(base64Images)
+            let response = try await apiService.parseRecipeFromImage(images: base64Images)
             isLoading = false
             return response
         } catch {
@@ -127,9 +187,20 @@ class RecipeManager: ObservableObject {
             return nil
         }
     }
-    
+
     // MARK: - Helper Methods
+
     func clearError() {
         errorMessage = nil
+    }
+
+    func searchRecipes(query: String) -> [Recipe] {
+        guard !query.isEmpty else { return recipes }
+
+        return recipes.filter { recipe in
+            recipe.recipe_data.title.localizedCaseInsensitiveContains(query) ||
+            recipe.recipe_data.tags.contains(where: { $0.localizedCaseInsensitiveContains(query) }) ||
+            recipe.recipe_data.cuisine_type?.localizedCaseInsensitiveContains(query) ?? false
+        }
     }
 }
