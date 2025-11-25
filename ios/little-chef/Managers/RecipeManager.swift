@@ -49,9 +49,19 @@ class RecipeManager: ObservableObject {
         do {
             let recipe = Recipe(
                 id: UUID(),
-                recipe_data: recipeBase,
-                created_at: Date(),
-                updated_at: Date()
+                title: recipeBase.title,
+                description: recipeBase.description,
+                servings: recipeBase.servings,
+                prepTime: recipeBase.prepTime,
+                cookTime: recipeBase.cookTime,
+                ingredients: recipeBase.ingredients,
+                instructions: recipeBase.instructions,
+                tags: recipeBase.tags,
+                sourceUrl: recipeBase.sourceUrl,
+                cuisineType: recipeBase.cuisineType,
+                difficulty: recipeBase.difficulty,
+                createdAt: Date(),
+                updatedAt: Date()
             )
 
             _ = RecipeEntity.create(from: recipe, in: context)
@@ -198,9 +208,9 @@ class RecipeManager: ObservableObject {
         guard !query.isEmpty else { return recipes }
 
         return recipes.filter { recipe in
-            recipe.recipe_data.title.localizedCaseInsensitiveContains(query) ||
-            recipe.recipe_data.tags.contains(where: { $0.localizedCaseInsensitiveContains(query) }) ||
-            recipe.recipe_data.cuisine_type?.localizedCaseInsensitiveContains(query) ?? false
+            recipe.title.localizedCaseInsensitiveContains(query) ||
+            recipe.tags.contains(where: { $0.localizedCaseInsensitiveContains(query) }) ||
+            recipe.cuisineType?.localizedCaseInsensitiveContains(query) ?? false
         }
     }
 }

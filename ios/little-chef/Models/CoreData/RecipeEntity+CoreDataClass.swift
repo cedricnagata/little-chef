@@ -34,7 +34,10 @@ public class RecipeEntity: NSManagedObject {
     // Convert to Recipe model
     func toRecipe() -> Recipe? {
         guard let jsonString = recipeDataJSON,
-              let data = jsonString.data(using: .utf8) else {
+              let data = jsonString.data(using: .utf8),
+              let recipeId = id,
+              let created = createdAt,
+              let updated = updatedAt else {
             return nil
         }
 
@@ -42,12 +45,23 @@ public class RecipeEntity: NSManagedObject {
         decoder.dateDecodingStrategy = .iso8601
 
         do {
-            let recipeData = try decoder.decode(RecipeBase.self, from: data)
+            let recipeBase = try decoder.decode(RecipeBase.self, from: data)
+            // Convert RecipeBase to Recipe (flat structure)
             return Recipe(
-                id: id ?? UUID(),
-                recipe_data: recipeData,
-                created_at: createdAt ?? Date(),
-                updated_at: updatedAt ?? Date()
+                id: recipeId,
+                title: recipeBase.title,
+                description: recipeBase.description,
+                servings: recipeBase.servings,
+                prepTime: recipeBase.prepTime,
+                cookTime: recipeBase.cookTime,
+                ingredients: recipeBase.ingredients,
+                instructions: recipeBase.instructions,
+                tags: recipeBase.tags,
+                sourceUrl: recipeBase.sourceUrl,
+                cuisineType: recipeBase.cuisineType,
+                difficulty: recipeBase.difficulty,
+                createdAt: created,
+                updatedAt: updated
             )
         } catch {
             print("Failed to decode recipe: \(error)")
@@ -59,14 +73,28 @@ public class RecipeEntity: NSManagedObject {
     static func create(from recipe: Recipe, in context: NSManagedObjectContext) -> RecipeEntity {
         let entity = RecipeEntity(context: context)
         entity.id = recipe.id
-        entity.title = recipe.recipe_data.title
-        entity.createdAt = recipe.created_at
-        entity.updatedAt = recipe.updated_at
+        entity.title = recipe.title
+        entity.createdAt = recipe.createdAt
+        entity.updatedAt = recipe.updatedAt
 
-        // Encode recipe_data to JSON
+        // Convert Recipe to RecipeBase and encode to JSON
+        let recipeBase = RecipeBase(
+            title: recipe.title,
+            description: recipe.description,
+            servings: recipe.servings,
+            prepTime: recipe.prepTime,
+            cookTime: recipe.cookTime,
+            ingredients: recipe.ingredients,
+            instructions: recipe.instructions,
+            tags: recipe.tags,
+            sourceUrl: recipe.sourceUrl,
+            cuisineType: recipe.cuisineType,
+            difficulty: recipe.difficulty
+        )
+
         let encoder = JSONEncoder()
         encoder.dateEncodingStrategy = .iso8601
-        if let data = try? encoder.encode(recipe.recipe_data),
+        if let data = try? encoder.encode(recipeBase),
            let jsonString = String(data: data, encoding: .utf8) {
             entity.recipeDataJSON = jsonString
         }

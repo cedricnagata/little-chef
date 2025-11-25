@@ -135,7 +135,20 @@ struct AddRecipeView: View {
                 if let recipe = parsedRecipe {
                     EditRecipeView(recipe: recipe) { finalRecipe in
                         Task {
-                            let success = await recipeManager.createRecipe(finalRecipe)
+                            let recipeBase = RecipeBase(
+                                title: finalRecipe.title,
+                                description: finalRecipe.description,
+                                servings: finalRecipe.servings,
+                                prepTime: finalRecipe.prepTime,
+                                cookTime: finalRecipe.cookTime,
+                                ingredients: finalRecipe.ingredients,
+                                instructions: finalRecipe.instructions,
+                                tags: finalRecipe.tags,
+                                sourceUrl: finalRecipe.sourceUrl,
+                                cuisineType: finalRecipe.cuisineType,
+                                difficulty: finalRecipe.difficulty
+                            )
+                            let success = await recipeManager.createRecipe(recipeBase)
                             if success {
                                 dismiss()
                             }

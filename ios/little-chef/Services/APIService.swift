@@ -33,10 +33,10 @@ class APIService {
 
     /// Send query to cooking assistant Lambda
     /// POST /v1/assistant
-    func sendAgentQuery(cookingSession: CookingSessionBase, query: String) async throws -> AgentQueryResponse {
+    func sendAgentQuery(cookingSession: CookingSession, query: String) async throws -> AgentQueryResponse {
         let url = URL(string: "\(baseURL)/v1/assistant")!
 
-        let requestBody = AgentQueryRequest(cooking_session: cookingSession, query: query)
+        let requestBody = AgentQueryRequest(cookingSession: cookingSession, query: query)
 
         var request = URLRequest(url: url)
         request.httpMethod = "POST"

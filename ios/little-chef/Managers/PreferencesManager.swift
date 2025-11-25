@@ -30,27 +30,33 @@ class PreferencesManager: ObservableObject {
     }
 
     func updateLLMModel(_ model: String) {
-        preferences.llm_model = model
+        preferences.llmModel = model
         saveChanges()
     }
 
     func updateMeasurementSystem(_ system: String) {
-        preferences.measurement_system = system
+        preferences.measurementSystem = system
         saveChanges()
     }
 
     func updateDietaryRestrictions(_ restrictions: [String]) {
-        preferences.dietary_restrictions = restrictions
+        preferences.dietaryRestrictions = restrictions
         saveChanges()
     }
 
     func updateVoiceSettings(_ settings: VoiceSettings) {
-        preferences.voice_settings = settings
+        preferences.voiceSettings = settings
         saveChanges()
     }
 
     func updateElevenLabsSettings(_ settings: ElevenLabsSettings) {
-        preferences.voice_settings.elevenlabs = settings
+        let newVoiceSettings = VoiceSettings(
+            speechRate: preferences.voiceSettings.speechRate,
+            voiceIdentifier: preferences.voiceSettings.voiceIdentifier,
+            autoSpeakResponses: preferences.voiceSettings.autoSpeakResponses,
+            elevenlabs: settings
+        )
+        preferences.voiceSettings = newVoiceSettings
         saveChanges()
     }
 

@@ -237,9 +237,11 @@ struct AgentQueryRequest: Codable {
 struct AgentQueryResponse: Codable {
     let response: String
     let updatedSession: CookingSession
-    
+    let audio: String?  // Base64 encoded MP3 audio (if ElevenLabs enabled)
+
     enum CodingKeys: String, CodingKey {
         case response
         case updatedSession = "updated_session"
+        case audio
     }
 }

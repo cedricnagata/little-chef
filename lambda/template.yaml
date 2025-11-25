@@ -6,7 +6,7 @@ Globals:
   Function:
     Timeout: 300
     MemorySize: 512
-    Runtime: python3.11
+    Runtime: python3.12
     Environment:
       Variables:
         LOG_LEVEL: INFO
@@ -106,9 +106,9 @@ Resources:
       Description: Shared schemas and utilities
       ContentUri: shared/
       CompatibleRuntimes:
-        - python3.11
+        - python3.12
     Metadata:
-      BuildMethod: python3.11
+      BuildMethod: python3.12
 
 Outputs:
   ApiGatewayUrl:

@@ -20,10 +20,10 @@ extension EnvironmentValues {
 }
 
 struct MainView: View {
-    @EnvironmentObject var authManager: AuthManager
     @StateObject private var recipeManager = RecipeManager()
     @StateObject private var cookingSessionManager = CookingSessionManager()
     @StateObject private var voiceAssistant = VoiceAssistant()
+    @StateObject private var preferencesManager = PreferencesManager()
     @State private var selectedTab = 0
     
     var body: some View {
@@ -49,14 +49,15 @@ struct MainView: View {
                 .environmentObject(cookingSessionManager)
                 .environmentObject(voiceAssistant)
             
-            // Profile Tab
+            // Settings Tab
             ProfileView()
                 .tabItem {
-                    Image(systemName: "person.fill")
-                    Text("Profile")
+                    Image(systemName: "gearshape.fill")
+                    Text("Settings")
                 }
                 .tag(2)
                 .environmentObject(cookingSessionManager)
+                .environmentObject(preferencesManager)
         }
         .accentColor(.orange)
         .environment(\.selectedTab, $selectedTab)
@@ -71,139 +72,47 @@ struct MainView: View {
 // MARK: - Profile View
 
 struct ProfileView: View {
-    @EnvironmentObject var authManager: AuthManager
     @EnvironmentObject var cookingSessionManager: CookingSessionManager
-    @State private var showingDeleteAlert = false
-    @State private var isDeleting = false
-    
+    @EnvironmentObject var preferencesManager: PreferencesManager
+
     var body: some View {
         NavigationStack {
             ScrollView {
                 VStack(spacing: 24) {
-                // User Info
-                VStack(spacing: 16) {
-                    Image(systemName: "person.circle.fill")
-                        .font(.system(size: 80))
-                        .foregroundColor(.orange)
-                    
-                    if let user = authManager.currentUser {
-                        Text(user.name)
+                    // App Icon
+                    VStack(spacing: 16) {
+                        Image(systemName: "fork.knife.circle.fill")
+                            .font(.system(size: 80))
+                            .foregroundColor(.orange)
+
+                        Text("LittleChef")
                             .font(.title2)
                             .fontWeight(.semibold)
-                        
-                        Text(user.email)
+
+                        Text("Hands-Free Cooking Assistant")
                             .font(.subheadline)
                             .foregroundColor(.secondary)
                     }
-                }
-                .padding(.top, 20)
-                
-                // Settings Options
-                VStack(spacing: 16) {
-                    NavigationLink(destination: ProfileSettingsView().environmentObject(cookingSessionManager)) {
-                        SettingsOptionRow(
-                            icon: "person.circle.fill",
-                            title: "Profile Settings",
-                            subtitle: "LLM model, voice settings, ElevenLabs, dietary restrictions"
-                        )
-                    }
-                    .buttonStyle(PlainButtonStyle())
-                    
-                    NavigationLink(destination: AccountSettingsView()) {
-                        SettingsOptionRow(
-                            icon: "gear.circle.fill",
-                            title: "Account Settings", 
-                            subtitle: "Email, name, password"
-                        )
-                    }
-                    .buttonStyle(PlainButtonStyle())
-                    
-                    // Delete Account Button
-                    Button(action: {
-                        showingDeleteAlert = true
-                    }) {
-                        HStack {
-                            if isDeleting {
-                                ProgressView()
-                                    .progressViewStyle(CircularProgressViewStyle(tint: .red))
-                                    .scaleEffect(0.8)
-                            } else {
-                                Image(systemName: "trash.circle.fill")
-                                    .font(.title2)
-                                    .foregroundColor(.red)
-                            }
-                            
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text("Delete Account")
-                                    .foregroundColor(.red)
-                                    .font(.body)
-                                Text("Permanently delete your account and data")
-                                    .foregroundColor(.secondary)
-                                    .font(.caption)
-                            }
-                            
-                            Spacer()
-                            
-                            Image(systemName: "chevron.right")
-                                .font(.caption)
-                                .foregroundColor(.secondary)
+                    .padding(.top, 20)
+
+                    // Settings Options
+                    VStack(spacing: 16) {
+                        NavigationLink(destination: ProfileSettingsView()
+                            .environmentObject(cookingSessionManager)
+                            .environmentObject(preferencesManager)) {
+                            SettingsOptionRow(
+                                icon: "gearshape.fill",
+                                title: "Preferences",
+                                subtitle: "LLM model, voice settings, ElevenLabs, dietary restrictions"
+                            )
                         }
-                        .padding()
-                        .background(Color(.systemGray6))
-                        .cornerRadius(12)
+                        .buttonStyle(PlainButtonStyle())
                     }
-                    .disabled(isDeleting)
-                }
-                .padding(.horizontal)
-                
-                // Logout Button
-                Button(action: {
-                    Task {
-                        await authManager.logout()
-                    }
-                }) {
-                    HStack {
-                        if authManager.isLoading {
-                            ProgressView()
-                                .progressViewStyle(CircularProgressViewStyle(tint: .white))
-                                .scaleEffect(0.8)
-                        }
-                        Text("Sign Out")
-                            .fontWeight(.semibold)
-                    }
-                    .frame(maxWidth: .infinity)
-                    .padding()
-                    .background(Color.red)
-                    .foregroundColor(.white)
-                    .cornerRadius(12)
-                }
-                .disabled(authManager.isLoading)
-                .padding(.horizontal)
-                .padding(.bottom, 32)
+                    .padding(.horizontal)
+                    .padding(.bottom, 32)
                 }
             }
-            .navigationTitle("Profile")
-        }
-        .alert("Delete Account", isPresented: $showingDeleteAlert) {
-            Button("Cancel", role: .cancel) { }
-            Button("Delete", role: .destructive) {
-                deleteAccount()
-            }
-        } message: {
-            Text("Are you sure you want to permanently delete your account? This action cannot be undone and will delete all your recipes and data forever.")
-        }
-    }
-    
-    private func deleteAccount() {
-        Task {
-            isDeleting = true
-            let success = await authManager.deleteAccount()
-            isDeleting = false
-            
-            if !success {
-                // Error handling is managed by AuthManager
-                print("Failed to delete account")
-            }
+            .navigationTitle("Settings")
         }
     }
 }
@@ -244,5 +153,4 @@ struct SettingsOptionRow: View {
 
 #Preview {
     MainView()
-        .environmentObject(AuthManager())
 }

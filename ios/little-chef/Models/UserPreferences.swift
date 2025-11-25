@@ -1,5 +1,5 @@
 //
-//  User.swift
+//  UserPreferences.swift
 //  little-chef
 //
 //  Created by Cedric Nagata on 9/5/25.
@@ -7,83 +7,7 @@
 
 import Foundation
 
-// MARK: - User Models
-struct User: Codable, Identifiable {
-    let id: UUID
-    let email: String
-    let name: String
-    let isActive: Bool
-    let preferences: [String: AnyCodable]
-    let createdAt: Date
-    let updatedAt: Date
-    
-    enum CodingKeys: String, CodingKey {
-        case id, email, name, preferences
-        case isActive = "is_active"
-        case createdAt = "created_at"
-        case updatedAt = "updated_at"
-    }
-}
-
-struct UserCreate: Codable {
-    let email: String
-    let password: String
-    let name: String
-}
-
-struct UserLogin: Codable {
-    let email: String
-    let password: String
-}
-
-struct UserUpdate: Codable {
-    let name: String?
-    let email: String?
-    let preferences: [String: AnyCodable]?
-    
-    init(name: String? = nil, email: String? = nil, preferences: [String: AnyCodable]? = nil) {
-        self.name = name
-        self.email = email
-        self.preferences = preferences
-    }
-    
-    func encode(to encoder: Encoder) throws {
-        var container = encoder.container(keyedBy: CodingKeys.self)
-        
-        // Only encode non-nil values
-        if let name = name {
-            try container.encode(name, forKey: .name)
-        }
-        if let email = email {
-            try container.encode(email, forKey: .email)
-        }
-        if let preferences = preferences {
-            try container.encode(preferences, forKey: .preferences)
-        }
-    }
-    
-    enum CodingKeys: String, CodingKey {
-        case name, email, preferences
-    }
-}
-
 // MARK: - Voice Settings Models
-struct ElevenLabsVoice: Codable, Identifiable {
-    let voiceName: String
-    let voiceId: String
-    
-    var id: String { voiceId }
-    
-    enum CodingKeys: String, CodingKey {
-        case voiceName = "voice_name"
-        case voiceId = "voice_id"
-    }
-}
-
-struct ElevenLabsVoicesResponse: Codable {
-    let voices: [ElevenLabsVoice]
-}
-
 struct ElevenLabsSettings: Codable, Equatable {
     let enabled: Bool
     let voiceName: String
@@ -121,20 +45,34 @@ struct VoiceSettings: Codable, Equatable {
 }
 
 struct UserPreferences: Codable {
-    let llmModel: String
-    let measurementSystem: String
-    let dietaryRestrictions: [String]
-    let voiceSettings: VoiceSettings
-    
+    var llmModel: String
+    var measurementSystem: String
+    var dietaryRestrictions: [String]
+    var voiceSettings: VoiceSettings
+
     enum CodingKeys: String, CodingKey {
         case llmModel = "llm_model"
         case measurementSystem = "measurement_system"
         case dietaryRestrictions = "dietary_restrictions"
         case voiceSettings = "voice_settings"
     }
-    
+
+    init() {
+        self.llmModel = "gpt-4.1-mini"
+        self.measurementSystem = "imperial"
+        self.dietaryRestrictions = []
+        self.voiceSettings = VoiceSettings.defaultSettings
+    }
+
+    init(llmModel: String, measurementSystem: String, dietaryRestrictions: [String], voiceSettings: VoiceSettings) {
+        self.llmModel = llmModel
+        self.measurementSystem = measurementSystem
+        self.dietaryRestrictions = dietaryRestrictions
+        self.voiceSettings = voiceSettings
+    }
+
     static let defaultPreferences = UserPreferences(
-        llmModel: "gpt-4.1",
+        llmModel: "gpt-4.1-mini",
         measurementSystem: "imperial",
         dietaryRestrictions: [],
         voiceSettings: VoiceSettings.defaultSettings

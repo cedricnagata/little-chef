@@ -30,7 +30,7 @@ class VoiceSettings(BaseModel):
 
 class UserPreferences(BaseModel):
     """Schema for user preferences"""
-    llm_model: str = Field("gpt-4.1", pattern="^(gpt-5|gpt-5-mini|gpt-5-nano|gpt-4.1|gpt-4.1-mini|gpt-4.1-nano)$")
+    llm_model: str = Field("gpt-4.1", pattern="^(gpt-4.1|gpt-4.1-mini)$")
     measurement_system: str = Field("imperial", pattern="^(metric|imperial)$")
     dietary_restrictions: list[str] = Field(default_factory=list)
     voice_settings: VoiceSettings = Field(default_factory=VoiceSettings)

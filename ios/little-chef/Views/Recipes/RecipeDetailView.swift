@@ -256,8 +256,8 @@ struct RecipeDetailView: View {
     }
     
     private func updateRecipe(_ updatedRecipe: RecipeCreate) async {
-        // Convert RecipeCreate to RecipeUpdate
-        let recipeUpdate = RecipeUpdate(
+        // Convert RecipeCreate to RecipeBase
+        let recipeBase = RecipeBase(
             title: updatedRecipe.title,
             description: updatedRecipe.description,
             servings: updatedRecipe.servings,
@@ -270,8 +270,8 @@ struct RecipeDetailView: View {
             cuisineType: updatedRecipe.cuisineType,
             difficulty: updatedRecipe.difficulty
         )
-        
-        let success = await recipeManager.updateRecipe(id: recipe.id, with: recipeUpdate)
+
+        let success = await recipeManager.updateRecipe(id: recipe.id, with: recipeBase)
         if !success {
             // Handle error - could show an alert
             print("Failed to update recipe: \(recipeManager.errorMessage ?? "Unknown error")")
