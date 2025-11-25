@@ -18,8 +18,8 @@ struct Config {
                 print("Using local API URL from Config.plist: \(url)")
                 return url
             }
-            print("⚠️ Using default localhost URL")
-            return "http://localhost:8000"
+            print("⚠️ Using default localhost URL (SAM local API)")
+            return "http://localhost:3000"
         #else
             // In release mode, MUST have PRODUCTION_API_URL in Config.plist
             guard let url = loadConfigValue(key: "PRODUCTION_API_URL") else {

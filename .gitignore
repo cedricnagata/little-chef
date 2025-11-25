@@ -19,3 +19,4 @@ lambda/**/venv/
 lambda/**/.venv/
 .aws-sam/
 samconfig.toml
+lambda/env.json
