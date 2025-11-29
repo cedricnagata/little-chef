@@ -69,7 +69,7 @@ async def process_cooking_query(event_body: Dict[str, Any]) -> Dict[str, Any]:
         # Prepare response
         response_data = {
             "response": response_text,
-            "updated_session": updated_session.model_dump(),
+            "updated_session": updated_session.model_dump(mode='json'),
         }
 
         # Add audio if generated

@@ -5,7 +5,7 @@ Contains only schemas needed for recipe parsing and cooking assistant
 
 from pydantic import BaseModel, Field, validator
 from typing import Optional, Dict, Any, List, Literal
-from datetime import datetime
+from datetime import datetime, timezone
 import uuid
 
 
@@ -95,7 +95,7 @@ class Command(BaseModel):
     target_id: Optional[str] = None  # ID of the target entity (e.g., timer_id)
     label: str
     parameters: Dict[str, Any] = Field(default_factory=dict)  # Flexible parameters
-    created_at: datetime = Field(default_factory=datetime.now)
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
 
 class TimerStatus(BaseModel):
@@ -115,7 +115,7 @@ class Message(BaseModel):
     id: uuid.UUID = Field(default_factory=uuid.uuid4)
     role: Literal["user", "assistant"]
     content: str
-    timestamp: datetime = Field(default_factory=datetime.now)
+    timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
 
 class CookingSessionBase(BaseModel):

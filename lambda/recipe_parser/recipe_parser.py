@@ -6,6 +6,7 @@ import json
 import base64
 import requests
 import os
+import logging
 from typing import Dict, Any, Optional, Tuple, List
 from langchain_openai import ChatOpenAI
 from langchain_core.output_parsers import PydanticOutputParser
@@ -13,6 +14,8 @@ from langchain_core.prompts import ChatPromptTemplate
 
 import sys
 sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
+
+logger = logging.getLogger(__name__)
 
 from shared.schemas import RecipeBase, RecipeParseResponse
 from prompts import RECIPE_PARSING_PROMPT, IMAGE_RECIPE_PARSING_PROMPT, RECIPE_FORMAT_INSTRUCTIONS
@@ -201,14 +204,7 @@ class RecipeParser:
 
             payload = {
               "url": url,
-              "onlyMainContent": True,
-              "maxAge": 172800000,
-              "parsers": [
-                "pdf"
-              ],
-              "formats": [
-                "markdown"
-              ]
+              "formats": ["markdown"]
             }
 
             headers = {
@@ -221,7 +217,10 @@ class RecipeParser:
 
             # Firecrawl returns a Document object
             if not response_json.get('success'):
-                raise RecipeParsingError("Failed to scrape URL: No content returned")
+                error_msg = response_json.get('error', 'Unknown error')
+                logger.error(f"Firecrawl API error: {error_msg}")
+                logger.error(f"Full response: {response_json}")
+                raise RecipeParsingError(f"Failed to scrape URL: {error_msg}")
 
             return response_json['data']['markdown']
 

@@ -65,6 +65,8 @@ Resources:
           OPENAI_API_KEY: placeholder-update-after-deployment
           ELEVENLABS_API_KEY: placeholder-update-after-deployment
           ENVIRONMENT: !Ref Environment
+      Layers:
+        - !Ref SharedLayer
       Events:
         CookingAssistantApi:
           Type: HttpApi
@@ -89,6 +91,8 @@ Resources:
           FIRECRAWL_API_KEY: placeholder-update-after-deployment
           FIRECRAWL_API_URL: https://api.firecrawl.dev/v1/scrape
           ENVIRONMENT: !Ref Environment
+      Layers:
+        - !Ref SharedLayer
       Events:
         RecipeParserApi:
           Type: HttpApi

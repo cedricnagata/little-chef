@@ -143,14 +143,17 @@ struct RecipeParseRequest: Codable {
 }
 
 struct RecipeParseUrlRequest: Codable {
+    let type: String = "url"
     let url: String
 }
 
 struct RecipeParseTextRequest: Codable {
+    let type: String = "text"
     let text: String
 }
 
 struct RecipeParseImageRequest: Codable {
+    let type: String = "image"
     let images: [String] // Array of base64 encoded images
 }
 
