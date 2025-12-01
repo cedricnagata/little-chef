@@ -89,11 +89,7 @@ struct RecipeListView: View {
                             }
                             .onDelete(perform: deleteRecipes)
                         }
-                        .simultaneousGesture(
-                            TapGesture().onEnded {
-                                isSearchFocused = false
-                            }
-                        )
+                        .scrollDismissesKeyboard(.interactively)
                         .refreshable {
                             await recipeManager.loadRecipes()
                         }
