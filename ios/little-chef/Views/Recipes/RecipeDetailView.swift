@@ -18,31 +18,31 @@ struct RecipeDetailView: View {
     
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 20) {
+            VStack(alignment: .leading, spacing: DesignSystem.Spacing.xl) {
                 // Header
-                VStack(alignment: .leading, spacing: 12) {
+                VStack(alignment: .leading, spacing: DesignSystem.Spacing.md) {
                     Text(recipe.title)
                         .font(.title)
                         .fontWeight(.bold)
-                    
+
                     if let description = recipe.description {
                         Text(description)
                             .font(.body)
-                            .foregroundColor(.secondary)
+                            .foregroundColor(DesignSystem.Colors.textSecondary)
                     }
-                    
+
                     // Recipe info grid
-                    LazyVGrid(columns: Array(repeating: GridItem(.flexible()), count: 2), spacing: 12) {
+                    LazyVGrid(columns: Array(repeating: GridItem(.flexible()), count: 2), spacing: DesignSystem.Spacing.md) {
                         if let prepTime = recipe.prepTime {
                             InfoCard(title: "Prep Time", value: "\(prepTime) min", icon: "clock")
                         }
-                        
+
                         if let cookTime = recipe.cookTime {
                             InfoCard(title: "Cook Time", value: "\(cookTime) min", icon: "flame")
                         }
-                        
+
                         InfoCard(title: "Servings", value: "\(recipe.servings)", icon: "person.2")
-                        
+
                         if let difficulty = recipe.difficulty {
                             InfoCard(title: "Difficulty", value: difficulty.capitalized, icon: "star")
                         }
@@ -72,77 +72,75 @@ struct RecipeDetailView: View {
                 Divider()
                 
                 // Ingredients
-                VStack(alignment: .leading, spacing: 12) {
+                VStack(alignment: .leading, spacing: DesignSystem.Spacing.md) {
                     HStack {
                         Text("Ingredients")
+                            .sectionHeader()
                             .font(.title2)
-                            .fontWeight(.semibold)
-                        
+
                         Spacer()
-                        
+
                         Text("\(recipe.ingredients.count) items")
-                            .font(.caption)
-                            .foregroundColor(.secondary)
+                            .captionText()
                     }
-                    
-                    LazyVStack(alignment: .leading, spacing: 8) {
+
+                    LazyVStack(alignment: .leading, spacing: DesignSystem.Spacing.md) {
                         ForEach(Array(recipe.ingredients.enumerated()), id: \.offset) { index, ingredient in
-                            HStack(alignment: .top, spacing: 12) {
+                            HStack(alignment: .top, spacing: DesignSystem.Spacing.md) {
                                 Circle()
-                                    .fill(Color.orange.opacity(0.2))
+                                    .fill(DesignSystem.Colors.primaryMedium)
                                     .frame(width: 8, height: 8)
                                     .padding(.top, 6)
-                                
+
                                 Text(ingredient)
-                                    .font(.body)
-                                
+                                    .bodyText()
+
                                 Spacer()
                             }
                         }
                     }
                 }
-                .padding(.horizontal)
+                .padding(.horizontal, DesignSystem.Spacing.lg)
                 
                 Divider()
                 
                 // Instructions
-                VStack(alignment: .leading, spacing: 12) {
+                VStack(alignment: .leading, spacing: DesignSystem.Spacing.md) {
                     HStack {
                         Text("Instructions")
+                            .sectionHeader()
                             .font(.title2)
-                            .fontWeight(.semibold)
-                        
+
                         Spacer()
-                        
+
                         Text("\(recipe.instructions.count) steps")
-                            .font(.caption)
-                            .foregroundColor(.secondary)
+                            .captionText()
                     }
-                    
-                    LazyVStack(alignment: .leading, spacing: 16) {
+
+                    LazyVStack(alignment: .leading, spacing: DesignSystem.Spacing.lg) {
                         ForEach(Array(recipe.instructions.enumerated()), id: \.offset) { index, instruction in
-                            HStack(alignment: .top, spacing: 12) {
+                            HStack(alignment: .top, spacing: DesignSystem.Spacing.md) {
                                 ZStack {
                                     Circle()
-                                        .fill(Color.orange)
+                                        .fill(DesignSystem.Colors.primary)
                                         .frame(width: 24, height: 24)
-                                    
+
                                     Text("\(index + 1)")
                                         .font(.caption)
                                         .fontWeight(.semibold)
                                         .foregroundColor(.white)
                                 }
-                                
+
                                 Text(instruction)
-                                    .font(.body)
+                                    .bodyText()
                                     .fixedSize(horizontal: false, vertical: true)
-                                
+
                                 Spacer()
                             }
                         }
                     }
                 }
-                .padding(.horizontal)
+                .padding(.horizontal, DesignSystem.Spacing.lg)
                 
                 // Source URL (if available)
                 if let sourceUrl = recipe.sourceUrl, !sourceUrl.isEmpty {

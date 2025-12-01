@@ -124,7 +124,7 @@ struct ProfileSettingsView: View {
                             dietaryRestrictions.removeAll { $0 == restriction }
                         }) {
                             Image(systemName: "minus.circle.fill")
-                                .foregroundColor(.red)
+                                .foregroundColor(DesignSystem.Colors.error)
                         }
                     }
                 }
@@ -133,7 +133,7 @@ struct ProfileSettingsView: View {
                     TextField("Add restriction", text: $newRestriction)
                     Button(action: addRestriction) {
                         Image(systemName: "plus.circle.fill")
-                            .foregroundColor(.green)
+                            .foregroundColor(DesignSystem.Colors.success)
                     }
                     .disabled(newRestriction.isEmpty)
                 }

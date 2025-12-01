@@ -49,25 +49,19 @@ struct AddRecipeView: View {
                     }
                     .padding(.top)
                     
-                    // Input type selector
-                    VStack(spacing: 16) {
-                        Text("Recipe Source")
-                            .font(.headline)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                        
-                        LazyVGrid(columns: Array(repeating: GridItem(.flexible()), count: 3), spacing: 12) {
+                    // Input type selector - Segmented picker
+                    VStack(spacing: DesignSystem.Spacing.md) {
+                        Picker("Recipe Source", selection: $selectedInputType) {
                             ForEach(RecipeInputType.allCases, id: \.self) { inputType in
-                                InputTypeCard(
-                                    inputType: inputType,
-                                    isSelected: selectedInputType == inputType
-                                ) {
-                                    selectedInputType = inputType
-                                    clearInputs()
-                                }
+                                Text(inputType.displayName).tag(inputType)
                             }
                         }
+                        .pickerStyle(.segmented)
+                        .onChange(of: selectedInputType) { _, _ in
+                            clearInputs()
+                        }
                     }
-                    .padding(.horizontal)
+                    .padding(.horizontal, DesignSystem.Spacing.lg)
                     
                     // Input area based on selected type
                     VStack(spacing: 16) {
@@ -317,26 +311,18 @@ struct TextInputView: View {
     }
     
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack {
-                Text("Recipe Text")
-                    .font(.headline)
-                
-                Spacer()
-                
-                Text("\(characterCount)/50,000")
-                    .font(.caption)
-                    .foregroundColor(isValid || trimmedText.isEmpty ? .secondary : .red)
-            }
-            
+        VStack(alignment: .leading, spacing: DesignSystem.Spacing.sm) {
+            Text("Recipe Text")
+                .font(.headline)
+
             TextEditor(text: $textInput)
                 .frame(minHeight: 120)
-                .padding(8)
-                .background(Color(.systemGray6))
-                .cornerRadius(8)
+                .padding(DesignSystem.Spacing.sm)
+                .background(DesignSystem.Colors.backgroundSecondary)
+                .cornerRadius(DesignSystem.CornerRadius.small)
                 .overlay(
-                    RoundedRectangle(cornerRadius: 8)
-                        .stroke(validationMessage != nil ? Color.red : Color.clear, lineWidth: 1)
+                    RoundedRectangle(cornerRadius: DesignSystem.CornerRadius.small)
+                        .stroke(validationMessage != nil ? DesignSystem.Colors.error : Color.clear, lineWidth: 1)
                 )
             
             VStack(alignment: .leading, spacing: 4) {
@@ -474,37 +460,23 @@ struct ParsedRecipePreview: View {
     }
     
     var body: some View {
-        VStack(spacing: 16) {
+        VStack(spacing: DesignSystem.Spacing.lg) {
             // Header
             HStack {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("Recipe Parsed!")
-                        .font(.headline)
-                        .foregroundColor(.green)
-                    
-                    HStack {
-                        Text("Confidence:")
-                        Text("\(Int(confidence * 100))%")
-                            .fontWeight(.semibold)
-                            .foregroundColor(confidenceColor)
-                    }
-                    .font(.caption)
-                }
-                
+                Text("Recipe Parsed!")
+                    .font(.headline)
+                    .foregroundColor(DesignSystem.Colors.success)
+
                 Spacer()
-                
+
                 Button(action: onEdit) {
                     HStack {
                         Image(systemName: "pencil")
                         Text("Edit & Save")
                     }
                     .font(.subheadline)
-                    .foregroundColor(.white)
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 8)
-                    .background(Color.orange)
-                    .cornerRadius(8)
                 }
+                .primaryButton()
             }
             
             // Recipe preview
@@ -540,27 +512,25 @@ struct ParsedRecipePreview: View {
             
             // Warnings (if any)
             if !warnings.isEmpty {
-                VStack(alignment: .leading, spacing: 4) {
-                    Label("Parsing Notes", systemImage: "exclamationmark.triangle")
+                VStack(alignment: .leading, spacing: DesignSystem.Spacing.xs) {
+                    Label("Notes", systemImage: "info.circle")
                         .font(.caption)
-                        .foregroundColor(.orange)
-                    
-                    ForEach(warnings.prefix(3), id: \.self) { warning in
+                        .foregroundColor(DesignSystem.Colors.primary)
+
+                    ForEach(warnings.prefix(2), id: \.self) { warning in
                         Text("• \(warning)")
                             .font(.caption2)
-                            .foregroundColor(.secondary)
+                            .foregroundColor(DesignSystem.Colors.textSecondary)
                     }
                 }
-                .padding(.horizontal, 12)
-                .padding(.vertical, 8)
-                .background(Color.orange.opacity(0.1))
-                .cornerRadius(8)
+                .padding(DesignSystem.Spacing.md)
+                .background(DesignSystem.Colors.primaryLight)
+                .cornerRadius(DesignSystem.CornerRadius.small)
             }
         }
-        .padding()
-        .background(Color(.systemBackground))
-        .cornerRadius(12)
-        .shadow(color: .black.opacity(0.1), radius: 4, x: 0, y: 2)
+        .padding(DesignSystem.Spacing.lg)
+        .cardBackground()
+        .shadow(color: .black.opacity(0.05), radius: 4, x: 0, y: 2)
     }
 }
 

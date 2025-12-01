@@ -536,7 +536,7 @@ struct InputAreaView: View {
         VStack(spacing: 0) {
             Divider()
 
-            HStack(spacing: 12) {
+            HStack(spacing: DesignSystem.Spacing.lg) {
                 // Hands-free mode toggle
                 Button(action: {
                     isInputFocused = false
@@ -548,12 +548,12 @@ struct InputAreaView: View {
                 }) {
                     Image(systemName: voiceAssistant.isHandsFreeMode ? "ear.fill" : "ear")
                         .font(.title2)
-                        .foregroundColor(voiceAssistant.isHandsFreeMode ? .green : .orange)
+                        .foregroundColor(voiceAssistant.isHandsFreeMode ? DesignSystem.Colors.success : DesignSystem.Colors.primary)
                         .scaleEffect(voiceAssistant.isWakeWordListening && isAnimating ? 1.1 : 1.0)
                         .animation(.easeInOut(duration: 2.0).repeatForever(autoreverses: true), value: isAnimating)
                 }
-                .padding(12)
-                .background(Circle().fill(voiceAssistant.isHandsFreeMode ? Color.green.opacity(0.2) : Color(.systemGray6)))
+                .padding(DesignSystem.Spacing.sm)
+                .background(Circle().fill(voiceAssistant.isHandsFreeMode ? DesignSystem.Colors.successLight : DesignSystem.Colors.backgroundSecondary))
                 .disabled(!voiceAssistant.isAvailable || cookingSessionManager.isLoading)
 
                 // Voice button
@@ -570,12 +570,12 @@ struct InputAreaView: View {
                 }) {
                     Image(systemName: voiceAssistant.isListening ? "mic.fill" : "mic")
                         .font(.title2)
-                        .foregroundColor(voiceAssistant.isListening ? .red : .orange)
+                        .foregroundColor(voiceAssistant.isListening ? DesignSystem.Colors.error : DesignSystem.Colors.primary)
                         .scaleEffect(voiceAssistant.isListening && isAnimating ? 1.2 : 1.0)
                         .animation(.easeInOut(duration: 0.6).repeatForever(autoreverses: true), value: isAnimating)
                 }
-                .padding(12)
-                .background(Circle().fill(Color(.systemGray6)))
+                .padding(DesignSystem.Spacing.sm)
+                .background(Circle().fill(DesignSystem.Colors.backgroundSecondary))
                 .disabled(!voiceAssistant.isAvailable || cookingSessionManager.isLoading || voiceAssistant.isHandsFreeMode)
                 .onAppear {
                     if voiceAssistant.isListening {
@@ -604,7 +604,7 @@ struct InputAreaView: View {
                 }) {
                     Image(systemName: "arrow.up.circle.fill")
                         .font(.title2)
-                        .foregroundColor(textInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? .gray : .orange)
+                        .foregroundColor(textInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? .gray : DesignSystem.Colors.primary)
                 }
                 .disabled(textInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || cookingSessionManager.isLoading)
             }

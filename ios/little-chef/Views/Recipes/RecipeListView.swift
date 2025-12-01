@@ -133,76 +133,54 @@ struct RecipeListView: View {
 
 struct RecipeRowView: View {
     let recipe: Recipe
-    
+
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: DesignSystem.Spacing.md) {
             // Title and difficulty
             HStack {
                 Text(recipe.title)
                     .font(.headline)
                     .lineLimit(2)
-                
+
                 Spacer()
-                
+
                 if let difficulty = recipe.difficulty {
                     DifficultyBadge(difficulty: difficulty)
                 }
             }
-            
+
             // Description (if available)
             if let description = recipe.description {
                 Text(description)
                     .font(.subheadline)
-                    .foregroundColor(.secondary)
-                    .lineLimit(2)
+                    .foregroundColor(DesignSystem.Colors.textSecondary)
+                    .lineLimit(1)
             }
-            
-            // Time and servings info
-            HStack {
-                if let prepTime = recipe.prepTime {
-                    Label("\(prepTime)m prep", systemImage: "clock")
-                        .font(.caption)
-                        .foregroundColor(.secondary)
-                }
-                
-                if let cookTime = recipe.cookTime {
-                    Label("\(cookTime)m cook", systemImage: "flame")
-                        .font(.caption)
-                        .foregroundColor(.secondary)
-                }
-                
-                Spacer()
-                
-                Label("\(recipe.servings) servings", systemImage: "person.2")
-                    .font(.caption)
-                    .foregroundColor(.secondary)
-            }
-            
+
             // Tags (if available)
             if !recipe.tags.isEmpty {
                 ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(spacing: 6) {
+                    HStack(spacing: DesignSystem.Spacing.xs) {
                         ForEach(recipe.tags.prefix(3), id: \.self) { tag in
                             Text(tag)
                                 .font(.caption2)
-                                .foregroundColor(.orange)
-                                .padding(.horizontal, 8)
-                                .padding(.vertical, 4)
-                                .background(Color.orange.opacity(0.15))
-                                .cornerRadius(8)
+                                .foregroundColor(DesignSystem.Colors.primary)
+                                .padding(.horizontal, DesignSystem.Spacing.sm)
+                                .padding(.vertical, DesignSystem.Spacing.xs)
+                                .background(DesignSystem.Colors.primaryLight)
+                                .cornerRadius(DesignSystem.CornerRadius.small)
                         }
-                        
+
                         if recipe.tags.count > 3 {
                             Text("+\(recipe.tags.count - 3)")
                                 .font(.caption2)
-                                .foregroundColor(.secondary)
+                                .foregroundColor(DesignSystem.Colors.textSecondary)
                         }
                     }
-                    .padding(.vertical, 2)
                 }
             }
         }
-        .padding(.vertical, 4)
+        .padding(.vertical, DesignSystem.Spacing.sm)
     }
 }
 
