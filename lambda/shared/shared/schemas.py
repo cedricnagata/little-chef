@@ -3,7 +3,7 @@ Pydantic schemas for Lambda functions
 Contains only schemas needed for recipe parsing and cooking assistant
 """
 
-from pydantic import BaseModel, Field, validator
+from pydantic import BaseModel, Field, validator, field_serializer
 from typing import Optional, Dict, Any, List, Literal
 from datetime import datetime, timezone
 import uuid
@@ -97,6 +97,13 @@ class Command(BaseModel):
     parameters: Dict[str, Any] = Field(default_factory=dict)  # Flexible parameters
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
+    @field_serializer('created_at')
+    def serialize_created_at(self, dt: datetime, _info):
+        """Serialize datetime to ISO8601 format with timezone"""
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return dt.isoformat()
+
 
 class TimerStatus(BaseModel):
     """Current status of a timer (reported by frontend)"""
@@ -109,6 +116,15 @@ class TimerStatus(BaseModel):
     started_at: Optional[datetime] = None
     completed_at: Optional[datetime] = None
 
+    @field_serializer('created_at', 'started_at', 'completed_at')
+    def serialize_datetime(self, dt: Optional[datetime], _info):
+        """Serialize datetime to ISO8601 format with timezone"""
+        if dt is None:
+            return None
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return dt.isoformat()
+
 
 class Message(BaseModel):
     """Schema for conversation messages"""
@@ -116,6 +132,13 @@ class Message(BaseModel):
     role: Literal["user", "assistant"]
     content: str
     timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+    @field_serializer('timestamp')
+    def serialize_timestamp(self, dt: datetime, _info):
+        """Serialize datetime to ISO8601 format with timezone"""
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return dt.isoformat()
 
 
 class CookingSessionBase(BaseModel):

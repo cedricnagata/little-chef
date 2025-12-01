@@ -24,7 +24,9 @@ struct CookingSessionView: View {
                     StartCookingView(showingRecipeSelector: $showingRecipeSelector)
                 }
             }
-            .navigationTitle("Cook with LittleChef")
+            .navigationTitle(cookingSessionManager.hasActiveSession() ? "" : "Cook with LittleChef")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar(cookingSessionManager.hasActiveSession() ? .hidden : .visible, for: .tabBar)
             .sheet(isPresented: $showingRecipeSelector) {
                 RecipeSelectorView()
             }
@@ -100,50 +102,53 @@ struct ActiveCookingView: View {
     @EnvironmentObject var voiceAssistant: VoiceAssistant
     @State private var textInput = ""
     @State private var showingEndSessionAlert = false
-    
+    @State private var selectedTab: CookingTab = .recipe
+    @FocusState private var isInputFocused: Bool
+
+    enum CookingTab: String, CaseIterable {
+        case recipe = "Recipe"
+        case chat = "Chat"
+    }
+
     var body: some View {
-        GeometryReader { geometry in
-            if geometry.size.width > geometry.size.height {
-                // Landscape: Side-by-side layout
-                HStack(spacing: 0) {
-                    // Recipe details on the left
-                    RecipeDetailsView()
-                        .frame(width: geometry.size.width * 0.4)
-                        .background(Color(.systemGray6))
-                    
-                    Divider()
-                    
-                    // Conversation on the right
-                    VStack(spacing: 0) {
-                        ChatAreaView()
-                        InputAreaView(textInput: $textInput)
-                    }
-                    .frame(width: geometry.size.width * 0.6)
-                }
-            } else {
-                // Portrait: Vertical split layout
-                VStack(spacing: 0) {
-                    // Recipe details on top
-                    RecipeDetailsView()
-                        .frame(height: geometry.size.height * 0.45)
-                        .background(Color(.systemGray6))
-                    
-                    Divider()
-                    
-                    // Chat area on bottom
-                    VStack(spacing: 0) {
-                        ChatAreaView()
-                        InputAreaView(textInput: $textInput)
-                    }
+        VStack(spacing: 0) {
+            // Segmented control
+            Picker("View", selection: $selectedTab) {
+                ForEach(CookingTab.allCases, id: \.self) { tab in
+                    Text(tab.rawValue).tag(tab)
                 }
             }
+            .pickerStyle(.segmented)
+            .padding()
+
+            Divider()
+
+            // Main content area
+            ZStack {
+                if selectedTab == .recipe {
+                    RecipeDetailsView()
+                } else {
+                    ChatAreaView()
+                }
+            }
+            .contentShape(Rectangle())
+            .onTapGesture {
+                // Dismiss keyboard when tapping on content
+                isInputFocused = false
+            }
+
+            // Input area - always visible
+            InputAreaView(textInput: $textInput, isInputFocused: _isInputFocused)
         }
         .toolbar {
-            ToolbarItem(placement: .navigationBarTrailing) {
-                Button("End") {
+            ToolbarItem(placement: .navigationBarLeading) {
+                Button(action: {
                     showingEndSessionAlert = true
+                }) {
+                    Image(systemName: "xmark.circle.fill")
+                        .font(.body)
+                        .foregroundColor(.red)
                 }
-                .foregroundColor(.red)
             }
         }
         .alert("End Cooking Session", isPresented: $showingEndSessionAlert) {
@@ -166,7 +171,7 @@ struct ActiveCookingView: View {
             updateVoiceAssistantSettings()
         }
     }
-    
+
     private func updateVoiceAssistantSettings() {
         // Update voice settings from the current session
         if let session = cookingSessionManager.currentSession {
@@ -522,17 +527,19 @@ struct MessageBubbleView: View {
 
 struct InputAreaView: View {
     @Binding var textInput: String
+    @FocusState var isInputFocused: Bool
     @EnvironmentObject var cookingSessionManager: CookingSessionManager
     @EnvironmentObject var voiceAssistant: VoiceAssistant
     @State private var isAnimating = false
-    
+
     var body: some View {
         VStack(spacing: 0) {
             Divider()
-            
+
             HStack(spacing: 12) {
                 // Hands-free mode toggle
                 Button(action: {
+                    isInputFocused = false
                     if voiceAssistant.isHandsFreeMode {
                         voiceAssistant.stopHandsFreeMode()
                     } else {
@@ -548,9 +555,10 @@ struct InputAreaView: View {
                 .padding(12)
                 .background(Circle().fill(voiceAssistant.isHandsFreeMode ? Color.green.opacity(0.2) : Color(.systemGray6)))
                 .disabled(!voiceAssistant.isAvailable || cookingSessionManager.isLoading)
-                
+
                 // Voice button
                 Button(action: {
+                    isInputFocused = false
                     if voiceAssistant.isListening {
                         voiceAssistant.stopListening()
                         if voiceAssistant.hasRecognizedText() {
@@ -580,15 +588,16 @@ struct InputAreaView: View {
                 .onChange(of: voiceAssistant.isWakeWordListening) { listening in
                     isAnimating = listening
                 }
-                
+
                 // Text input
                 TextField("Ask about cooking...", text: $textInput)
                     .textFieldStyle(RoundedBorderTextFieldStyle())
+                    .focused($isInputFocused)
                     .disabled(cookingSessionManager.isLoading)
                     .onSubmit {
                         sendTextQuery()
                     }
-                
+
                 // Send button
                 Button(action: {
                     sendTextQuery()
@@ -671,12 +680,13 @@ struct InputAreaView: View {
     private func sendTextQuery() {
         let query = textInput.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !query.isEmpty else { return }
-        
+
         textInput = ""
-        
+        isInputFocused = false // Dismiss keyboard
+
         Task {
             await cookingSessionManager.sendQuery(query)
-            
+
             // Auto-speak response if enabled
             if let session = cookingSessionManager.currentSession,
                session.userPreferences.voiceSettings.autoSpeakResponses,
