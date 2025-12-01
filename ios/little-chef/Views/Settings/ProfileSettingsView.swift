@@ -10,6 +10,7 @@ import AVFoundation
 
 struct ProfileSettingsView: View {
     @EnvironmentObject var preferencesManager: PreferencesManager
+    @FocusState private var isInputFocused: Bool
     @State private var selectedLLMModel = "gpt-4.1-mini"
     @State private var measurementSystem = "imperial"
     @State private var speechRate: Float = 0.5
@@ -131,6 +132,10 @@ struct ProfileSettingsView: View {
 
                 HStack {
                     TextField("Add restriction", text: $newRestriction)
+                        .focused($isInputFocused)
+                        .onSubmit {
+                            addRestriction()
+                        }
                     Button(action: addRestriction) {
                         Image(systemName: "plus.circle.fill")
                             .foregroundColor(DesignSystem.Colors.success)
@@ -143,6 +148,11 @@ struct ProfileSettingsView: View {
                 Text("e.g., vegetarian, vegan, gluten-free, dairy-free")
             }
         }
+        .simultaneousGesture(
+            TapGesture().onEnded {
+                isInputFocused = false
+            }
+        )
         .navigationTitle("Preferences")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {

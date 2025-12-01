@@ -9,9 +9,10 @@ import SwiftUI
 
 struct RecipeListView: View {
     @EnvironmentObject var recipeManager: RecipeManager
+    @FocusState private var isSearchFocused: Bool
     @State private var showingAddRecipe = false
     @State private var searchText = ""
-    
+
     var filteredRecipes: [Recipe] {
         if searchText.isEmpty {
             return recipeManager.recipes
@@ -29,7 +30,7 @@ struct RecipeListView: View {
             VStack(spacing: 0) {
                 // Custom search bar positioned below title
                 if !recipeManager.recipes.isEmpty {
-                    SearchBar(text: $searchText)
+                    SearchBar(text: $searchText, isInputFocused: _isSearchFocused)
                         .padding(.horizontal, 16)
                         .padding(.vertical, 8)
                 }
@@ -88,6 +89,11 @@ struct RecipeListView: View {
                             }
                             .onDelete(perform: deleteRecipes)
                         }
+                        .simultaneousGesture(
+                            TapGesture().onEnded {
+                                isSearchFocused = false
+                            }
+                        )
                         .refreshable {
                             await recipeManager.loadRecipes()
                         }
@@ -214,15 +220,17 @@ struct DifficultyBadge: View {
 
 struct SearchBar: View {
     @Binding var text: String
+    @FocusState var isInputFocused: Bool
     @State private var isEditing = false
-    
+
     var body: some View {
         HStack {
             HStack {
                 Image(systemName: "magnifyingglass")
                     .foregroundColor(.secondary)
-                
+
                 TextField("Search recipes, ingredients, or tags", text: $text)
+                    .focused($isInputFocused)
                     .onTapGesture {
                         isEditing = true
                     }
@@ -244,12 +252,17 @@ struct SearchBar: View {
                 Button("Cancel") {
                     isEditing = false
                     text = ""
-                    UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
+                    isInputFocused = false
                 }
                 .foregroundColor(.orange)
             }
         }
         .animation(.easeInOut(duration: 0.2), value: isEditing)
+        .onChange(of: isInputFocused) { focused in
+            if !focused {
+                isEditing = false
+            }
+        }
     }
 }
 

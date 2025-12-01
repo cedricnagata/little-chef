@@ -10,10 +10,11 @@ import SwiftUI
 struct EditRecipeView: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.editMode) private var editMode
-    
+    @FocusState private var isInputFocused: Bool
+
     let originalRecipe: RecipeData
     let onSave: (RecipeCreate) -> Void
-    
+
     @State private var title: String
     @State private var description: String
     @State private var servings: Int
@@ -25,7 +26,7 @@ struct EditRecipeView: View {
     @State private var sourceUrl: String
     @State private var cuisineType: String
     @State private var difficulty: String
-    
+
     @State private var newIngredient = ""
     @State private var newInstruction = ""
     
@@ -188,6 +189,11 @@ struct EditRecipeView: View {
                     }
                 }
             }
+            .simultaneousGesture(
+                TapGesture().onEnded {
+                    isInputFocused = false
+                }
+            )
             .navigationTitle("Edit Recipe")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {

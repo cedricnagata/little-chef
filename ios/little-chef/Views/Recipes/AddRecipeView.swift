@@ -11,13 +11,14 @@ import PhotosUI
 struct AddRecipeView: View {
     @Environment(\.dismiss) private var dismiss
     @EnvironmentObject var recipeManager: RecipeManager
-    
+    @FocusState private var isInputFocused: Bool
+
     @State private var selectedInputType: RecipeInputType = .url
     @State private var urlInput = ""
     @State private var textInput = ""
     @State private var selectedPhotos: [PhotosPickerItem] = []
     @State private var imageDataArray: [Data] = []
-    
+
     // Parsed recipe state
     @State private var parsedRecipe: RecipeData?
     @State private var parseConfidence: Double = 0.0
@@ -27,7 +28,7 @@ struct AddRecipeView: View {
     @State private var showingErrorAlert = false
     @State private var errorAlertMessage = ""
     @State private var lastProcessedError: String?
-    
+
     var body: some View {
         NavigationView {
             ScrollView {
@@ -67,9 +68,9 @@ struct AddRecipeView: View {
                     VStack(spacing: 16) {
                         switch selectedInputType {
                         case .url:
-                            URLInputView(urlInput: $urlInput)
+                            URLInputView(urlInput: $urlInput, isInputFocused: _isInputFocused)
                         case .text:
-                            TextInputView(textInput: $textInput)
+                            TextInputView(textInput: $textInput, isInputFocused: _isInputFocused)
                         case .image:
                             MultiImageInputView(
                                 selectedPhotos: $selectedPhotos,
@@ -114,6 +115,10 @@ struct AddRecipeView: View {
                     }
                     
                     Spacer(minLength: 20)
+                }
+                .contentShape(Rectangle())
+                .onTapGesture {
+                    isInputFocused = false
                 }
             }
             .navigationTitle("Add Recipe")
@@ -265,16 +270,18 @@ struct InputTypeCard: View {
 // MARK: - URL Input View
 struct URLInputView: View {
     @Binding var urlInput: String
-    
+    @FocusState var isInputFocused: Bool
+
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             Text("Recipe URL")
                 .font(.headline)
-            
+
             TextField("https://example.com/recipe", text: $urlInput)
                 .textFieldStyle(RoundedBorderTextFieldStyle())
                 .keyboardType(.URL)
                 .autocapitalization(.none)
+                .focused($isInputFocused)
             
             Text("Paste a link from your favorite recipe website")
                 .font(.caption)
@@ -286,19 +293,20 @@ struct URLInputView: View {
 // MARK: - Text Input View
 struct TextInputView: View {
     @Binding var textInput: String
-    
+    @FocusState var isInputFocused: Bool
+
     private var trimmedText: String {
         textInput.trimmingCharacters(in: .whitespacesAndNewlines)
     }
-    
+
     private var characterCount: Int {
         trimmedText.count
     }
-    
+
     private var isValid: Bool {
         characterCount >= 10 && characterCount <= 50000
     }
-    
+
     private var validationMessage: String? {
         if trimmedText.isEmpty {
             return nil
@@ -309,7 +317,7 @@ struct TextInputView: View {
         }
         return nil
     }
-    
+
     var body: some View {
         VStack(alignment: .leading, spacing: DesignSystem.Spacing.sm) {
             Text("Recipe Text")
@@ -320,6 +328,7 @@ struct TextInputView: View {
                 .padding(DesignSystem.Spacing.sm)
                 .background(DesignSystem.Colors.backgroundSecondary)
                 .cornerRadius(DesignSystem.CornerRadius.small)
+                .focused($isInputFocused)
                 .overlay(
                     RoundedRectangle(cornerRadius: DesignSystem.CornerRadius.small)
                         .stroke(validationMessage != nil ? DesignSystem.Colors.error : Color.clear, lineWidth: 1)
