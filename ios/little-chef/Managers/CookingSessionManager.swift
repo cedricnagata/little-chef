@@ -390,7 +390,7 @@ class CookingSessionManager: ObservableObject {
                 action: "add",
                 targetId: timerId,
                 label: label,
-                parameters: ["duration_seconds": FlexibleValue(durationSeconds)],
+                parameters: ["duration_seconds": AnyCodable(durationSeconds)],
                 createdAt: Date()
             )
 

@@ -20,10 +20,10 @@ extension EnvironmentValues {
 }
 
 struct MainView: View {
-    @StateObject private var recipeManager = RecipeManager()
-    @StateObject private var cookingSessionManager = CookingSessionManager()
-    @StateObject private var voiceAssistant = VoiceAssistant()
-    @StateObject private var preferencesManager = PreferencesManager()
+    @EnvironmentObject var recipeManager: RecipeManager
+    @EnvironmentObject var cookingSessionManager: CookingSessionManager
+    @EnvironmentObject var voiceAssistant: VoiceAssistant
+    @EnvironmentObject var preferencesManager: PreferencesManager
     @State private var selectedTab = 0
     
     var body: some View {

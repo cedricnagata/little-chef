@@ -229,58 +229,6 @@ class RecipeParser:
                 raise
             raise RecipeParsingError(f"Failed to fetch content from URL: {str(e)}")
 
-
-    def _validate_and_clean_recipe_data(self, data: Dict[str, Any]) -> Dict[str, Any]:
-        """Validate and clean recipe data from LLM"""
-
-        # Ensure required fields exist
-        if not data.get('title'):
-            data['title'] = "Untitled Recipe"
-
-        if not data.get('ingredients') or not isinstance(data['ingredients'], list):
-            raise RecipeParsingError("Recipe must have ingredients list")
-
-        if not data.get('instructions') or not isinstance(data['instructions'], list):
-            raise RecipeParsingError("Recipe must have instructions list")
-
-        # Clean and validate fields
-        data['title'] = str(data['title']).strip()[:255]
-
-        # Ensure servings is a positive integer
-        if not isinstance(data.get('servings'), int) or data['servings'] <= 0:
-            data['servings'] = 4
-
-        # Validate time fields
-        for time_field in ['prep_time', 'cook_time']:
-            if data.get(time_field) is not None:
-                try:
-                    time_val = int(data[time_field])
-                    data[time_field] = max(0, min(time_val, 1440))  # Cap at 24 hours
-                except (ValueError, TypeError):
-                    data[time_field] = None
-
-        # Clean ingredients and instructions
-        data['ingredients'] = [str(ing).strip() for ing in data['ingredients'] if str(ing).strip()]
-        data['instructions'] = [str(inst).strip() for inst in data['instructions'] if str(inst).strip()]
-
-        # Ensure tags is a list
-        if not isinstance(data.get('tags'), list):
-            data['tags'] = []
-        data['tags'] = [str(tag).strip().lower() for tag in data['tags'] if str(tag).strip()]
-
-        # Validate difficulty
-        if data.get('difficulty') not in ['easy', 'medium', 'hard']:
-            data['difficulty'] = None
-
-        # Clean string fields
-        for field in ['description', 'cuisine_type', 'source_url']:
-            if data.get(field):
-                data[field] = str(data[field]).strip()
-            else:
-                data[field] = None
-
-        return data
-
     def _calculate_confidence(self, recipe_data: Dict[str, Any]) -> float:
         """Calculate confidence score based on recipe completeness"""
 

@@ -8,7 +8,7 @@
 import SwiftUI
 
 struct RecipeListView: View {
-    @StateObject private var recipeManager = RecipeManager()
+    @EnvironmentObject var recipeManager: RecipeManager
     @State private var showingAddRecipe = false
     @State private var searchText = ""
     

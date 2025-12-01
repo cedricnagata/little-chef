@@ -9,6 +9,7 @@ import SwiftUI
 
 @main
 struct little_chefApp: App {
+    @StateObject private var recipeManager = RecipeManager()
     @StateObject private var cookingSessionManager = CookingSessionManager()
     @StateObject private var voiceAssistant = VoiceAssistant()
     @StateObject private var preferencesManager = PreferencesManager()
@@ -16,6 +17,7 @@ struct little_chefApp: App {
     var body: some Scene {
         WindowGroup {
             ContentView()
+                .environmentObject(recipeManager)
                 .environmentObject(cookingSessionManager)
                 .environmentObject(voiceAssistant)
                 .environmentObject(preferencesManager)
