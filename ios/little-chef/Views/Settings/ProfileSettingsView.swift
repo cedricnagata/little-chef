@@ -148,11 +148,7 @@ struct ProfileSettingsView: View {
                 Text("e.g., vegetarian, vegan, gluten-free, dairy-free")
             }
         }
-        .simultaneousGesture(
-            TapGesture().onEnded {
-                isInputFocused = false
-            }
-        )
+        .scrollDismissesKeyboard(.interactively)
         .navigationTitle("Preferences")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {

@@ -189,11 +189,7 @@ struct EditRecipeView: View {
                     }
                 }
             }
-            .simultaneousGesture(
-                TapGesture().onEnded {
-                    isInputFocused = false
-                }
-            )
+            .scrollDismissesKeyboard(.interactively)
             .navigationTitle("Edit Recipe")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {

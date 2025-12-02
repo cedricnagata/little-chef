@@ -116,11 +116,8 @@ struct AddRecipeView: View {
                     
                     Spacer(minLength: 20)
                 }
-                .contentShape(Rectangle())
-                .onTapGesture {
-                    isInputFocused = false
-                }
             }
+            .scrollDismissesKeyboard(.interactively)
             .navigationTitle("Add Recipe")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
