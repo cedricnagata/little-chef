@@ -469,9 +469,20 @@ struct ParsedRecipePreview: View {
         VStack(spacing: DesignSystem.Spacing.lg) {
             // Header
             HStack {
-                Text("Recipe Parsed!")
-                    .font(.headline)
-                    .foregroundColor(DesignSystem.Colors.success)
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Recipe Parsed!")
+                        .font(.headline)
+                        .foregroundColor(DesignSystem.Colors.success)
+
+                    HStack(spacing: 4) {
+                        Circle()
+                            .fill(confidenceColor)
+                            .frame(width: 8, height: 8)
+                        Text("\(Int(confidence * 100))% confidence")
+                            .font(.caption)
+                            .foregroundColor(confidenceColor)
+                    }
+                }
 
                 Spacer()
 

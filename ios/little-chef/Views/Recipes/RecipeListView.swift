@@ -109,6 +109,7 @@ struct RecipeListView: View {
             .sheet(isPresented: $showingAddRecipe) {
                 AddRecipeView()
                     .environmentObject(recipeManager)
+                    .interactiveDismissDisabled()
             }
             .alert("Error", isPresented: .constant(recipeManager.errorMessage != nil)) {
                 Button("OK") {
