@@ -99,10 +99,10 @@ class Command(BaseModel):
 
     @field_serializer('created_at')
     def serialize_created_at(self, dt: datetime, _info):
-        """Serialize datetime to ISO8601 format with timezone"""
+        """Serialize datetime to ISO8601 format with timezone (without microseconds)"""
         if dt.tzinfo is None:
             dt = dt.replace(tzinfo=timezone.utc)
-        return dt.isoformat()
+        return dt.replace(microsecond=0).isoformat()
 
 
 class TimerStatus(BaseModel):
@@ -118,12 +118,12 @@ class TimerStatus(BaseModel):
 
     @field_serializer('created_at', 'started_at', 'completed_at')
     def serialize_datetime(self, dt: Optional[datetime], _info):
-        """Serialize datetime to ISO8601 format with timezone"""
+        """Serialize datetime to ISO8601 format with timezone (without microseconds)"""
         if dt is None:
             return None
         if dt.tzinfo is None:
             dt = dt.replace(tzinfo=timezone.utc)
-        return dt.isoformat()
+        return dt.replace(microsecond=0).isoformat()
 
 
 class Message(BaseModel):
@@ -135,10 +135,10 @@ class Message(BaseModel):
 
     @field_serializer('timestamp')
     def serialize_timestamp(self, dt: datetime, _info):
-        """Serialize datetime to ISO8601 format with timezone"""
+        """Serialize datetime to ISO8601 format with timezone (without microseconds)"""
         if dt.tzinfo is None:
             dt = dt.replace(tzinfo=timezone.utc)
-        return dt.isoformat()
+        return dt.replace(microsecond=0).isoformat()
 
 
 class CookingSessionBase(BaseModel):
