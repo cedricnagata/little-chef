@@ -60,10 +60,8 @@ Resources:
       MemorySize: 1024
       Environment:
         Variables:
-          # NOTE: Set these via AWS Console or use --parameter-overrides during deployment
-          # Example: sam deploy --parameter-overrides OpenAIKey=sk-xxx ElevenLabsKey=xxx
-          OPENAI_API_KEY: placeholder-update-after-deployment
-          ELEVENLABS_API_KEY: placeholder-update-after-deployment
+          # API keys must be set manually via AWS CLI or Console after first deployment
+          # They will persist across code deployments
           ENVIRONMENT: !Ref Environment
       Layers:
         - !Ref SharedLayer
@@ -86,9 +84,8 @@ Resources:
       MemorySize: 1024
       Environment:
         Variables:
-          # NOTE: Set these via AWS Console or use --parameter-overrides during deployment
-          OPENAI_API_KEY: placeholder-update-after-deployment
-          FIRECRAWL_API_KEY: placeholder-update-after-deployment
+          # API keys must be set manually via AWS CLI or Console after first deployment
+          # They will persist across code deployments
           FIRECRAWL_API_URL: https://api.firecrawl.dev/v1/scrape
           ENVIRONMENT: !Ref Environment
       Layers:

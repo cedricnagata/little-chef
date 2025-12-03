@@ -33,7 +33,6 @@ class RecipeManager: ObservableObject {
             object: nil,
             queue: .main
         ) { [weak self] _ in
-            print("📥 CloudKit remote change detected - refreshing recipes")
             Task { @MainActor in
                 await self?.loadRecipes()
             }
