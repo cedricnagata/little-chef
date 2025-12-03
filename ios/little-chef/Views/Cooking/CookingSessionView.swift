@@ -691,7 +691,10 @@ struct InputAreaView: View {
             if let session = cookingSessionManager.currentSession,
                session.userPreferences.voiceSettings.autoSpeakResponses,
                !cookingSessionManager.lastResponse.isEmpty {
-                voiceAssistant.speak(cookingSessionManager.lastResponse)
+                voiceAssistant.speak(
+                    cookingSessionManager.lastResponse,
+                    audioData: cookingSessionManager.lastAudioData
+                )
             }
         }
     }
@@ -704,10 +707,13 @@ struct InputAreaView: View {
         
         Task {
             await cookingSessionManager.sendQuery(query)
-            
+
             // Auto-speak response for voice queries
             if !cookingSessionManager.lastResponse.isEmpty {
-                voiceAssistant.speak(cookingSessionManager.lastResponse)
+                voiceAssistant.speak(
+                    cookingSessionManager.lastResponse,
+                    audioData: cookingSessionManager.lastAudioData
+                )
             }
         }
     }
@@ -729,10 +735,13 @@ struct InputAreaView: View {
             
             Task {
                 await cookingSessionManager?.sendQuery(query)
-                
+
                 // Auto-speak response for hands-free queries
                 if let response = cookingSessionManager?.lastResponse, !response.isEmpty {
-                    voiceAssistant?.speak(response)
+                    voiceAssistant?.speak(
+                        response,
+                        audioData: cookingSessionManager?.lastAudioData
+                    )
                 }
             }
         }

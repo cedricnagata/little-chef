@@ -24,7 +24,7 @@ struct ProfileSettingsView: View {
 
     // Available LLM models
     private let llmModels = [
-        "gpt-4.1", "gpt-4.1-mini"
+        "gpt-4.1", "gpt-4.1-mini", "gpt-4.1-nano"
     ]
 
     // Available iOS voices (simplified list)
