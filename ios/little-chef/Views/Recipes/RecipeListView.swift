@@ -12,6 +12,7 @@ struct RecipeListView: View {
     @FocusState private var isSearchFocused: Bool
     @State private var showingAddRecipe = false
     @State private var searchText = ""
+    @State private var isRefreshing = false
 
     var filteredRecipes: [Recipe] {
         if searchText.isEmpty {
@@ -35,9 +36,9 @@ struct RecipeListView: View {
                         .padding(.vertical, 8)
                 }
                 
-                // Main content area
-                Group {
-                    if recipeManager.isLoading && recipeManager.recipes.isEmpty {
+                // Main content area with pull-to-refresh
+                ScrollView {
+                    if recipeManager.isLoading && recipeManager.recipes.isEmpty && !isRefreshing {
                         // Loading state
                         VStack {
                             ProgressView()
@@ -47,22 +48,23 @@ struct RecipeListView: View {
                                 .padding(.top)
                         }
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        .frame(minHeight: 400)
                     } else if recipeManager.recipes.isEmpty {
-                        // Empty state
+                        // Empty state with pull-to-refresh
                         VStack(spacing: 20) {
                             Image(systemName: "book.fill")
                                 .font(.system(size: 60))
                                 .foregroundColor(.orange)
-                            
+
                             Text("No Recipes Yet")
                                 .font(.title2)
                                 .fontWeight(.semibold)
-                            
+
                             Text("Add your first recipe to get started with LittleChef!")
                                 .foregroundColor(.secondary)
                                 .multilineTextAlignment(.center)
                                 .padding(.horizontal)
-                            
+
                             Button(action: {
                                 showingAddRecipe = true
                             }) {
@@ -76,24 +78,45 @@ struct RecipeListView: View {
                                 .background(Color.orange)
                                 .cornerRadius(12)
                             }
+
+                            Text("Pull down to refresh from iCloud")
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                                .padding(.top, 8)
                         }
                         .padding()
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        .frame(minHeight: 400)
                     } else {
                         // Recipe list
-                        List {
+                        LazyVStack(spacing: 0) {
                             ForEach(filteredRecipes) { recipe in
                                 NavigationLink(destination: RecipeDetailView(recipe: recipe).environmentObject(recipeManager)) {
                                     RecipeRowView(recipe: recipe)
+                                        .padding(.horizontal)
                                 }
+                                .buttonStyle(PlainButtonStyle())
+                                .swipeActions(edge: .trailing, allowsFullSwipe: true) {
+                                    Button(role: .destructive) {
+                                        Task {
+                                            await recipeManager.deleteRecipe(recipe)
+                                        }
+                                    } label: {
+                                        Label("Delete", systemImage: "trash")
+                                    }
+                                }
+
+                                Divider()
+                                    .padding(.leading, 16)
                             }
-                            .onDelete(perform: deleteRecipes)
                         }
                         .scrollDismissesKeyboard(.interactively)
-                        .refreshable {
-                            await recipeManager.loadRecipes()
-                        }
                     }
+                }
+                .refreshable {
+                    isRefreshing = true
+                    await recipeManager.loadRecipes()
+                    isRefreshing = false
                 }
             }
             .navigationTitle("My Recipes")
@@ -120,15 +143,16 @@ struct RecipeListView: View {
             }
         }
         .task {
+            // Initial load when view is first created
             await recipeManager.loadRecipes()
         }
-    }
-    
-    private func deleteRecipes(offsets: IndexSet) {
-        for index in offsets {
-            let recipe = filteredRecipes[index]
-            Task {
-                await recipeManager.deleteRecipe(recipe)
+        .onAppear {
+            // Refresh when view appears (e.g., switching tabs)
+            // Only refresh if not already loading to avoid duplicate calls
+            if !recipeManager.isLoading {
+                Task {
+                    await recipeManager.loadRecipes()
+                }
             }
         }
     }

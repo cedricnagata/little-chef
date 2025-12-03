@@ -21,6 +21,27 @@ class RecipeManager: ObservableObject {
 
     init(context: NSManagedObjectContext = PersistenceController.shared.container.viewContext) {
         self.context = context
+        setupCloudKitNotifications()
+    }
+
+    // MARK: - CloudKit Notifications
+
+    private func setupCloudKitNotifications() {
+        // Listen for remote changes from CloudKit
+        NotificationCenter.default.addObserver(
+            forName: NSNotification.Name.NSPersistentStoreRemoteChange,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            print("📥 CloudKit remote change detected - refreshing recipes")
+            Task { @MainActor in
+                await self?.loadRecipes()
+            }
+        }
+    }
+
+    deinit {
+        NotificationCenter.default.removeObserver(self)
     }
 
     // MARK: - Recipe Management (Core Data)
