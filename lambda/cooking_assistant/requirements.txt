@@ -9,8 +9,6 @@ langchain-openai
 langchain-core
 openai
 
-# ElevenLabs TTS
-elevenlabs
-
-# AWS Lambda runtime helpers
+# AWS SDK (includes Polly TTS, API Gateway Management)
 boto3
+

@@ -9,8 +9,8 @@ import Foundation
 
 struct Config {
     // MARK: - API Configuration
-    
-    /// Returns the base URL for the API based on the current environment
+
+    /// Returns the base URL for the HTTP API (recipe parser) based on the current environment
     static var baseURL: String {
         #if DEBUG
             // In debug mode, try to load from Config.plist first, fall back to localhost
@@ -26,6 +26,26 @@ struct Config {
                 fatalError("PRODUCTION_API_URL not found in Config.plist.")
             }
             print("📱 Using production API URL from Config.plist: \(url)")
+            return url
+        #endif
+    }
+
+    /// Returns the WebSocket URL for the cooking assistant based on the current environment
+    static var webSocketURL: String {
+        #if DEBUG
+            // In debug mode, try to load from Config.plist first
+            if let url = loadConfigValue(key: "LOCAL_WEBSOCKET_URL") {
+                print("Using local WebSocket URL from Config.plist: \(url)")
+                return url
+            }
+            print("⚠️ Using default localhost WebSocket URL")
+            return "ws://localhost:3001"
+        #else
+            // In release mode, MUST have PRODUCTION_WEBSOCKET_URL in Config.plist
+            guard let url = loadConfigValue(key: "PRODUCTION_WEBSOCKET_URL") else {
+                fatalError("PRODUCTION_WEBSOCKET_URL not found in Config.plist.")
+            }
+            print("📱 Using production WebSocket URL from Config.plist: \(url)")
             return url
         #endif
     }
@@ -67,7 +87,8 @@ extension Config {
     static func logConfiguration() {
         print("🔧 Configuration:")
         print("   Environment: \(environment)")
-        print("   Base URL: \(baseURL)")
+        print("   HTTP API URL: \(baseURL)")
+        print("   WebSocket URL: \(webSocketURL)")
         print("   Debug Mode: \(isDebug)")
     }
 }

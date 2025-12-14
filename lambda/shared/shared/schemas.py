@@ -11,21 +11,27 @@ import uuid
 
 # ===== Voice Settings Schemas =====
 
-class ElevenLabsSettings(BaseModel):
-    """Schema for ElevenLabs voice synthesis settings"""
-    enabled: bool = Field(default=False, description="Whether to use ElevenLabs for TTS")
-    voice_name: str = Field(default="Rachel - calm", description="ElevenLabs voice name (e.g., 'Rachel - calm', 'Josh - intelligent')")
-
-
 class VoiceSettings(BaseModel):
-    """Schema for voice settings"""
-    # Native iOS/System TTS settings
+    """Schema for voice settings with TTS provider support"""
+    # TTS provider selection
+    tts_provider: Literal["polly", "elevenlabs", "device", "disabled"] = Field(
+        default="polly",
+        description="TTS provider: polly (AWS Polly), elevenlabs, device (iOS native), or disabled"
+    )
+
+    # Voice configuration (provider-specific)
+    voice_id: Optional[str] = Field(
+        default="Joanna",
+        description="Voice ID - Polly voice name (e.g., 'Joanna', 'Matthew') or ElevenLabs voice ID"
+    )
+
+    # Native iOS/System TTS settings (for device provider)
     speech_rate: float = Field(default=0.5, ge=0.1, le=2.0)
     voice_identifier: str = Field(default="com.apple.ttsbundle.Samantha-compact")
     auto_speak_responses: bool = True
 
-    # ElevenLabs settings
-    elevenlabs: ElevenLabsSettings = Field(default_factory=ElevenLabsSettings)
+    # Legacy ElevenLabs settings (deprecated, kept for backwards compatibility)
+    elevenlabs: Optional[Dict[str, Any]] = Field(default=None, description="Legacy ElevenLabs settings")
 
 
 class UserPreferences(BaseModel):

@@ -91,6 +91,11 @@ class CookingAgent:
 
     def _should_continue(self, state: AgentState) -> Literal["use_tools", "end"]:
         """Determine if agent should use tools or end workflow"""
+        # Safety check for empty messages list
+        if not state.get("messages"):
+            logger.warning("Empty messages list in _should_continue")
+            return "end"
+
         last_message = state["messages"][-1]
         if isinstance(last_message, AIMessage) and last_message.tool_calls:
             return "use_tools"
@@ -135,6 +140,12 @@ class CookingAgent:
     async def _tool_node(self, state: AgentState) -> AgentState:
         """Execute tools and update state"""
         try:
+            # Safety check for empty messages list
+            if not state.get("messages"):
+                logger.error("Empty messages list in _tool_node")
+                state["error"] = "Internal error: No messages to process"
+                return state
+
             last_message = state["messages"][-1]
 
             tool_messages = []

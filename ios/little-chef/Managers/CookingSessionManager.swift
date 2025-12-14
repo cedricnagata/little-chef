@@ -14,13 +14,89 @@ class CookingSessionManager: ObservableObject {
     @Published var isLoading = false
     @Published var error: String?
     @Published var lastResponse: String = ""
-    @Published var lastAudioData: Data? = nil  // NEW: Store audio from Lambda
+    @Published var streamingResponse: String = ""  // Real-time accumulation
+    @Published var lastAudioData: Data? = nil
 
     private let apiService = APIService.shared
     private let preferencesManager: PreferencesManager
+    private let webSocketService: WebSocketService
+
+    // Audio chunk accumulation
+    private var audioChunks: [Int: Data] = [:]
+    private var currentRequestId: String?
+
+    // Callback for when response is ready to be spoken
+    var onResponseReady: ((String, Data?) -> Void)?
 
     init(preferencesManager: PreferencesManager = PreferencesManager()) {
         self.preferencesManager = preferencesManager
+        self.webSocketService = WebSocketService()
+
+        setupWebSocketHandlers()
+    }
+
+    // MARK: - WebSocket Setup
+
+    private func setupWebSocketHandlers() {
+        webSocketService.onToken = { [weak self] content, requestId in
+            guard let self = self, requestId == self.currentRequestId else { return }
+            self.streamingResponse += content
+        }
+
+        webSocketService.onAudio = { [weak self] audioData, chunkIndex, requestId in
+            guard let self = self, requestId == self.currentRequestId else { return }
+            self.audioChunks[chunkIndex] = audioData
+        }
+
+        webSocketService.onTool = { [weak self] status, tool, args, result, requestId in
+            guard let self = self, requestId == self.currentRequestId else { return }
+            print("🔧 Tool \(status): \(tool)")
+        }
+
+        webSocketService.onDone = { [weak self] response, session, commands, requestId in
+            guard let self = self, requestId == self.currentRequestId else { return }
+
+            // Process commands
+            let updatedSession = CookingSession(
+                recipe: session.recipe,
+                commands: session.commands,
+                timerStatus: session.timerStatus,
+                conversationHistory: session.conversationHistory,
+                userPreferences: session.userPreferences,
+                startedAt: session.startedAt
+            )
+
+            self.processCommands(from: updatedSession)
+            self.currentSession = updatedSession
+            self.lastResponse = response
+            self.streamingResponse = ""
+
+            // Reassemble audio chunks
+            var completeAudio: Data? = nil
+            if !self.audioChunks.isEmpty {
+                let sortedChunks = self.audioChunks.sorted(by: { $0.key < $1.key })
+                var audioData = Data()
+                for (_, chunk) in sortedChunks {
+                    audioData.append(chunk)
+                }
+                completeAudio = audioData
+                self.lastAudioData = audioData
+                self.audioChunks.removeAll()
+                print("🔊 Received \(sortedChunks.count) audio chunks (\(audioData.count) bytes)")
+            }
+
+            self.isLoading = false
+
+            // Trigger callback for voice playback (after state is updated)
+            self.onResponseReady?(response, completeAudio)
+        }
+
+        webSocketService.onError = { [weak self] error, requestId in
+            guard let self = self, requestId == self.currentRequestId else { return }
+            self.error = error.message
+            self.isLoading = false
+            self.streamingResponse = ""
+        }
     }
 
     // MARK: - Session Management
@@ -33,15 +109,24 @@ class CookingSessionManager: ObservableObject {
 
         currentSession = CookingSession(recipe: recipeBase, userPreferences: userPreferences)
         error = nil
+
+        // Connect WebSocket when starting session
+        webSocketService.connect()
+
         print("🔵 Started new cooking session with model: \(userPreferences.llmModel)")
     }
 
     func endCookingSession() {
+        // Disconnect WebSocket
+        webSocketService.disconnect()
+
         // Clear session data
         currentSession = nil
         lastResponse = ""
+        streamingResponse = ""
         lastAudioData = nil
         error = nil
+        audioChunks.removeAll()
 
         // Clear all timers
         clearAllTimers()
@@ -63,58 +148,40 @@ class CookingSessionManager: ObservableObject {
 
     // MARK: - Agent Communication
 
-    func sendQuery(_ query: String) async {
+    func sendQuery(_ query: String) {
         guard var session = currentSession else {
             error = "No active cooking session"
             return
         }
 
-        // Clear any previous errors
-        error = nil
-        isLoading = true
-
-        do {
-            // Update session with current timer status before sending
-            let updatedSession = CookingSession(
-                recipe: session.recipe,
-                commands: session.commands,
-                timerStatus: getTimerStatusForBackend(), // Current timer status
-                conversationHistory: session.conversationHistory,
-                userPreferences: session.userPreferences,
-                startedAt: session.startedAt
-            )
-
-            let response = try await apiService.sendAgentQuery(
-                cookingSession: updatedSession,
-                query: query
-            )
-
-            // Process any new commands from AI
-            processCommands(from: response.updatedSession)
-
-            // Update the session with the response
-            currentSession = response.updatedSession
-            lastResponse = response.response
-
-            // Handle audio response if present (from ElevenLabs via Lambda)
-            if let audioBase64 = response.audio {
-                if let audioData = Data(base64Encoded: audioBase64) {
-                    lastAudioData = audioData
-                    print("🔊 Received audio from Lambda (\(audioData.count) bytes)")
-                } else {
-                    print("⚠️ Failed to decode audio from Lambda")
-                    lastAudioData = nil
-                }
-            } else {
-                lastAudioData = nil
-            }
-
-        } catch {
-            self.error = "Failed to get response: \(error.localizedDescription)"
-            print("Agent query error: \(error)")
+        guard webSocketService.isConnected else {
+            error = "WebSocket not connected. Reconnecting..."
+            webSocketService.connect()
+            return
         }
 
-        isLoading = false
+        // Clear any previous state
+        error = nil
+        isLoading = true
+        streamingResponse = ""
+        audioChunks.removeAll()
+        lastAudioData = nil
+
+        // Update session with current timer status before sending
+        let updatedSession = CookingSession(
+            recipe: session.recipe,
+            commands: session.commands,
+            timerStatus: getTimerStatusForBackend(), // Current timer status
+            conversationHistory: session.conversationHistory,
+            userPreferences: session.userPreferences,
+            startedAt: session.startedAt
+        )
+
+        // Send query via WebSocket and get the request ID
+        currentRequestId = webSocketService.sendQuery(session: updatedSession, query: query)
+
+        print("📤 Sent query via WebSocket: \(query.prefix(50))...")
+        print("🔑 Request ID: \(currentRequestId ?? "nil")")
     }
 
     // MARK: - Voice Interaction Helpers

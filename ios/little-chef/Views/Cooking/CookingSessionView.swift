@@ -165,6 +165,15 @@ struct ActiveCookingView: View {
         .onAppear {
             // Update voice assistant settings when view appears
             updateVoiceAssistantSettings()
+
+            // Set up callback for auto-speaking responses
+            cookingSessionManager.onResponseReady = { [weak voiceAssistant] response, audioData in
+                guard let session = cookingSessionManager.currentSession,
+                      session.userPreferences.voiceSettings.autoSpeakResponses else {
+                    return
+                }
+                voiceAssistant?.speak(response, audioData: audioData)
+            }
         }
         .onChange(of: cookingSessionManager.currentSession?.userPreferences.voiceSettings) { _ in
             // Update voice assistant settings when voice preferences change
@@ -451,10 +460,15 @@ struct ChatAreaView: View {
                             MessageBubbleView(message: message)
                                 .id(message.id)
                         }
+
+                        // Streaming response (real-time)
+                        if cookingSessionManager.isLoading && !cookingSessionManager.streamingResponse.isEmpty {
+                            StreamingMessageView(text: cookingSessionManager.streamingResponse)
+                        }
                     }
-                    
-                    // Loading indicator
-                    if cookingSessionManager.isLoading {
+
+                    // Loading indicator (before any response text arrives)
+                    if cookingSessionManager.isLoading && cookingSessionManager.streamingResponse.isEmpty {
                         HStack {
                             ProgressView()
                                 .scaleEffect(0.8)
@@ -519,6 +533,53 @@ struct MessageBubbleView: View {
                 }
                 Spacer()
             }
+        }
+    }
+}
+
+// MARK: - Streaming Message View
+
+struct StreamingMessageView: View {
+    let text: String
+
+    var body: some View {
+        GeometryReader { geometry in
+            let width = geometry.size.width
+
+            VStack(alignment: .leading, spacing: 4) {
+                HStack(alignment: .top, spacing: 8) {
+                    Text(text)
+                        .padding(12)
+                        .background(Color(.systemGray5))
+                        .foregroundColor(.primary)
+                        .clipShape(RoundedRectangle(cornerRadius: 16))
+                        .frame(maxWidth: min(width * 0.8, 300), alignment: .leading)
+
+                    // Typing indicator
+                    HStack(spacing: 3) {
+                        ForEach(0..<3) { index in
+                            Circle()
+                                .fill(Color.orange)
+                                .frame(width: 4, height: 4)
+                                .opacity(0.6)
+                                .animation(
+                                    Animation.easeInOut(duration: 0.6)
+                                        .repeatForever()
+                                        .delay(Double(index) * 0.2),
+                                    value: text
+                                )
+                        }
+                    }
+                    .padding(.top, 12)
+
+                    Spacer()
+                }
+
+                Text("Typing...")
+                    .font(.caption2)
+                    .foregroundColor(.secondary)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
     }
 }
@@ -686,16 +747,7 @@ struct InputAreaView: View {
 
         Task {
             await cookingSessionManager.sendQuery(query)
-
-            // Auto-speak response if enabled
-            if let session = cookingSessionManager.currentSession,
-               session.userPreferences.voiceSettings.autoSpeakResponses,
-               !cookingSessionManager.lastResponse.isEmpty {
-                voiceAssistant.speak(
-                    cookingSessionManager.lastResponse,
-                    audioData: cookingSessionManager.lastAudioData
-                )
-            }
+            // Audio playback now handled by onResponseReady callback
         }
     }
     
@@ -707,14 +759,7 @@ struct InputAreaView: View {
         
         Task {
             await cookingSessionManager.sendQuery(query)
-
-            // Auto-speak response for voice queries
-            if !cookingSessionManager.lastResponse.isEmpty {
-                voiceAssistant.speak(
-                    cookingSessionManager.lastResponse,
-                    audioData: cookingSessionManager.lastAudioData
-                )
-            }
+            // Audio playback now handled by onResponseReady callback
         }
     }
     
@@ -735,14 +780,7 @@ struct InputAreaView: View {
             
             Task {
                 await cookingSessionManager?.sendQuery(query)
-
-                // Auto-speak response for hands-free queries
-                if let response = cookingSessionManager?.lastResponse, !response.isEmpty {
-                    voiceAssistant?.speak(
-                        response,
-                        audioData: cookingSessionManager?.lastAudioData
-                    )
-                }
+                // Audio playback now handled by onResponseReady callback
             }
         }
         

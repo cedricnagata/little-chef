@@ -2,8 +2,8 @@
 //  APIService.swift
 //  little-chef
 //
-//  Minimal API client for Lambda endpoints only
-//  No authentication, no user management, no recipe CRUD
+//  HTTP API client for recipe parser endpoint
+//  Cooking assistant uses WebSocket (see WebSocketService.swift)
 //
 
 import Foundation
@@ -30,21 +30,6 @@ class APIService {
     }
 
     // MARK: - Lambda Endpoints
-
-    /// Send query to cooking assistant Lambda
-    /// POST /v1/assistant
-    func sendAgentQuery(cookingSession: CookingSession, query: String) async throws -> AgentQueryResponse {
-        let url = URL(string: "\(baseURL)/v1/assistant")!
-
-        let requestBody = AgentQueryRequest(cookingSession: cookingSession, query: query)
-
-        var request = URLRequest(url: url)
-        request.httpMethod = "POST"
-        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        request.httpBody = try jsonEncoder.encode(requestBody)
-
-        return try await performRequest(request: request, responseType: AgentQueryResponse.self)
-    }
 
     /// Parse recipe from URL
     /// POST /v1/parse

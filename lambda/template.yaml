@@ -1,6 +1,6 @@
 AWSTemplateFormatVersion: '2010-09-09'
 Transform: AWS::Serverless-2016-10-31
-Description: LittleChef Serverless Backend - Cooking Assistant and Recipe Parser
+Description: LittleChef Serverless Backend - WebSocket Cooking Assistant and REST Recipe Parser
 
 Globals:
   Function:
@@ -28,9 +28,81 @@ Parameters:
     Description: Comma-separated list of allowed CORS origins (use * for dev)
 
 Resources:
-  # ===== API Gateway =====
+  # ===== WebSocket API (Cooking Assistant) =====
 
-  LittleChefApi:
+  WebSocketApi:
+    Type: AWS::ApiGatewayV2::Api
+    Properties:
+      Name: !Sub 'littlechef-websocket-${Environment}'
+      ProtocolType: WEBSOCKET
+      RouteSelectionExpression: "$request.body.action"
+      Description: WebSocket API for real-time cooking assistance
+
+  ConnectRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref WebSocketApi
+      RouteKey: $connect
+      AuthorizationType: NONE
+      Target: !Sub 'integrations/${ConnectIntegration}'
+
+  ConnectIntegration:
+    Type: AWS::ApiGatewayV2::Integration
+    Properties:
+      ApiId: !Ref WebSocketApi
+      IntegrationType: AWS_PROXY
+      IntegrationUri: !Sub 'arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${CookingAssistantFunction.Arn}/invocations'
+
+  DisconnectRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref WebSocketApi
+      RouteKey: $disconnect
+      AuthorizationType: NONE
+      Target: !Sub 'integrations/${DisconnectIntegration}'
+
+  DisconnectIntegration:
+    Type: AWS::ApiGatewayV2::Integration
+    Properties:
+      ApiId: !Ref WebSocketApi
+      IntegrationType: AWS_PROXY
+      IntegrationUri: !Sub 'arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${CookingAssistantFunction.Arn}/invocations'
+
+  DefaultRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref WebSocketApi
+      RouteKey: $default
+      AuthorizationType: NONE
+      Target: !Sub 'integrations/${DefaultIntegration}'
+
+  DefaultIntegration:
+    Type: AWS::ApiGatewayV2::Integration
+    Properties:
+      ApiId: !Ref WebSocketApi
+      IntegrationType: AWS_PROXY
+      IntegrationUri: !Sub 'arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${CookingAssistantFunction.Arn}/invocations'
+
+  WebSocketDeployment:
+    Type: AWS::ApiGatewayV2::Deployment
+    DependsOn:
+      - ConnectRoute
+      - DisconnectRoute
+      - DefaultRoute
+    Properties:
+      ApiId: !Ref WebSocketApi
+
+  WebSocketStage:
+    Type: AWS::ApiGatewayV2::Stage
+    Properties:
+      ApiId: !Ref WebSocketApi
+      DeploymentId: !Ref WebSocketDeployment
+      StageName: !Ref Environment
+      Description: !Sub '${Environment} stage for WebSocket API'
+
+  # ===== HTTP API (Recipe Parser) =====
+
+  HttpApi:
     Type: AWS::Serverless::HttpApi
     Properties:
       CorsConfiguration:
@@ -54,24 +126,34 @@ Resources:
     Properties:
       FunctionName: !Sub 'littlechef-cooking-assistant-${Environment}'
       CodeUri: cooking_assistant/
-      Handler: handler.lambda_handler
-      Description: LangGraph-based cooking assistant with timer tools
+      Handler: websocket_handler.handler
+      Description: WebSocket-based cooking assistant with LangGraph and Polly TTS
       Timeout: 300
       MemorySize: 1024
       Environment:
         Variables:
           # API keys must be set manually via AWS CLI or Console after first deployment
-          # They will persist across code deployments
           ENVIRONMENT: !Ref Environment
       Layers:
         - !Ref SharedLayer
-      Events:
-        CookingAssistantApi:
-          Type: HttpApi
-          Properties:
-            ApiId: !Ref LittleChefApi
-            Path: /v1/assistant
-            Method: POST
+      Policies:
+        - Statement:
+            - Effect: Allow
+              Action:
+                - execute-api:ManageConnections
+              Resource: !Sub 'arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${WebSocketApi}/*'
+            - Effect: Allow
+              Action:
+                - polly:SynthesizeSpeech
+              Resource: '*'
+
+  CookingAssistantPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref CookingAssistantFunction
+      Action: lambda:InvokeFunction
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub 'arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${WebSocketApi}/*'
 
   RecipeParserFunction:
     Type: AWS::Serverless::Function
@@ -85,7 +167,6 @@ Resources:
       Environment:
         Variables:
           # API keys must be set manually via AWS CLI or Console after first deployment
-          # They will persist across code deployments
           FIRECRAWL_API_URL: https://api.firecrawl.dev/v1/scrape
           ENVIRONMENT: !Ref Environment
       Layers:
@@ -94,7 +175,7 @@ Resources:
         RecipeParserApi:
           Type: HttpApi
           Properties:
-            ApiId: !Ref LittleChefApi
+            ApiId: !Ref HttpApi
             Path: /v1/parse
             Method: POST
 
@@ -112,19 +193,21 @@ Resources:
       BuildMethod: python3.12
 
 Outputs:
-  ApiGatewayUrl:
-    Description: API Gateway endpoint URL
-    Value: !Sub 'https://${LittleChefApi}.execute-api.${AWS::Region}.amazonaws.com/${Environment}'
+  WebSocketUrl:
+    Description: WebSocket API endpoint URL for cooking assistant
+    Value: !Sub 'wss://${WebSocketApi}.execute-api.${AWS::Region}.amazonaws.com/${Environment}'
     Export:
-      Name: !Sub '${AWS::StackName}-ApiUrl'
+      Name: !Sub '${AWS::StackName}-WebSocketUrl'
 
-  CookingAssistantEndpoint:
-    Description: Cooking Assistant endpoint
-    Value: !Sub 'https://${LittleChefApi}.execute-api.${AWS::Region}.amazonaws.com/${Environment}/v1/assistant'
+  HttpApiUrl:
+    Description: HTTP API endpoint URL for recipe parser
+    Value: !Sub 'https://${HttpApi}.execute-api.${AWS::Region}.amazonaws.com/${Environment}'
+    Export:
+      Name: !Sub '${AWS::StackName}-HttpApiUrl'
 
   RecipeParserEndpoint:
     Description: Recipe Parser endpoint
-    Value: !Sub 'https://${LittleChefApi}.execute-api.${AWS::Region}.amazonaws.com/${Environment}/v1/parse'
+    Value: !Sub 'https://${HttpApi}.execute-api.${AWS::Region}.amazonaws.com/${Environment}/v1/parse'
 
   CookingAssistantFunctionArn:
     Description: Cooking Assistant Lambda Function ARN

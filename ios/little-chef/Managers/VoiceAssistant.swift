@@ -198,9 +198,9 @@ class VoiceAssistant: NSObject, ObservableObject {
         }
     }
 
-    /// Play audio data directly (from Lambda ElevenLabs response)
+    /// Play audio data directly (from server TTS: Polly, ElevenLabs, etc.)
     func playAudio(data: Data) {
-        playElevenLabsAudio(data: data)
+        playServerTTSAudio(data: data)
     }
     
     private func speakWithNativeTTS(_ text: String) {
@@ -219,22 +219,20 @@ class VoiceAssistant: NSObject, ObservableObject {
         synthesizer.speak(utterance)
     }
     
-    // Removed: speakWithElevenLabs() - audio now comes from Lambda response
-
-    private func playElevenLabsAudio(data: Data) {
+    // Server TTS audio playback (Polly, ElevenLabs, OpenAI TTS, etc.)
+    private func playServerTTSAudio(data: Data) {
         do {
             let audioPlayer = try AVAudioPlayer(data: data)
             audioPlayer.delegate = self
             audioPlayer.prepareToPlay()
-            
+
             isSpeaking = true
             audioPlayer.play()
-            
+
             // Store the player to keep it alive during playback
-            // We'll use a simple property for this
             objc_setAssociatedObject(self, "currentAudioPlayer", audioPlayer, .OBJC_ASSOCIATION_RETAIN_NONATOMIC)
         } catch {
-            print("Failed to play ElevenLabs audio: \(error)")
+            print("Failed to play server TTS audio: \(error)")
             // Fallback to native TTS
             speakWithNativeTTS("Error playing audio")
         }
@@ -242,12 +240,12 @@ class VoiceAssistant: NSObject, ObservableObject {
     
     func stopSpeaking() {
         synthesizer.stopSpeaking(at: .immediate)
-        
-        // Stop ElevenLabs audio if playing
+
+        // Stop server TTS audio if playing
         if let audioPlayer = objc_getAssociatedObject(self, "currentAudioPlayer") as? AVAudioPlayer {
             audioPlayer.stop()
         }
-        
+
         isSpeaking = false
     }
     
