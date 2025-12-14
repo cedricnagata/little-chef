@@ -56,9 +56,12 @@ class CookingSessionManager: ObservableObject {
         webSocketService.onDone = { [weak self] response, session, commands, requestId in
             guard let self = self, requestId == self.currentRequestId else { return }
 
+            // Preserve the current (possibly scaled) recipe instead of using backend's original
+            let recipeToUse = self.currentSession?.recipe ?? session.recipe
+
             // Process commands
             let updatedSession = CookingSession(
-                recipe: session.recipe,
+                recipe: recipeToUse,  // Use local recipe (preserves scaling)
                 commands: session.commands,
                 timerStatus: session.timerStatus,
                 conversationHistory: session.conversationHistory,

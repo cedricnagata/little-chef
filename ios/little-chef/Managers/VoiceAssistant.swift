@@ -42,7 +42,7 @@ class VoiceAssistant: NSObject, ObservableObject {
     // Speech timeout handling
     private var speechTimeoutWorkItem: DispatchWorkItem?
     private var lastSpeechTime: Date?
-    private let speechTimeoutInterval: TimeInterval = 3.0 // 3 seconds of silence
+    private let speechTimeoutInterval: TimeInterval = 2 // 1.5 seconds of silence for snappier response
     
     
     override init() {
