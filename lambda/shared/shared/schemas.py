@@ -14,24 +14,21 @@ import uuid
 class VoiceSettings(BaseModel):
     """Schema for voice settings with TTS provider support"""
     # TTS provider selection
-    tts_provider: Literal["polly", "elevenlabs", "device", "disabled"] = Field(
+    tts_provider: Literal["polly", "device", "disabled"] = Field(
         default="polly",
-        description="TTS provider: polly (AWS Polly), elevenlabs, device (iOS native), or disabled"
+        description="TTS provider: polly (AWS Polly), device (iOS native), or disabled"
     )
 
-    # Voice configuration (provider-specific)
+    # Voice configuration
     voice_id: Optional[str] = Field(
         default="Joanna",
-        description="Voice ID - Polly voice name (e.g., 'Joanna', 'Matthew') or ElevenLabs voice ID"
+        description="Polly voice name (e.g., 'Joanna', 'Matthew', 'Amy')"
     )
 
     # Native iOS/System TTS settings (for device provider)
     speech_rate: float = Field(default=0.5, ge=0.1, le=2.0)
     voice_identifier: str = Field(default="com.apple.ttsbundle.Samantha-compact")
     auto_speak_responses: bool = True
-
-    # Legacy ElevenLabs settings (deprecated, kept for backwards compatibility)
-    elevenlabs: Optional[Dict[str, Any]] = Field(default=None, description="Legacy ElevenLabs settings")
 
 
 class UserPreferences(BaseModel):
@@ -167,4 +164,4 @@ class AgentQueryResponse(BaseModel):
     """Schema for agent query response"""
     response: str
     updated_session: CookingSessionBase
-    audio: Optional[str] = Field(None, description="Base64 encoded MP3 audio (if ElevenLabs enabled)")
+    audio: Optional[str] = Field(None, description="Base64 encoded MP3 audio (if TTS enabled)")

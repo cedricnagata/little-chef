@@ -8,39 +8,34 @@
 import Foundation
 
 // MARK: - Voice Settings Models
-struct ElevenLabsSettings: Codable, Equatable {
-    let enabled: Bool
-    let voiceName: String
-    
-    enum CodingKeys: String, CodingKey {
-        case enabled
-        case voiceName = "voice_name"
-    }
-    
-    static let defaultSettings = ElevenLabsSettings(
-        enabled: false,
-        voiceName: "Rachel - calm"
-    )
+
+enum TTSProvider: String, Codable {
+    case polly = "polly"
+    case device = "device"
+    case disabled = "disabled"
 }
 
 struct VoiceSettings: Codable, Equatable {
+    let ttsProvider: TTSProvider
+    let voiceId: String?
     let speechRate: Float
     let voiceIdentifier: String
     let autoSpeakResponses: Bool
-    let elevenlabs: ElevenLabsSettings
-    
+
     enum CodingKeys: String, CodingKey {
+        case ttsProvider = "tts_provider"
+        case voiceId = "voice_id"
         case speechRate = "speech_rate"
         case voiceIdentifier = "voice_identifier"
         case autoSpeakResponses = "auto_speak_responses"
-        case elevenlabs
     }
-    
+
     static let defaultSettings = VoiceSettings(
+        ttsProvider: .polly,
+        voiceId: "Joanna",
         speechRate: 0.5,
         voiceIdentifier: "com.apple.ttsbundle.Samantha-compact",
-        autoSpeakResponses: true,
-        elevenlabs: ElevenLabsSettings.defaultSettings
+        autoSpeakResponses: true
     )
 }
 

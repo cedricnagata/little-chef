@@ -103,7 +103,7 @@ struct ProfileView: View {
                             SettingsOptionRow(
                                 icon: "gearshape.fill",
                                 title: "Preferences",
-                                subtitle: "LLM model, voice settings, ElevenLabs, dietary restrictions"
+                                subtitle: "LLM model, voice settings, TTS provider, dietary restrictions"
                             )
                         }
                         .buttonStyle(PlainButtonStyle())

@@ -49,17 +49,6 @@ class PreferencesManager: ObservableObject {
         saveChanges()
     }
 
-    func updateElevenLabsSettings(_ settings: ElevenLabsSettings) {
-        let newVoiceSettings = VoiceSettings(
-            speechRate: preferences.voiceSettings.speechRate,
-            voiceIdentifier: preferences.voiceSettings.voiceIdentifier,
-            autoSpeakResponses: preferences.voiceSettings.autoSpeakResponses,
-            elevenlabs: settings
-        )
-        preferences.voiceSettings = newVoiceSettings
-        saveChanges()
-    }
-
     // MARK: - Private Methods
 
     private func saveChanges() {

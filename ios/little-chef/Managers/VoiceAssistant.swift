@@ -189,7 +189,7 @@ class VoiceAssistant: NSObject, ObservableObject {
         // Stop any current speech
         synthesizer.stopSpeaking(at: .immediate)
 
-        // If audio data provided (from Lambda/ElevenLabs), use it
+        // If audio data provided (from server TTS), use it
         if let audio = audioData {
             playAudio(data: audio)
         } else {
@@ -198,7 +198,7 @@ class VoiceAssistant: NSObject, ObservableObject {
         }
     }
 
-    /// Play audio data directly (from server TTS: Polly, ElevenLabs, etc.)
+    /// Play audio data directly (from server TTS: Polly, OpenAI, etc.)
     func playAudio(data: Data) {
         playServerTTSAudio(data: data)
     }
@@ -219,7 +219,7 @@ class VoiceAssistant: NSObject, ObservableObject {
         synthesizer.speak(utterance)
     }
     
-    // Server TTS audio playback (Polly, ElevenLabs, OpenAI TTS, etc.)
+    // Server TTS audio playback (Polly, OpenAI TTS, etc.)
     private func playServerTTSAudio(data: Data) {
         do {
             let audioPlayer = try AVAudioPlayer(data: data)
@@ -570,7 +570,7 @@ extension VoiceAssistant: AVAudioPlayerDelegate {
         DispatchQueue.main.async {
             self.isSpeaking = false
             objc_setAssociatedObject(self, "currentAudioPlayer", nil, .OBJC_ASSOCIATION_RETAIN_NONATOMIC)
-            print("ElevenLabs audio decode error: \(error?.localizedDescription ?? "Unknown error")")
+            print("Server TTS audio decode error: \(error?.localizedDescription ?? "Unknown error")")
         }
     }
 }
