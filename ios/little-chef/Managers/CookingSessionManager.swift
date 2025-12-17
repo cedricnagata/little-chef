@@ -118,11 +118,16 @@ class CookingSessionManager: ObservableObject {
 
         print("🔵 Started new cooking session with model: \(userPreferences.llmModel)")
 
-        // Send warmup query to avoid Lambda cold start on first real query
+        // Send warmup query after a brief delay to ensure WebSocket is connected
         // This query won't be added to conversation history
-        if let session = currentSession {
-            _ = webSocketService.sendWarmupQuery(session: session)
-            print("🔥 Sent warmup query to wake up Lambda")
+        Task {
+            // Wait for WebSocket connection to establish
+            try? await Task.sleep(nanoseconds: 500_000_000) // 0.5 seconds
+
+            if let session = currentSession {
+                _ = webSocketService.sendWarmupQuery(session: session)
+                print("🔥 Sent warmup query to wake up Lambda")
+            }
         }
     }
 
