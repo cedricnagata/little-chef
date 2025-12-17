@@ -126,6 +126,8 @@ struct RecipeListView: View {
                 }
                 .refreshable {
                     isRefreshing = true
+                    // Trigger CloudKit sync on pull-to-refresh
+                    await recipeManager.triggerCloudKitSync()
                     await recipeManager.loadRecipes()
                     isRefreshing = false
                 }

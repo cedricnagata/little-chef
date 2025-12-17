@@ -22,6 +22,11 @@ class RecipeManager: ObservableObject {
     init(context: NSManagedObjectContext = PersistenceController.shared.container.viewContext) {
         self.context = context
         setupCloudKitNotifications()
+
+        // Trigger initial CloudKit import on app launch
+        Task {
+            await self.triggerCloudKitSync()
+        }
     }
 
     // MARK: - CloudKit Notifications
@@ -33,10 +38,48 @@ class RecipeManager: ObservableObject {
             object: nil,
             queue: .main
         ) { [weak self] _ in
+            print("📥 CloudKit remote change notification received")
             Task { @MainActor in
                 await self?.loadRecipes()
             }
         }
+    }
+
+    // MARK: - CloudKit Sync
+
+    func triggerCloudKitSync() async {
+        print("🔄 Triggering CloudKit sync...")
+
+        guard let container = context.persistentStoreCoordinator?.persistentStores.first else {
+            print("❌ No persistent store found")
+            return
+        }
+
+        // Check if CloudKit is configured
+        guard let cloudKitContainer = PersistenceController.shared.container as? NSPersistentCloudKitContainer else {
+            print("❌ Not using CloudKit container")
+            return
+        }
+
+        do {
+            // Try to initialize CloudKit schema if needed
+            try await cloudKitContainer.initializeCloudKitSchema()
+            print("✅ CloudKit schema initialized")
+        } catch {
+            print("⚠️ CloudKit schema initialization: \(error.localizedDescription)")
+        }
+
+        // Force a save to trigger sync
+        if context.hasChanges {
+            do {
+                try context.save()
+                print("✅ Context saved to trigger sync")
+            } catch {
+                print("❌ Failed to save context: \(error)")
+            }
+        }
+
+        print("✅ CloudKit sync triggered - data will sync in background")
     }
 
     deinit {
