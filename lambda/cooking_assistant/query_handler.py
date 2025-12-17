@@ -27,12 +27,16 @@ async def handle_query(body: Dict[str, Any], sender: WebSocketSender) -> None:
         payload = body.get("payload", {})
         session_data = payload.get("cooking_session", {})
         query = payload.get("query", "")
+        warmup = payload.get("warmup", False)
 
         if not query:
             await sender.send_error("INVALID_REQUEST", "Query is required")
             return
 
-        logger.info(f"Processing query: {query[:50]}...")
+        if warmup:
+            logger.info("Processing warmup query (Lambda cold start prevention)")
+        else:
+            logger.info(f"Processing query: {query[:50]}...")
 
         # Parse cooking session
         try:
@@ -45,7 +49,7 @@ async def handle_query(body: Dict[str, Any], sender: WebSocketSender) -> None:
         # Process query with LangGraph agent
         # Note: For now, we get the full response first
         # TODO: Add token-level streaming in future iteration
-        result = await cooking_agent.process_query(session, query)
+        result = await cooking_agent.process_query(session, query, warmup=warmup)
 
         full_response = result["response"]
         updated_session = result["updated_session"]
@@ -54,9 +58,9 @@ async def handle_query(body: Dict[str, Any], sender: WebSocketSender) -> None:
         # TODO: Implement char-by-char or word-by-word streaming
         await sender.send_token(full_response)
 
-        # Generate TTS audio with Polly (if enabled)
+        # Generate TTS audio with Polly (if enabled and not a warmup query)
         voice_settings = session.user_preferences.voice_settings
-        if voice_settings and voice_settings.tts_provider == "polly":
+        if not warmup and voice_settings and voice_settings.tts_provider == "polly":
             logger.info("Generating Polly TTS audio")
             polly = PollyService()
             chunk_index = 0

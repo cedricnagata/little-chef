@@ -50,14 +50,16 @@ struct MainView: View {
                 .environmentObject(voiceAssistant)
             
             // Settings Tab
-            ProfileView()
-                .tabItem {
-                    Image(systemName: "gearshape.fill")
-                    Text("Settings")
-                }
-                .tag(2)
-                .environmentObject(cookingSessionManager)
-                .environmentObject(preferencesManager)
+            NavigationStack {
+                ProfileSettingsView()
+                    .environmentObject(cookingSessionManager)
+                    .environmentObject(preferencesManager)
+            }
+            .tabItem {
+                Image(systemName: "gearshape.fill")
+                Text("Settings")
+            }
+            .tag(2)
         }
         .accentColor(.orange)
         .environment(\.selectedTab, $selectedTab)

@@ -10,7 +10,6 @@ import AVFoundation
 
 struct ProfileSettingsView: View {
     @EnvironmentObject var preferencesManager: PreferencesManager
-    @FocusState private var isInputFocused: Bool
     @State private var selectedLLMModel = "gpt-4.1-mini"
     @State private var measurementSystem = "imperial"
     @State private var ttsProvider: TTSProvider = .polly
@@ -18,8 +17,6 @@ struct ProfileSettingsView: View {
     @State private var speechRate: Float = 0.5
     @State private var voiceIdentifier = "com.apple.ttsbundle.Samantha-compact"
     @State private var autoSpeakResponses = true
-    @State private var dietaryRestrictions: [String] = []
-    @State private var newRestriction = ""
     @State private var showingSuccess = false
 
     // Available LLM models
@@ -30,8 +27,7 @@ struct ProfileSettingsView: View {
     // Available TTS providers
     private let ttsProviders: [(TTSProvider, String)] = [
         (.polly, "AWS Polly (Server)"),
-        (.device, "iOS Native"),
-        (.disabled, "Disabled")
+        (.device, "iOS Native")
     ]
 
     // Available Polly voices
@@ -102,83 +98,53 @@ struct ProfileSettingsView: View {
 
             // Voice Settings
             Section {
-                Picker("TTS Provider", selection: $ttsProvider) {
-                    ForEach(ttsProviders, id: \.0) { provider, label in
-                        Text(label).tag(provider)
-                    }
-                }
-
-                // Show Polly voice selection when Polly is selected
-                if ttsProvider == .polly {
-                    Picker("Polly Voice", selection: $pollyVoice) {
-                        ForEach(pollyVoices, id: \.self) { voice in
-                            Text(voice).tag(voice)
-                        }
-                    }
-                }
-
-                // Show iOS voice selection when device is selected
-                if ttsProvider == .device {
-                    Picker("iOS Voice", selection: $voiceIdentifier) {
-                        ForEach(iosVoices, id: \.0) { identifier, label in
-                            Text(label).tag(identifier)
-                        }
-                    }
-
-                    Slider(value: Binding(
-                        get: { Double(speechRate) },
-                        set: { speechRate = Float($0) }
-                    ), in: 0.5...2.0, step: 0.1)
-
-                    Text("Speech Rate: \(String(format: "%.1f", speechRate))x")
-                        .font(.caption)
-                        .foregroundColor(.secondary)
-                }
-
                 Toggle("Auto-speak Responses", isOn: $autoSpeakResponses)
+
+                // Only show TTS options if auto-speak is enabled
+                if autoSpeakResponses {
+                    Picker("TTS Provider", selection: $ttsProvider) {
+                        ForEach(ttsProviders, id: \.0) { provider, label in
+                            Text(label).tag(provider)
+                        }
+                    }
+
+                    // Show Polly voice selection when Polly is selected
+                    if ttsProvider == .polly {
+                        Picker("Polly Voice", selection: $pollyVoice) {
+                            ForEach(pollyVoices, id: \.self) { voice in
+                                Text(voice).tag(voice)
+                            }
+                        }
+                    }
+
+                    // Show iOS voice selection when device is selected
+                    if ttsProvider == .device {
+                        Picker("iOS Voice", selection: $voiceIdentifier) {
+                            ForEach(iosVoices, id: \.0) { identifier, label in
+                                Text(label).tag(identifier)
+                            }
+                        }
+
+                        Slider(value: Binding(
+                            get: { Double(speechRate) },
+                            set: { speechRate = Float($0) }
+                        ), in: 0.5...2.0, step: 0.1)
+
+                        Text("Speech Rate: \(String(format: "%.1f", speechRate))x")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                    }
+                }
             } header: {
                 Text("Voice Settings")
             } footer: {
-                if ttsProvider == .polly {
+                if !autoSpeakResponses {
+                    Text("Enable auto-speak to have responses read aloud while cooking")
+                } else if ttsProvider == .polly {
                     Text("AWS Polly provides natural-sounding neural voices from the cloud")
-                } else if ttsProvider == .device {
-                    Text("Uses your device's built-in text-to-speech")
                 } else {
-                    Text("Responses will be shown as text only")
+                    Text("Uses your device's built-in text-to-speech")
                 }
-            }
-
-            // Dietary Restrictions
-            Section {
-                ForEach(dietaryRestrictions, id: \.self) { restriction in
-                    HStack {
-                        Text(restriction)
-                        Spacer()
-                        Button(action: {
-                            dietaryRestrictions.removeAll { $0 == restriction }
-                        }) {
-                            Image(systemName: "minus.circle.fill")
-                                .foregroundColor(DesignSystem.Colors.error)
-                        }
-                    }
-                }
-
-                HStack {
-                    TextField("Add restriction", text: $newRestriction)
-                        .focused($isInputFocused)
-                        .onSubmit {
-                            addRestriction()
-                        }
-                    Button(action: addRestriction) {
-                        Image(systemName: "plus.circle.fill")
-                            .foregroundColor(DesignSystem.Colors.success)
-                    }
-                    .disabled(newRestriction.isEmpty)
-                }
-            } header: {
-                Text("Dietary Restrictions")
-            } footer: {
-                Text("e.g., vegetarian, vegan, gluten-free, dairy-free")
             }
         }
         .scrollDismissesKeyboard(.interactively)
@@ -205,7 +171,6 @@ struct ProfileSettingsView: View {
         let prefs = preferencesManager.preferences
         selectedLLMModel = prefs.llmModel
         measurementSystem = prefs.measurementSystem
-        dietaryRestrictions = prefs.dietaryRestrictions
 
         let voiceSettings = prefs.voiceSettings
         ttsProvider = voiceSettings.ttsProvider
@@ -227,19 +192,12 @@ struct ProfileSettingsView: View {
         let preferences = UserPreferences(
             llmModel: selectedLLMModel,
             measurementSystem: measurementSystem,
-            dietaryRestrictions: dietaryRestrictions,
+            dietaryRestrictions: [], // Keep empty array for backward compatibility
             voiceSettings: voiceSettings
         )
 
         preferencesManager.updatePreferences(preferences)
         showingSuccess = true
-    }
-
-    private func addRestriction() {
-        let trimmed = newRestriction.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty, !dietaryRestrictions.contains(trimmed) else { return }
-        dietaryRestrictions.append(trimmed)
-        newRestriction = ""
     }
 }
 

@@ -195,168 +195,220 @@ struct ActiveCookingView: View {
 struct RecipeDetailsView: View {
     @EnvironmentObject var cookingSessionManager: CookingSessionManager
     @State private var showingAddTimer = false
-    
+    @Environment(\.horizontalSizeClass) var horizontalSizeClass
+
     var body: some View {
         if let session = cookingSessionManager.currentSession {
-            ScrollView {
-                VStack(alignment: .leading, spacing: 16) {
-                    // Recipe title and basic info
-                    VStack(alignment: .leading, spacing: 12) {
-                        Text(session.recipe.title)
-                            .font(.title2)
-                            .fontWeight(.bold)
-                            .multilineTextAlignment(.leading)
-                        
-                        if let description = session.recipe.description {
-                            Text(description)
-                                .font(.caption)
-                                .foregroundColor(.secondary)
-                        }
-                        
-                        // Recipe info
-                        LazyVGrid(columns: Array(repeating: GridItem(.flexible()), count: 2), spacing: 8) {
-                            if let prepTime = session.recipe.prepTime {
-                                CompactInfoCard(title: "Prep", value: "\(prepTime)m", icon: "clock")
+            GeometryReader { geometry in
+                let isLandscape = geometry.size.width > geometry.size.height
+
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 16) {
+                        // Recipe title and basic info
+                        VStack(alignment: .leading, spacing: 12) {
+                            Text(session.recipe.title)
+                                .font(.title2)
+                                .fontWeight(.bold)
+                                .multilineTextAlignment(.leading)
+
+                            if let description = session.recipe.description {
+                                Text(description)
+                                    .font(.caption)
+                                    .foregroundColor(.secondary)
                             }
-                            
-                            if let cookTime = session.recipe.cookTime {
-                                CompactInfoCard(title: "Cook", value: "\(cookTime)m", icon: "flame")
-                            }
-                            
-                            EditableServingsCard(
-                                originalServings: session.recipe.servings,
-                                currentServings: cookingSessionManager.getCurrentServings(),
-                                onServingsChange: { newServings in
-                                    cookingSessionManager.updateServings(newServings: newServings)
+
+                            // Recipe info - single line for compact display
+                            HStack(spacing: 8) {
+                                if let prepTime = session.recipe.prepTime {
+                                    CompactInfoCard(title: "Prep", value: "\(prepTime)m", icon: "clock")
                                 }
-                            )
-                            
-                            if let difficulty = session.recipe.difficulty {
-                                CompactInfoCard(title: "Level", value: difficulty.capitalized, icon: "star")
-                            }
-                        }
-                    }
-                    
-                    Divider()
-                    
-                    // Ingredients
-                    VStack(alignment: .leading, spacing: 8) {
-                        HStack {
-                            Text("Ingredients")
-                                .font(.headline)
-                                .fontWeight(.semibold)
-                            
-                            Spacer()
-                            
-                            Text("\(session.recipe.ingredients.count)")
-                                .font(.caption)
-                                .foregroundColor(.secondary)
-                        }
-                        
-                        LazyVStack(alignment: .leading, spacing: 6) {
-                            ForEach(Array(session.recipe.ingredients.enumerated()), id: \.offset) { index, ingredient in
-                                HStack(alignment: .top, spacing: 8) {
-                                    Circle()
-                                        .fill(Color.orange.opacity(0.3))
-                                        .frame(width: 6, height: 6)
-                                        .padding(.top, 6)
-                                    
-                                    Text(ingredient)
-                                        .font(.caption)
-                                        .fixedSize(horizontal: false, vertical: true)
-                                    
-                                    Spacer()
+
+                                if let cookTime = session.recipe.cookTime {
+                                    CompactInfoCard(title: "Cook", value: "\(cookTime)m", icon: "flame")
                                 }
-                            }
-                        }
-                    }
-                    
-                    Divider()
-                    
-                    // Timers Section
-                    VStack(alignment: .leading, spacing: 8) {
-                        HStack {
-                            Text("Timers")
-                                .font(.headline)
-                                .fontWeight(.semibold)
-                            
-                            Spacer()
-                            
-                            Button(action: {
-                                showingAddTimer = true
-                            }) {
-                                Image(systemName: "plus.circle.fill")
-                                    .font(.title3)
-                                    .foregroundColor(.orange)
-                            }
-                        }
-                        
-                        if cookingSessionManager.localTimers.isEmpty {
-                            Text("No timers yet. Add one above or ask the AI!")
-                                .font(.caption)
-                                .foregroundColor(.secondary)
-                                .italic()
-                        } else {
-                            LazyVStack(spacing: 8) {
-                                ForEach(cookingSessionManager.localTimers) { timer in
-                                    TimerCardView(
-                                        timer: timer,
-                                        onDelete: {
-                                            cookingSessionManager.deleteManualTimer(id: timer.id)
-                                        }
-                                    )
-                                }
-                            }
-                        }
-                    }
-                    
-                    Divider()
-                    
-                    // Instructions
-                    VStack(alignment: .leading, spacing: 8) {
-                        HStack {
-                            Text("Instructions")
-                                .font(.headline)
-                                .fontWeight(.semibold)
-                            
-                            Spacer()
-                            
-                            Text("\(session.recipe.instructions.count) steps")
-                                .font(.caption)
-                                .foregroundColor(.secondary)
-                        }
-                        
-                        LazyVStack(alignment: .leading, spacing: 12) {
-                            ForEach(Array(session.recipe.instructions.enumerated()), id: \.offset) { index, instruction in
-                                HStack(alignment: .top, spacing: 8) {
-                                    ZStack {
-                                        Circle()
-                                            .fill(Color.orange)
-                                            .frame(width: 18, height: 18)
-                                        
-                                        Text("\(index + 1)")
-                                            .font(.caption2)
-                                            .fontWeight(.semibold)
-                                            .foregroundColor(.white)
+
+                                EditableServingsCard(
+                                    originalServings: session.recipe.servings,
+                                    currentServings: cookingSessionManager.getCurrentServings(),
+                                    onServingsChange: { newServings in
+                                        cookingSessionManager.updateServings(newServings: newServings)
                                     }
-                                    
-                                    Text(instruction)
-                                        .font(.caption)
-                                        .fixedSize(horizontal: false, vertical: true)
-                                    
-                                    Spacer()
+                                )
+
+                                if let difficulty = session.recipe.difficulty {
+                                    CompactInfoCard(title: "Level", value: difficulty.capitalized, icon: "star")
                                 }
                             }
                         }
+
+                        Divider()
+
+                        // Timers Section (moved above ingredients)
+                        TimersSection(showingAddTimer: $showingAddTimer)
+
+                        Divider()
+
+                        // Ingredients and Instructions - side by side in landscape
+                        if isLandscape {
+                            HStack(alignment: .top, spacing: 16) {
+                                IngredientsSection()
+                                    .frame(maxWidth: .infinity)
+
+                                Divider()
+
+                                InstructionsSection()
+                                    .frame(maxWidth: .infinity)
+                            }
+                        } else {
+                            // Portrait mode - stacked layout
+                            IngredientsSection()
+
+                            Divider()
+
+                            InstructionsSection()
+                        }
+
+                        Spacer(minLength: 20)
                     }
-                    
-                    Spacer(minLength: 20)
+                    .padding()
                 }
-                .padding()
             }
             .sheet(isPresented: $showingAddTimer) {
                 AddTimerView { label, minutes in
                     cookingSessionManager.addManualTimer(label: label, durationMinutes: minutes)
+                }
+            }
+        }
+    }
+}
+
+// MARK: - Timers Section
+
+struct TimersSection: View {
+    @EnvironmentObject var cookingSessionManager: CookingSessionManager
+    @Binding var showingAddTimer: Bool
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Text("Timers")
+                    .font(.headline)
+                    .fontWeight(.semibold)
+
+                Spacer()
+
+                Button(action: {
+                    showingAddTimer = true
+                }) {
+                    Image(systemName: "plus.circle.fill")
+                        .font(.title3)
+                        .foregroundColor(.orange)
+                }
+            }
+
+            if cookingSessionManager.localTimers.isEmpty {
+                Text("No timers yet. Add one above or ask the AI!")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+                    .italic()
+            } else {
+                LazyVStack(spacing: 8) {
+                    ForEach(cookingSessionManager.localTimers) { timer in
+                        TimerCardView(
+                            timer: timer,
+                            onDelete: {
+                                cookingSessionManager.deleteManualTimer(id: timer.id)
+                            }
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+// MARK: - Ingredients Section
+
+struct IngredientsSection: View {
+    @EnvironmentObject var cookingSessionManager: CookingSessionManager
+
+    var body: some View {
+        if let session = cookingSessionManager.currentSession {
+            VStack(alignment: .leading, spacing: 8) {
+                HStack {
+                    Text("Ingredients")
+                        .font(.headline)
+                        .fontWeight(.semibold)
+
+                    Spacer()
+
+                    Text("\(session.recipe.ingredients.count)")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                }
+
+                LazyVStack(alignment: .leading, spacing: 6) {
+                    ForEach(Array(session.recipe.ingredients.enumerated()), id: \.offset) { index, ingredient in
+                        HStack(alignment: .top, spacing: 8) {
+                            Circle()
+                                .fill(Color.orange.opacity(0.3))
+                                .frame(width: 6, height: 6)
+                                .padding(.top, 6)
+
+                            Text(ingredient)
+                                .font(.caption)
+                                .fixedSize(horizontal: false, vertical: true)
+
+                            Spacer()
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+// MARK: - Instructions Section
+
+struct InstructionsSection: View {
+    @EnvironmentObject var cookingSessionManager: CookingSessionManager
+
+    var body: some View {
+        if let session = cookingSessionManager.currentSession {
+            VStack(alignment: .leading, spacing: 8) {
+                HStack {
+                    Text("Instructions")
+                        .font(.headline)
+                        .fontWeight(.semibold)
+
+                    Spacer()
+
+                    Text("\(session.recipe.instructions.count) steps")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                }
+
+                LazyVStack(alignment: .leading, spacing: 12) {
+                    ForEach(Array(session.recipe.instructions.enumerated()), id: \.offset) { index, instruction in
+                        HStack(alignment: .top, spacing: 8) {
+                            ZStack {
+                                Circle()
+                                    .fill(Color.orange)
+                                    .frame(width: 18, height: 18)
+
+                                Text("\(index + 1)")
+                                    .font(.caption2)
+                                    .fontWeight(.semibold)
+                                    .foregroundColor(.white)
+                            }
+
+                            Text(instruction)
+                                .font(.caption)
+                                .fixedSize(horizontal: false, vertical: true)
+
+                            Spacer()
+                        }
+                    }
                 }
             }
         }
@@ -369,26 +421,28 @@ struct CompactInfoCard: View {
     let title: String
     let value: String
     let icon: String
-    
+
     var body: some View {
-        VStack(spacing: 2) {
+        HStack(spacing: 4) {
             Image(systemName: icon)
-                .font(.caption)
-                .foregroundColor(.orange)
-            
-            Text(value)
-                .font(.caption)
-                .fontWeight(.semibold)
-            
-            Text(title)
                 .font(.caption2)
-                .foregroundColor(.secondary)
+                .foregroundColor(.orange)
+
+            VStack(alignment: .leading, spacing: 1) {
+                Text(value)
+                    .font(.caption)
+                    .fontWeight(.semibold)
+
+                Text(title)
+                    .font(.caption2)
+                    .foregroundColor(.secondary)
+            }
         }
         .frame(maxWidth: .infinity)
-        .padding(.vertical, 6)
-        .padding(.horizontal, 4)
-        .background(Color(.systemBackground))
-        .cornerRadius(8)
+        .padding(.vertical, 4)
+        .padding(.horizontal, 6)
+        .background(Color(.systemGray6))
+        .cornerRadius(6)
     }
 }
 
@@ -830,13 +884,13 @@ struct EditableServingsCard: View {
     let onServingsChange: (Int) -> Void
     
     var body: some View {
-        VStack(spacing: 4) {
+        HStack(spacing: 4) {
             Image(systemName: "person.2")
-                .font(.caption)
+                .font(.caption2)
                 .foregroundColor(.orange)
-            
+
             // Stepper controls for servings
-            HStack(spacing: 4) {
+            HStack(spacing: 2) {
                 // Decrease button
                 Button(action: {
                     if currentServings > 1 {
@@ -844,26 +898,23 @@ struct EditableServingsCard: View {
                     }
                 }) {
                     Image(systemName: "minus.circle.fill")
-                        .font(.caption)
+                        .font(.caption2)
                         .foregroundColor(currentServings > 1 ? .orange : .gray)
                 }
                 .disabled(currentServings <= 1)
-                
+
                 // Current servings display
-                VStack(spacing: 1) {
+                VStack(alignment: .center, spacing: 1) {
                     Text("\(currentServings)")
-                        .font(.headline)
+                        .font(.caption)
                         .fontWeight(.semibold)
                         .foregroundColor(.primary)
-                        .frame(minWidth: 30)
-                    
-                    if currentServings != originalServings {
-                        Text("(was \(originalServings))")
-                            .font(.caption2)
-                            .foregroundColor(.orange)
-                    }
+
+                    Text("Serves")
+                        .font(.caption2)
+                        .foregroundColor(.secondary)
                 }
-                
+
                 // Increase button
                 Button(action: {
                     if currentServings < 50 {
@@ -871,22 +922,19 @@ struct EditableServingsCard: View {
                     }
                 }) {
                     Image(systemName: "plus.circle.fill")
-                        .font(.caption)
+                        .font(.caption2)
                         .foregroundColor(currentServings < 50 ? .orange : .gray)
                 }
                 .disabled(currentServings >= 50)
             }
-            
-            Text("Serves")
-                .font(.caption)
-                .foregroundColor(.secondary)
         }
         .frame(maxWidth: .infinity)
-        .padding()
+        .padding(.vertical, 4)
+        .padding(.horizontal, 6)
         .background(Color(.systemGray6))
-        .cornerRadius(12)
+        .cornerRadius(6)
         .overlay(
-            RoundedRectangle(cornerRadius: 12)
+            RoundedRectangle(cornerRadius: 6)
                 .stroke(currentServings != originalServings ? Color.orange.opacity(0.5) : Color.clear, lineWidth: 1)
         )
     }
@@ -1030,12 +1078,14 @@ struct CircularProgressView: View {
 
 struct AddTimerView: View {
     let onAdd: (String, Int) -> Void
-    
+
     @Environment(\.dismiss) private var dismiss
     @State private var timerLabel = ""
+    @State private var selectedHours = 0
     @State private var selectedMinutes = 5
     @State private var selectedSeconds = 0
-    
+
+    private let hourOptions = Array(0...23)
     private let minuteOptions = Array(0...59)
     private let secondOptions = Array(0...59)
     
@@ -1053,36 +1103,51 @@ struct AddTimerView: View {
                 VStack(alignment: .leading, spacing: 8) {
                     Text("Duration")
                         .font(.headline)
-                    
+
                     HStack {
+                        // Hours picker
+                        VStack {
+                            Text("Hours")
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+
+                            Picker("Hours", selection: $selectedHours) {
+                                ForEach(hourOptions, id: \.self) { hour in
+                                    Text("\(hour)").tag(hour)
+                                }
+                            }
+                            .pickerStyle(.wheel)
+                            .frame(width: 70, height: 120)
+                        }
+
                         // Minutes picker
                         VStack {
                             Text("Minutes")
                                 .font(.caption)
                                 .foregroundColor(.secondary)
-                            
+
                             Picker("Minutes", selection: $selectedMinutes) {
                                 ForEach(minuteOptions, id: \.self) { minute in
                                     Text("\(minute)").tag(minute)
                                 }
                             }
                             .pickerStyle(.wheel)
-                            .frame(width: 80, height: 120)
+                            .frame(width: 70, height: 120)
                         }
-                        
+
                         // Seconds picker
                         VStack {
                             Text("Seconds")
                                 .font(.caption)
                                 .foregroundColor(.secondary)
-                            
+
                             Picker("Seconds", selection: $selectedSeconds) {
                                 ForEach(secondOptions, id: \.self) { second in
                                     Text("\(second)").tag(second)
                                 }
                             }
                             .pickerStyle(.wheel)
-                            .frame(width: 80, height: 120)
+                            .frame(width: 70, height: 120)
                         }
                         
                         Spacer()
@@ -1126,26 +1191,33 @@ struct AddTimerView: View {
     
     private var isValid: Bool {
         !timerLabel.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty &&
-        (selectedMinutes > 0 || selectedSeconds > 0)
+        (selectedHours > 0 || selectedMinutes > 0 || selectedSeconds > 0)
     }
-    
+
     private var totalMinutes: Int {
-        let totalSeconds = selectedMinutes * 60 + selectedSeconds
+        let totalSeconds = selectedHours * 3600 + selectedMinutes * 60 + selectedSeconds
         return max(1, (totalSeconds + 59) / 60) // Round up to nearest minute, minimum 1
     }
-    
+
     private var formattedDuration: String {
-        let totalSeconds = selectedMinutes * 60 + selectedSeconds
-        let minutes = totalSeconds / 60
+        let totalSeconds = selectedHours * 3600 + selectedMinutes * 60 + selectedSeconds
+        let hours = totalSeconds / 3600
+        let minutes = (totalSeconds % 3600) / 60
         let seconds = totalSeconds % 60
-        
-        if minutes > 0 && seconds > 0 {
-            return "\(minutes)m \(seconds)s"
-        } else if minutes > 0 {
-            return "\(minutes)m"
-        } else {
-            return "\(seconds)s"
+
+        var components: [String] = []
+
+        if hours > 0 {
+            components.append("\(hours)h")
         }
+        if minutes > 0 {
+            components.append("\(minutes)m")
+        }
+        if seconds > 0 {
+            components.append("\(seconds)s")
+        }
+
+        return components.isEmpty ? "0s" : components.joined(separator: " ")
     }
     
     private func addTimer() {

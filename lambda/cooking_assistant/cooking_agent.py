@@ -254,11 +254,20 @@ class CookingAgent:
 
     # ===== Main Process Method =====
 
-    async def process_query(self, cooking_session: CookingSessionBase, query: str) -> Dict[str, Any]:
-        """Process a cooking query and return the response with updated session"""
+    async def process_query(self, cooking_session: CookingSessionBase, query: str, warmup: bool = False) -> Dict[str, Any]:
+        """Process a cooking query and return the response with updated session
+
+        Args:
+            cooking_session: Current cooking session with recipe and context
+            query: User's query
+            warmup: If True, skip adding to conversation history (for Lambda cold start prevention)
+        """
 
         query_preview = query.strip()[:50] + "..." if len(query.strip()) > 50 else query.strip()
-        logger.info(f"Workflow start: processing query '{query_preview}' for recipe '{cooking_session.recipe.title}'")
+        if warmup:
+            logger.info(f"Workflow start: processing warmup query (cold start prevention)")
+        else:
+            logger.info(f"Workflow start: processing query '{query_preview}' for recipe '{cooking_session.recipe.title}'")
 
         # Initialize agent state
         initial_state: AgentState = {
@@ -273,26 +282,27 @@ class CookingAgent:
             # Run the agent workflow
             result = await self.compiled_agent.ainvoke(initial_state)
 
-            # Update conversation history
+            # Update conversation history (skip for warmup queries)
             updated_session = result["cooking_session"]
 
-            # Add user message
-            user_message = Message(
-                id=uuid.uuid4(),
-                role="user",
-                content=query,
-                timestamp=datetime.now()
-            )
-            updated_session.conversation_history.append(user_message)
+            if not warmup:
+                # Add user message
+                user_message = Message(
+                    id=uuid.uuid4(),
+                    role="user",
+                    content=query,
+                    timestamp=datetime.now()
+                )
+                updated_session.conversation_history.append(user_message)
 
-            # Add assistant message
-            assistant_message = Message(
-                id=uuid.uuid4(),
-                role="assistant",
-                content=result["final_response"],
-                timestamp=datetime.now()
-            )
-            updated_session.conversation_history.append(assistant_message)
+                # Add assistant message
+                assistant_message = Message(
+                    id=uuid.uuid4(),
+                    role="assistant",
+                    content=result["final_response"],
+                    timestamp=datetime.now()
+                )
+                updated_session.conversation_history.append(assistant_message)
 
             final_response_data = {
                 "response": result["final_response"],

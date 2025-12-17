@@ -7,9 +7,7 @@ Globals:
     Timeout: 300
     MemorySize: 512
     Runtime: python3.12
-    Environment:
-      Variables:
-        LOG_LEVEL: INFO
+    # Environment variables removed to preserve manually-set API keys during deployment
     Architectures:
       - x86_64
 
@@ -130,10 +128,8 @@ Resources:
       Description: WebSocket-based cooking assistant with LangGraph and Polly TTS
       Timeout: 300
       MemorySize: 1024
-      Environment:
-        Variables:
-          # API keys must be set manually via AWS CLI or Console after first deployment
-          ENVIRONMENT: !Ref Environment
+      # Environment variables (OPENAI_API_KEY, etc.) are preserved from existing function config
+      # They will not be overwritten during deployment
       Layers:
         - !Ref SharedLayer
       Policies:
@@ -164,11 +160,8 @@ Resources:
       Description: Recipe parser supporting URL, text, and image inputs
       Timeout: 180
       MemorySize: 1024
-      Environment:
-        Variables:
-          # API keys must be set manually via AWS CLI or Console after first deployment
-          FIRECRAWL_API_URL: https://api.firecrawl.dev/v1/scrape
-          ENVIRONMENT: !Ref Environment
+      # Environment variables (OPENAI_API_KEY, FIRECRAWL_API_KEY, etc.) are preserved from existing function config
+      # They will not be overwritten during deployment
       Layers:
         - !Ref SharedLayer
       Events:

@@ -153,11 +153,11 @@ class WebSocketService: NSObject, ObservableObject {
 
     // MARK: - Message Sending
 
-    func sendQuery(session: CookingSession, query: String) -> String {
+    func sendQuery(session: CookingSession, query: String, warmup: Bool = false) -> String {
         let requestId = UUID().uuidString
         currentRequestId = requestId
 
-        let payload = QueryPayload(cookingSession: session, query: query)
+        let payload = QueryPayload(cookingSession: session, query: query, warmup: warmup)
         let message = WebSocketMessage(
             action: "query",
             requestId: requestId,
@@ -166,6 +166,11 @@ class WebSocketService: NSObject, ObservableObject {
 
         send(message)
         return requestId
+    }
+
+    /// Send a warmup query to wake up the Lambda function (doesn't add to conversation history)
+    func sendWarmupQuery(session: CookingSession) -> String {
+        return sendQuery(session: session, query: "ready", warmup: true)
     }
 
     private func send<T: Codable>(_ message: T) {

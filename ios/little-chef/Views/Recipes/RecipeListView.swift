@@ -29,13 +29,24 @@ struct RecipeListView: View {
     var body: some View {
         NavigationStack {
             VStack(spacing: 0) {
+                // Fixed header with large title
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("My Recipes")
+                        .font(.largeTitle)
+                        .fontWeight(.bold)
+                        .padding(.horizontal, 16)
+                        .padding(.top, 8)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(Color(UIColor.systemBackground))
+
                 // Custom search bar positioned below title
                 if !recipeManager.recipes.isEmpty {
                     SearchBar(text: $searchText, isInputFocused: _isSearchFocused)
                         .padding(.horizontal, 16)
                         .padding(.vertical, 8)
                 }
-                
+
                 // Main content area with pull-to-refresh
                 ScrollView {
                     if recipeManager.isLoading && recipeManager.recipes.isEmpty && !isRefreshing {
@@ -119,7 +130,6 @@ struct RecipeListView: View {
                     isRefreshing = false
                 }
             }
-            .navigationTitle("My Recipes")
             .toolbar {
                 ToolbarItem(placement: .navigationBarTrailing) {
                     Button(action: {
@@ -129,6 +139,7 @@ struct RecipeListView: View {
                     }
                 }
             }
+            .navigationBarTitleDisplayMode(.inline)
             .sheet(isPresented: $showingAddRecipe) {
                 AddRecipeView()
                     .environmentObject(recipeManager)

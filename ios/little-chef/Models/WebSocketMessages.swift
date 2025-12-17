@@ -17,10 +17,18 @@ struct WebSocketMessage<T: Codable>: Codable {
 struct QueryPayload: Codable {
     let cookingSession: CookingSession
     let query: String
+    let warmup: Bool
 
     enum CodingKeys: String, CodingKey {
         case cookingSession = "cooking_session"
         case query
+        case warmup
+    }
+
+    init(cookingSession: CookingSession, query: String, warmup: Bool = false) {
+        self.cookingSession = cookingSession
+        self.query = query
+        self.warmup = warmup
     }
 }
 
