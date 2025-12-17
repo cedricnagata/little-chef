@@ -17,7 +17,6 @@ struct ProfileSettingsView: View {
     @State private var speechRate: Float = 0.5
     @State private var voiceIdentifier = "com.apple.ttsbundle.Samantha-compact"
     @State private var autoSpeakResponses = true
-    @State private var showingSuccess = false
 
     // Available LLM models
     private let llmModels = [
@@ -150,20 +149,29 @@ struct ProfileSettingsView: View {
         .scrollDismissesKeyboard(.interactively)
         .navigationTitle("Preferences")
         .navigationBarTitleDisplayMode(.inline)
-        .toolbar {
-            ToolbarItem(placement: .navigationBarTrailing) {
-                Button("Save") {
-                    savePreferences()
-                }
-            }
-        }
-        .alert("Saved", isPresented: $showingSuccess) {
-            Button("OK", role: .cancel) { }
-        } message: {
-            Text("Your preferences have been saved successfully")
-        }
         .onAppear {
             loadPreferences()
+        }
+        .onChange(of: selectedLLMModel) { _, _ in
+            savePreferences()
+        }
+        .onChange(of: measurementSystem) { _, _ in
+            savePreferences()
+        }
+        .onChange(of: ttsProvider) { _, _ in
+            savePreferences()
+        }
+        .onChange(of: pollyVoice) { _, _ in
+            savePreferences()
+        }
+        .onChange(of: speechRate) { _, _ in
+            savePreferences()
+        }
+        .onChange(of: voiceIdentifier) { _, _ in
+            savePreferences()
+        }
+        .onChange(of: autoSpeakResponses) { _, _ in
+            savePreferences()
         }
     }
 
@@ -197,7 +205,6 @@ struct ProfileSettingsView: View {
         )
 
         preferencesManager.updatePreferences(preferences)
-        showingSuccess = true
     }
 }
 
