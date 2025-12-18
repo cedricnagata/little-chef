@@ -6,7 +6,6 @@
 //
 
 import SwiftUI
-import AVFoundation
 
 struct ProfileSettingsView: View {
     @EnvironmentObject var preferencesManager: PreferencesManager
@@ -49,24 +48,6 @@ struct ProfileSettingsView: View {
         ("com.apple.ttsbundle.Alex-compact", "Alex (English US)"),
         ("com.apple.ttsbundle.Victoria-compact", "Victoria (English US)"),
         ("com.apple.ttsbundle.Daniel-compact", "Daniel (English UK)")
-    ]
-
-    // Legacy - kept for compatibility
-    private let elevenLabsVoices = [
-        "Rachel - calm",
-        "Josh - intelligent",
-        "Arnold - crisp",
-        "Adam - storytelling",
-        "Antoni - well-rounded",
-        "Domi - nurturing",
-        "Elli - emotional",
-        "Freya - conversational",
-        "Grace - american-southern",
-        "Sam - storytelling",
-        "Glinda - warm",
-        "Jessica - expressive",
-        "Nicole - whispering",
-        "Sarah - conversational",
     ]
 
     var body: some View {

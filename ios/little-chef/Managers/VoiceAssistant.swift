@@ -17,7 +17,7 @@ class VoiceAssistant: NSObject, ObservableObject {
     @Published var recognizedText = ""
     @Published var isSpeaking = false
     @Published var isAvailable = false
-    @Published var error: String?
+    @Published var errorMessage: String?
     @Published var isHandsFreeMode = false
     @Published var isWakeWordListening = false
     
@@ -61,10 +61,10 @@ class VoiceAssistant: NSObject, ObservableObject {
                 case .authorized:
                     self.requestMicrophonePermission()
                 case .denied, .restricted, .notDetermined:
-                    self.error = "Speech recognition permission denied"
+                    self.errorMessage = "Speech recognition permission denied"
                     self.isAvailable = false
                 @unknown default:
-                    self.error = "Speech recognition permission unknown"
+                    self.errorMessage = "Speech recognition permission unknown"
                     self.isAvailable = false
                 }
             }
@@ -78,7 +78,7 @@ class VoiceAssistant: NSObject, ObservableObject {
                     self.isAvailable = true
                     self.setupAudioSession()
                 } else {
-                    self.error = "Microphone permission denied"
+                    self.errorMessage = "Microphone permission denied"
                     self.isAvailable = false
                 }
             }
@@ -93,7 +93,7 @@ class VoiceAssistant: NSObject, ObservableObject {
             try audioSession.setCategory(.playAndRecord, mode: .default, options: [.mixWithOthers, .defaultToSpeaker, .overrideMutedMicrophoneInterruption])
             try audioSession.setActive(true, options: .notifyOthersOnDeactivation)
         } catch {
-            self.error = "Failed to setup audio session: \(error.localizedDescription)"
+            self.errorMessage = "Failed to setup audio session: \(error.localizedDescription)"
         }
     }
     
@@ -101,20 +101,20 @@ class VoiceAssistant: NSObject, ObservableObject {
     
     func startListening() {
         guard isAvailable, !isListening else { return }
-        
+
         // Stop any ongoing tasks
         stopListening()
-        
+
         guard let speechRecognizer = speechRecognizer, speechRecognizer.isAvailable else {
-            error = "Speech recognizer not available"
+            self.errorMessage = "Speech recognizer not available"
             return
         }
-        
+
         do {
             // Setup recognition request
             recognitionRequest = SFSpeechAudioBufferRecognitionRequest()
             guard let recognitionRequest = recognitionRequest else {
-                error = "Unable to create recognition request"
+                self.errorMessage = "Unable to create recognition request"
                 return
             }
             
@@ -141,7 +141,7 @@ class VoiceAssistant: NSObject, ObservableObject {
                     }
                     
                     if let error = error {
-                        self?.error = "Recognition error: \(error.localizedDescription)"
+                        self?.errorMessage = "Recognition error: \(error.localizedDescription)"
                         self?.stopListening()
                     }
                 }
@@ -153,10 +153,10 @@ class VoiceAssistant: NSObject, ObservableObject {
             
             isListening = true
             recognizedText = ""
-            error = nil
-            
+            self.errorMessage = nil
+
         } catch {
-            self.error = "Failed to start listening: \(error.localizedDescription)"
+            self.errorMessage = "Failed to start listening: \(error.localizedDescription)"
         }
     }
     
@@ -304,7 +304,7 @@ class VoiceAssistant: NSObject, ObservableObject {
         stopWakeWordListening()
         
         guard let speechRecognizer = speechRecognizer, speechRecognizer.isAvailable else {
-            error = "Speech recognizer not available for wake word detection"
+            self.errorMessage = "Speech recognizer not available for wake word detection"
             return
         }
         
@@ -312,7 +312,7 @@ class VoiceAssistant: NSObject, ObservableObject {
             // Setup wake word recognition request
             wakeWordRequest = SFSpeechAudioBufferRecognitionRequest()
             guard let wakeWordRequest = wakeWordRequest else {
-                error = "Unable to create wake word recognition request"
+                self.errorMessage = "Unable to create wake word recognition request"
                 return
             }
             
@@ -361,7 +361,7 @@ class VoiceAssistant: NSObject, ObservableObject {
             isWakeWordListening = true
             
         } catch {
-            self.error = "Failed to start wake word listening: \(error.localizedDescription)"
+            self.errorMessage = "Failed to start wake word listening: \(error.localizedDescription)"
         }
     }
     
@@ -396,17 +396,17 @@ class VoiceAssistant: NSObject, ObservableObject {
     
     private func startHandsFreeVoiceListening() {
         guard isAvailable, !isListening else { return }
-        
+
         guard let speechRecognizer = speechRecognizer, speechRecognizer.isAvailable else {
-            error = "Speech recognizer not available"
+            self.errorMessage = "Speech recognizer not available"
             return
         }
-        
+
         do {
             // Setup recognition request
             recognitionRequest = SFSpeechAudioBufferRecognitionRequest()
             guard let recognitionRequest = recognitionRequest else {
-                error = "Unable to create recognition request"
+                self.errorMessage = "Unable to create recognition request"
                 return
             }
             
@@ -463,12 +463,12 @@ class VoiceAssistant: NSObject, ObservableObject {
             
             isListening = true
             recognizedText = ""
-            error = nil
+            self.errorMessage = nil
             lastSpeechTime = Date()
             scheduleSpeechTimeout()
             
         } catch {
-            self.error = "Failed to start hands-free listening: \(error.localizedDescription)"
+            self.errorMessage = "Failed to start hands-free listening: \(error.localizedDescription)"
         }
     }
     

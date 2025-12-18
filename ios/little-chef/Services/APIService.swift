@@ -55,7 +55,9 @@ class APIService {
     // MARK: - Private Methods
 
     private func parseRecipe<T: Encodable>(requestBody: T) async throws -> RecipeParseResponse {
-        let url = URL(string: "\(baseURL)/v1/parse")!
+        guard let url = URL(string: "\(baseURL)/v1/parse") else {
+            throw APIError.invalidURL
+        }
 
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
@@ -96,6 +98,7 @@ class APIService {
 // MARK: - Error Types
 
 enum APIError: LocalizedError {
+    case invalidURL
     case invalidResponse
     case httpError(statusCode: Int)
     case serverError(message: String, statusCode: Int)
@@ -104,6 +107,8 @@ enum APIError: LocalizedError {
 
     var errorDescription: String? {
         switch self {
+        case .invalidURL:
+            return "Invalid API URL"
         case .invalidResponse:
             return "Invalid response from server"
         case .httpError(let statusCode):

@@ -11,15 +11,15 @@ import Foundation
 
 struct CookingSession: Codable, Identifiable {
     // Local-only ID for SwiftUI, not sent to backend
-    var id: UUID { UUID() }
-    
+    let id: UUID
+
     let recipe: RecipeBase
     let commands: [Command]
     let timerStatus: [TimerStatus]
     let conversationHistory: [Message]
     let userPreferences: UserPreferencesDetailed
     let startedAt: Date
-    
+
     enum CodingKeys: String, CodingKey {
         case recipe
         case commands = "commands"
@@ -27,9 +27,11 @@ struct CookingSession: Codable, Identifiable {
         case conversationHistory = "conversation_history"
         case userPreferences = "user_preferences"
         case startedAt = "started_at"
+        // id is intentionally excluded from encoding/decoding
     }
-    
+
     init(recipe: RecipeBase, userPreferences: UserPreferencesDetailed) {
+        self.id = UUID()
         self.recipe = recipe
         self.commands = []
         self.timerStatus = []
@@ -37,14 +39,38 @@ struct CookingSession: Codable, Identifiable {
         self.userPreferences = userPreferences
         self.startedAt = Date()
     }
-    
+
     init(recipe: RecipeBase, commands: [Command], timerStatus: [TimerStatus], conversationHistory: [Message], userPreferences: UserPreferencesDetailed, startedAt: Date) {
+        self.id = UUID()
         self.recipe = recipe
         self.commands = commands
         self.timerStatus = timerStatus
         self.conversationHistory = conversationHistory
         self.userPreferences = userPreferences
         self.startedAt = startedAt
+    }
+
+    // Manual Codable implementation because id is excluded from CodingKeys
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.id = UUID()  // Generate new ID when decoding
+        self.recipe = try container.decode(RecipeBase.self, forKey: .recipe)
+        self.commands = try container.decode([Command].self, forKey: .commands)
+        self.timerStatus = try container.decode([TimerStatus].self, forKey: .timerStatus)
+        self.conversationHistory = try container.decode([Message].self, forKey: .conversationHistory)
+        self.userPreferences = try container.decode(UserPreferencesDetailed.self, forKey: .userPreferences)
+        self.startedAt = try container.decode(Date.self, forKey: .startedAt)
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(recipe, forKey: .recipe)
+        try container.encode(commands, forKey: .commands)
+        try container.encode(timerStatus, forKey: .timerStatus)
+        try container.encode(conversationHistory, forKey: .conversationHistory)
+        try container.encode(userPreferences, forKey: .userPreferences)
+        try container.encode(startedAt, forKey: .startedAt)
+        // id is intentionally not encoded
     }
 }
 
@@ -198,7 +224,7 @@ struct AgentQueryRequest: Codable {
 struct AgentQueryResponse: Codable {
     let response: String
     let updatedSession: CookingSession
-    let audio: String?  // Base64 encoded MP3 audio (if ElevenLabs enabled)
+    let audio: String?  // Base64 encoded MP3 audio (if server TTS enabled)
 
     enum CodingKeys: String, CodingKey {
         case response

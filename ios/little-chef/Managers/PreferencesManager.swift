@@ -8,6 +8,7 @@
 import Foundation
 import Combine
 
+@MainActor
 class PreferencesManager: ObservableObject {
     @Published var preferences: UserPreferences
 
