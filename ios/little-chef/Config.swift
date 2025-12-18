@@ -15,7 +15,7 @@ struct Config {
         #if DEBUG
             // In debug mode, try to load from Config.plist first, fall back to localhost
             if let url = loadConfigValue(key: "LOCAL_API_URL") {
-                print("Using local API URL from Config.plist: \(url)")
+                print("Using local Parser Function URL from Config.plist: \(url)")
                 return url
             }
             print("⚠️ Using default localhost URL (SAM local API)")
@@ -25,7 +25,7 @@ struct Config {
             guard let url = loadConfigValue(key: "PRODUCTION_API_URL") else {
                 fatalError("PRODUCTION_API_URL not found in Config.plist.")
             }
-            print("📱 Using production API URL from Config.plist: \(url)")
+            print("📱 Using production Parser Function URL from Config.plist: \(url)")
             return url
         #endif
     }

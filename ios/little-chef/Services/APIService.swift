@@ -55,7 +55,8 @@ class APIService {
     // MARK: - Private Methods
 
     private func parseRecipe<T: Encodable>(requestBody: T) async throws -> RecipeParseResponse {
-        guard let url = URL(string: "\(baseURL)/v1/parse") else {
+        // Using Lambda Function URL directly - no path needed
+        guard let url = URL(string: baseURL) else {
             throw APIError.invalidURL
         }
 

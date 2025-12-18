@@ -98,25 +98,6 @@ Resources:
       StageName: !Ref Environment
       Description: !Sub '${Environment} stage for WebSocket API'
 
-  # ===== HTTP API (Recipe Parser) =====
-
-  HttpApi:
-    Type: AWS::Serverless::HttpApi
-    Properties:
-      CorsConfiguration:
-        AllowOrigins:
-          - !Ref AllowedOrigins
-        AllowHeaders:
-          - Content-Type
-          - X-Api-Key
-          - Authorization
-        AllowMethods:
-          - GET
-          - POST
-          - OPTIONS
-        MaxAge: 600
-      StageName: !Ref Environment
-
   # ===== Lambda Functions =====
 
   CookingAssistantFunction:
@@ -164,13 +145,18 @@ Resources:
       # They will not be overwritten during deployment
       Layers:
         - !Ref SharedLayer
-      Events:
-        RecipeParserApi:
-          Type: HttpApi
-          Properties:
-            ApiId: !Ref HttpApi
-            Path: /v1/parse
-            Method: POST
+      FunctionUrlConfig:
+        AuthType: NONE
+        Cors:
+          AllowOrigins:
+            - "*"
+          AllowHeaders:
+            - Content-Type
+            - X-Api-Key
+            - Authorization
+          AllowMethods:
+            - "*"
+          MaxAge: 600
 
   # ===== Lambda Layer for Shared Code =====
 
@@ -191,16 +177,6 @@ Outputs:
     Value: !Sub 'wss://${WebSocketApi}.execute-api.${AWS::Region}.amazonaws.com/${Environment}'
     Export:
       Name: !Sub '${AWS::StackName}-WebSocketUrl'
-
-  HttpApiUrl:
-    Description: HTTP API endpoint URL for recipe parser
-    Value: !Sub 'https://${HttpApi}.execute-api.${AWS::Region}.amazonaws.com/${Environment}'
-    Export:
-      Name: !Sub '${AWS::StackName}-HttpApiUrl'
-
-  RecipeParserEndpoint:
-    Description: Recipe Parser endpoint
-    Value: !Sub 'https://${HttpApi}.execute-api.${AWS::Region}.amazonaws.com/${Environment}/v1/parse'
 
   CookingAssistantFunctionArn:
     Description: Cooking Assistant Lambda Function ARN
