@@ -103,6 +103,14 @@ struct MainView: View {
     }
 
     private func handleRecipeImport(from url: URL) {
+        // Request access to security-scoped resource (needed for files from external sources)
+        let didStartAccessing = url.startAccessingSecurityScopedResource()
+        defer {
+            if didStartAccessing {
+                url.stopAccessingSecurityScopedResource()
+            }
+        }
+
         do {
             let recipe = try exportManager.importRecipe(from: url)
             recipeToImport = recipe
