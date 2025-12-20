@@ -11,6 +11,9 @@ struct RecipeDetailView: View {
     let recipe: Recipe
     @State private var showingDeleteAlert = false
     @State private var showingEditSheet = false
+    @StateObject private var exportManager = RecipeExportManager()
+    @State private var exportedFileURL: URL?
+    @State private var exportErrorMessage: String?
     @EnvironmentObject var recipeManager: RecipeManager
     @EnvironmentObject var cookingSessionManager: CookingSessionManager
     @Environment(\.dismiss) private var dismiss
@@ -176,7 +179,9 @@ struct RecipeDetailView: View {
             ToolbarItem(placement: .navigationBarTrailing) {
                 Menu {
                     Button(action: {
-                        // TODO: Share recipe
+                        Task {
+                            await shareRecipe()
+                        }
                     }) {
                         Label("Share Recipe", systemImage: "square.and.arrow.up")
                     }
@@ -240,6 +245,22 @@ struct RecipeDetailView: View {
                 }
             )
         }
+        .sheet(item: .init(
+            get: { exportedFileURL.map { ShareSheetItem(url: $0) } },
+            set: { exportedFileURL = $0?.url }
+        )) { item in
+            ShareSheet(items: [item.url])
+        }
+        .alert("Export Error", isPresented: .init(
+            get: { exportErrorMessage != nil },
+            set: { if !$0 { exportErrorMessage = nil } }
+        )) {
+            Button("OK") {
+                exportErrorMessage = nil
+            }
+        } message: {
+            Text(exportErrorMessage ?? "Failed to export recipe")
+        }
     }
     
     private func startCookingSession() {
@@ -253,6 +274,15 @@ struct RecipeDetailView: View {
         selectedTab.wrappedValue = 1
     }
     
+    private func shareRecipe() async {
+        do {
+            let fileURL = try exportManager.exportRecipe(recipe)
+            exportedFileURL = fileURL
+        } catch {
+            exportErrorMessage = error.localizedDescription
+        }
+    }
+
     private func updateRecipe(_ updatedRecipe: RecipeCreate) async {
         // Convert RecipeCreate to RecipeBase
         let recipeBase = RecipeBase(
@@ -275,6 +305,12 @@ struct RecipeDetailView: View {
             print("Failed to update recipe: \(recipeManager.errorMessage ?? "Unknown error")")
         }
     }
+}
+
+// Helper struct for sheet presentation
+struct ShareSheetItem: Identifiable {
+    let id = UUID()
+    let url: URL
 }
 
 struct InfoCard: View {

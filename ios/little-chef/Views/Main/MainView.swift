@@ -25,7 +25,11 @@ struct MainView: View {
     @EnvironmentObject var voiceAssistant: VoiceAssistant
     @EnvironmentObject var preferencesManager: PreferencesManager
     @State private var selectedTab = 0
-    
+    @State private var showingImportSheet = false
+    @State private var recipeToImport: RecipeBase?
+    @State private var importErrorMessage: String?
+    @StateObject private var exportManager = RecipeExportManager()
+
     var body: some View {
         TabView(selection: $selectedTab) {
             // Recipes Tab
@@ -68,6 +72,49 @@ struct MainView: View {
                 await recipeManager.loadRecipes()
             }
         }
+        .sheet(isPresented: $showingImportSheet) {
+            if let recipe = recipeToImport {
+                ImportRecipeView(
+                    recipeBase: recipe,
+                    onImport: {
+                        await importRecipe(recipe)
+                    },
+                    onCancel: {
+                        showingImportSheet = false
+                        recipeToImport = nil
+                    }
+                )
+            }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .importRecipe)) { notification in
+            guard let url = notification.object as? URL else { return }
+            handleRecipeImport(from: url)
+        }
+        .alert("Import Error", isPresented: .init(
+            get: { importErrorMessage != nil },
+            set: { if !$0 { importErrorMessage = nil } }
+        )) {
+            Button("OK") {
+                importErrorMessage = nil
+            }
+        } message: {
+            Text(importErrorMessage ?? "Failed to import recipe")
+        }
+    }
+
+    private func handleRecipeImport(from url: URL) {
+        do {
+            let recipe = try exportManager.importRecipe(from: url)
+            recipeToImport = recipe
+            showingImportSheet = true
+        } catch {
+            importErrorMessage = error.localizedDescription
+        }
+    }
+
+    private func importRecipe(_ recipe: RecipeBase) async -> Bool {
+        // RecipeManager.createRecipe already reloads recipes after creation
+        return await recipeManager.createRecipe(recipe)
     }
 }
 

@@ -28,6 +28,25 @@ struct little_chefApp: App {
                 .environmentObject(cookingSessionManager)
                 .environmentObject(voiceAssistant)
                 .environmentObject(preferencesManager)
+                .onOpenURL { url in
+                    handleIncomingURL(url)
+                }
         }
     }
+
+    private func handleIncomingURL(_ url: URL) {
+        // Check if it's a .littlechef file
+        guard url.pathExtension == "littlechef" else { return }
+
+        // Post notification to trigger import flow
+        NotificationCenter.default.post(
+            name: .importRecipe,
+            object: url
+        )
+    }
+}
+
+// MARK: - Notification Names
+extension Notification.Name {
+    static let importRecipe = Notification.Name("importRecipe")
 }
