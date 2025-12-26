@@ -33,7 +33,23 @@ class VoiceAssistant: NSObject, ObservableObject {
     // Wake word detection
     private var wakeWordRequest: SFSpeechAudioBufferRecognitionRequest?
     private var wakeWordTask: SFSpeechRecognitionTask?
+
+    // Primary wake words (exact matches)
     private let wakeWords = ["hey littlechef", "hey little chef"]
+
+    // Phonetically similar variants (common misrecognitions)
+    private let phoneticVariants = [
+        "hey little chief",
+        "a little chef",
+        "hey little shift",
+        "hey little ship",
+        "hey lil chef",
+        "hey little chefs",
+        "hey little chef's"
+    ]
+
+    // Sliding window size for wake word detection
+    private let wakeWordWindowSize = 10
     
     // Hands-free mode callbacks
     var onWakeWordDetected: (() -> Void)?
@@ -281,11 +297,102 @@ class VoiceAssistant: NSObject, ObservableObject {
         }
     }
     
+    // MARK: - Wake Word Detection Algorithms
+
+    /// Improved wake word detection with multiple strategies
+    /// - Parameters:
+    ///   - transcript: The full transcript from speech recognition
+    ///   - confidence: The transcription object with confidence scores
+    /// - Returns: The detected wake word variant if found, nil otherwise
+    private func detectWakeWord(in transcript: String, confidence: SFTranscription?) -> String? {
+        let lowercased = transcript.lowercased()
+
+        // Strategy 1: Sliding window (only check recent words to reduce false positives)
+        let words = lowercased.components(separatedBy: " ")
+        let recentWords = words.suffix(wakeWordWindowSize).joined(separator: " ")
+
+        // Strategy 2: Exact matches in primary wake words
+        for wakeWord in wakeWords {
+            if recentWords.contains(wakeWord) {
+                print("✅ Exact match: \(wakeWord)")
+                return wakeWord
+            }
+        }
+
+        // Strategy 3: Phonetic variants (common misrecognitions)
+        for variant in phoneticVariants {
+            if recentWords.contains(variant) {
+                print("✅ Phonetic variant match: \(variant)")
+                return variant
+            }
+        }
+
+        // Strategy 4: Fuzzy matching (allows small variations)
+        if let fuzzyMatch = checkFuzzyMatch(in: recentWords) {
+            print("✅ Fuzzy match: \(fuzzyMatch)")
+            return fuzzyMatch
+        }
+
+        return nil
+    }
+
+    /// Check for fuzzy matches using Levenshtein distance
+    /// Allows 1-2 character differences to account for minor recognition errors
+    private func checkFuzzyMatch(in text: String) -> String? {
+        let allCandidates = wakeWords + phoneticVariants
+
+        for candidate in allCandidates {
+            let distance = levenshteinDistance(text, candidate)
+            let threshold = candidate.count / 5 // Allow ~20% character differences
+
+            if distance <= threshold {
+                return candidate
+            }
+        }
+
+        return nil
+    }
+
+    /// Calculate Levenshtein distance between two strings
+    /// This measures how many single-character edits are needed to change one string to another
+    private func levenshteinDistance(_ s1: String, _ s2: String) -> Int {
+        let s1Array = Array(s1)
+        let s2Array = Array(s2)
+        let s1Length = s1Array.count
+        let s2Length = s2Array.count
+
+        guard s1Length > 0 else { return s2Length }
+        guard s2Length > 0 else { return s1Length }
+
+        var matrix = [[Int]](repeating: [Int](repeating: 0, count: s2Length + 1), count: s1Length + 1)
+
+        for i in 0...s1Length {
+            matrix[i][0] = i
+        }
+
+        for j in 0...s2Length {
+            matrix[0][j] = j
+        }
+
+        for i in 1...s1Length {
+            for j in 1...s2Length {
+                let cost = s1Array[i - 1] == s2Array[j - 1] ? 0 : 1
+                matrix[i][j] = min(
+                    matrix[i - 1][j] + 1,      // deletion
+                    matrix[i][j - 1] + 1,      // insertion
+                    matrix[i - 1][j - 1] + cost // substitution
+                )
+            }
+        }
+
+        return matrix[s1Length][s2Length]
+    }
+
     // MARK: - Hands-Free Mode
-    
+
     func startHandsFreeMode() {
         guard isAvailable, !isHandsFreeMode else { return }
-        
+
         isHandsFreeMode = true
         startWakeWordListening()
     }
@@ -330,21 +437,19 @@ class VoiceAssistant: NSObject, ObservableObject {
             wakeWordTask = speechRecognizer.recognitionTask(with: wakeWordRequest) { [weak self] result, error in
                 DispatchQueue.main.async {
                     guard let self = self else { return }
-                    
+
                     if let result = result {
                         let transcript = result.bestTranscription.formattedString.lowercased()
-                        
-                        // Check for wake words
-                        for wakeWord in self.wakeWords {
-                            if transcript.contains(wakeWord) {
-                                print("🎤 Wake word detected: \(wakeWord)")
-                                self.onWakeWordDetected?()
-                                self.transitionToVoiceQuery()
-                                return
-                            }
+
+                        // Improved wake word detection
+                        if let detectedWakeWord = self.detectWakeWord(in: transcript, confidence: result.bestTranscription) {
+                            print("🎤 Wake word detected: \(detectedWakeWord)")
+                            self.onWakeWordDetected?()
+                            self.transitionToVoiceQuery()
+                            return
                         }
                     }
-                    
+
                     if let error = error {
                         print("Wake word recognition error: \(error.localizedDescription)")
                         // Don't stop wake word listening on errors, just continue
