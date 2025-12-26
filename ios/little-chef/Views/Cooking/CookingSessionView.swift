@@ -112,13 +112,25 @@ struct ActiveCookingView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            // Segmented control
-            Picker("View", selection: $selectedTab) {
-                ForEach(CookingTab.allCases, id: \.self) { tab in
-                    Text(tab.rawValue).tag(tab)
+            // Header with end session button and segmented control
+            HStack(spacing: 12) {
+                // End session button
+                Button(action: {
+                    showingEndSessionAlert = true
+                }) {
+                    Image(systemName: "xmark.circle.fill")
+                        .font(.title3)
+                        .foregroundColor(.red)
                 }
+
+                // Segmented control
+                Picker("View", selection: $selectedTab) {
+                    ForEach(CookingTab.allCases, id: \.self) { tab in
+                        Text(tab.rawValue).tag(tab)
+                    }
+                }
+                .pickerStyle(.segmented)
             }
-            .pickerStyle(.segmented)
             .padding()
 
             Divider()
@@ -139,17 +151,6 @@ struct ActiveCookingView: View {
 
             // Input area - always visible
             InputAreaView(textInput: $textInput, isInputFocused: _isInputFocused)
-        }
-        .toolbar {
-            ToolbarItem(placement: .navigationBarLeading) {
-                Button(action: {
-                    showingEndSessionAlert = true
-                }) {
-                    Image(systemName: "xmark.circle.fill")
-                        .font(.body)
-                        .foregroundColor(.red)
-                }
-            }
         }
         .alert("End Cooking Session", isPresented: $showingEndSessionAlert) {
             Button("Cancel", role: .cancel) { }
