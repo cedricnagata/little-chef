@@ -240,7 +240,23 @@ class WebSocketService: NSObject, ObservableObject {
             processEvent(event)
         } catch {
             print("❌ Error decoding message: \(error)")
-            print("📥 Raw message: \(text)")
+            print("📥 Raw message length: \(text.count) characters")
+
+            // Log specific details for debugging
+            if let decodingError = error as? DecodingError {
+                switch decodingError {
+                case .dataCorrupted(let context):
+                    print("   Data corrupted: \(context.debugDescription)")
+                case .keyNotFound(let key, _):
+                    print("   Key not found: \(key)")
+                case .typeMismatch(let type, let context):
+                    print("   Type mismatch: expected \(type) at \(context.codingPath)")
+                case .valueNotFound(let type, _):
+                    print("   Value not found: \(type)")
+                @unknown default:
+                    break
+                }
+            }
         }
     }
 
@@ -260,10 +276,15 @@ class WebSocketService: NSObject, ObservableObject {
 
             case "audio":
                 if let base64Data = event.data,
-                   let audioData = Data(base64Encoded: base64Data),
                    let chunkIndex = event.chunkIndex {
-                    print("🔊 Triggering onAudio callback (chunk \(chunkIndex))")
-                    self.onAudio?(audioData, chunkIndex, requestId)
+                    if let audioData = Data(base64Encoded: base64Data) {
+                        print("🔊 Triggering onAudio callback (chunk \(chunkIndex), \(audioData.count) bytes)")
+                        self.onAudio?(audioData, chunkIndex, requestId)
+                    } else {
+                        print("❌ Failed to decode base64 audio chunk \(chunkIndex) (base64 length: \(base64Data.count))")
+                    }
+                } else {
+                    print("⚠️ Audio event missing data or chunk_index")
                 }
 
             case "tool":

@@ -107,20 +107,47 @@ class WebSocketSender:
 
         await self.send(message)
 
-    async def send_audio(self, data: bytes, chunk_index: int) -> None:
+    async def send_audio(self, data: bytes, chunk_index: int) -> int:
         """
         Send an audio chunk event.
 
+        AWS API Gateway WebSocket has a 128 KB message limit.
+        Base64 encoding adds ~33% overhead, so we split audio at 64 KB
+        to ensure the full message (with JSON wrapper) stays under limit.
+
         Args:
             data: Raw audio bytes (MP3 format)
-            chunk_index: Sequential index for chunk ordering
+            chunk_index: Starting index for chunk ordering
+
+        Returns:
+            Number of WebSocket messages sent (1 if no split, >1 if split)
         """
-        await self.send({
-            "type": "audio",
-            "data": base64.b64encode(data).decode("utf-8"),
-            "format": "mp3",
-            "chunk_index": chunk_index
-        })
+        # Max raw audio size before base64 encoding (64 KB to be safe)
+        MAX_CHUNK_SIZE = 64 * 1024
+
+        if len(data) <= MAX_CHUNK_SIZE:
+            # Small enough to send as single message
+            await self.send({
+                "type": "audio",
+                "data": base64.b64encode(data).decode("utf-8"),
+                "format": "mp3",
+                "chunk_index": chunk_index
+            })
+            return 1
+        else:
+            # Split large audio into smaller sub-chunks with sequential indices
+            messages_sent = 0
+            for i in range(0, len(data), MAX_CHUNK_SIZE):
+                sub_chunk = data[i:i + MAX_CHUNK_SIZE]
+                await self.send({
+                    "type": "audio",
+                    "data": base64.b64encode(sub_chunk).decode("utf-8"),
+                    "format": "mp3",
+                    "chunk_index": chunk_index + messages_sent
+                })
+                logger.debug(f"Sent audio sub-chunk {chunk_index + messages_sent} ({len(sub_chunk)} bytes)")
+                messages_sent += 1
+            return messages_sent
 
     async def send_done(
         self,

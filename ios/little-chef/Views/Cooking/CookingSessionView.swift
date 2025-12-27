@@ -675,6 +675,7 @@ struct InputAreaView: View {
                 // Voice button
                 Button(action: {
                     isInputFocused = false
+                    voiceAssistant.stopSpeaking()  // Stop any playing audio first
                     if voiceAssistant.isListening {
                         voiceAssistant.stopListening()
                         if voiceAssistant.hasRecognizedText() {

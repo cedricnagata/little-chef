@@ -91,8 +91,11 @@ class CookingSessionManager: ObservableObject {
                 }
                 completeAudio = audioData
                 self.lastAudioData = audioData
+                print("🔊 Assembled \(sortedChunks.count) audio chunks → \(audioData.count) bytes total")
                 self.audioChunks.removeAll()
-                print("🔊 Received \(sortedChunks.count) audio chunks (\(audioData.count) bytes)")
+            } else {
+                print("⚠️ No audio chunks received - will fall back to native TTS")
+                print("   Response length: \(response.count) characters")
             }
 
             self.isLoading = false
@@ -180,6 +183,7 @@ class CookingSessionManager: ObservableObject {
         streamingResponse = ""
         audioChunks.removeAll()
         lastAudioData = nil
+        print("🔊 Cleared audio chunks, starting new query: \(query.prefix(50))...")
 
         // Update session with current timer status before sending
         let updatedSession = CookingSession(

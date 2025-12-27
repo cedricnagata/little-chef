@@ -67,11 +67,11 @@ async def handle_query(body: Dict[str, Any], sender: WebSocketSender) -> None:
 
             try:
                 async for audio_chunk in polly.stream_audio(full_response, voice_settings):
-                    await sender.send_audio(audio_chunk, chunk_index)
-                    chunk_index += 1
-                    logger.debug(f"Sent audio chunk {chunk_index}")
+                    logger.info(f"Sending audio chunk {chunk_index} ({len(audio_chunk)} bytes)")
+                    messages_sent = await sender.send_audio(audio_chunk, chunk_index)
+                    chunk_index += messages_sent  # Increment by number of WebSocket messages sent
 
-                logger.info(f"Sent {chunk_index} audio chunks")
+                logger.info(f"Successfully sent {chunk_index} audio chunks for {len(full_response)} char response")
 
             except Exception as e:
                 logger.error(f"TTS error (non-fatal): {e}")

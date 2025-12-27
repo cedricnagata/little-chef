@@ -116,6 +116,9 @@ class VoiceAssistant: NSObject, ObservableObject {
     // MARK: - Speech Recognition
     
     func startListening() {
+        // Stop any ongoing audio playback first to prevent buzzing
+        stopSpeaking()
+
         guard isAvailable, !isListening else { return }
 
         // Stop any ongoing tasks
@@ -650,12 +653,22 @@ extension VoiceAssistant: AVSpeechSynthesizerDelegate {
     func speechSynthesizer(_ synthesizer: AVSpeechSynthesizer, didFinish utterance: AVSpeechUtterance) {
         DispatchQueue.main.async {
             self.isSpeaking = false
+
+            // Resume wake word listening if in hands-free mode
+            if self.isHandsFreeMode && !self.isWakeWordListening && !self.isListening {
+                self.startWakeWordListening()
+            }
         }
     }
-    
+
     func speechSynthesizer(_ synthesizer: AVSpeechSynthesizer, didCancel utterance: AVSpeechUtterance) {
         DispatchQueue.main.async {
             self.isSpeaking = false
+
+            // Resume wake word listening if in hands-free mode
+            if self.isHandsFreeMode && !self.isWakeWordListening && !self.isListening {
+                self.startWakeWordListening()
+            }
         }
     }
 }
@@ -668,14 +681,24 @@ extension VoiceAssistant: AVAudioPlayerDelegate {
             self.isSpeaking = false
             // Clear the stored audio player
             objc_setAssociatedObject(self, "currentAudioPlayer", nil, .OBJC_ASSOCIATION_RETAIN_NONATOMIC)
+
+            // Resume wake word listening if in hands-free mode
+            if self.isHandsFreeMode && !self.isWakeWordListening && !self.isListening {
+                self.startWakeWordListening()
+            }
         }
     }
-    
+
     func audioPlayerDecodeErrorDidOccur(_ player: AVAudioPlayer, error: Error?) {
         DispatchQueue.main.async {
             self.isSpeaking = false
             objc_setAssociatedObject(self, "currentAudioPlayer", nil, .OBJC_ASSOCIATION_RETAIN_NONATOMIC)
             print("Server TTS audio decode error: \(error?.localizedDescription ?? "Unknown error")")
+
+            // Resume wake word listening if in hands-free mode
+            if self.isHandsFreeMode && !self.isWakeWordListening && !self.isListening {
+                self.startWakeWordListening()
+            }
         }
     }
 }
