@@ -29,6 +29,10 @@ class VoiceAssistant: NSObject, ObservableObject {
     private let synthesizer = AVSpeechSynthesizer()
     private var recognitionRequest: SFSpeechAudioBufferRecognitionRequest?
     private var recognitionTask: SFSpeechRecognitionTask?
+
+    // Current audio player for server TTS (Polly, etc.)
+    private var currentAudioPlayer: AVAudioPlayer?
+
     
     // Wake word detection
     private var wakeWordRequest: SFSpeechAudioBufferRecognitionRequest?
@@ -45,12 +49,22 @@ class VoiceAssistant: NSObject, ObservableObject {
         "hey little ship",
         "hey lil chef",
         "hey little chefs",
-        "hey little chef's"
+        "hey little chef's",
+        // Additional variants for noisy environments
+        "hey lil chief",
+        "a little chief",
+        "little chef",
+        "hey liddle chef",
+        "hey little shef",
+        "hey little shelf",
+        "hey little jeff",
+        "hey little left",
+        "hey little check"
     ]
 
     // Sliding window size for wake word detection
     private let wakeWordWindowSize = 10
-    
+
     // Hands-free mode callbacks
     var onWakeWordDetected: (() -> Void)?
     var onVoiceQueryReady: ((String) -> Void)?
@@ -104,10 +118,10 @@ class VoiceAssistant: NSObject, ObservableObject {
     private func setupAudioSession() {
         do {
             let audioSession = AVAudioSession.sharedInstance()
-            // Use .mixWithOthers to allow sounds to play while recording
-            // .overrideMutedMicrophoneInterruption ensures sounds play even when mic is active
-            try audioSession.setCategory(.playAndRecord, mode: .default, options: [.mixWithOthers, .defaultToSpeaker, .overrideMutedMicrophoneInterruption])
+            // Use .default mode for full volume audio playback
+            try audioSession.setCategory(.playAndRecord, mode: .default, options: [.defaultToSpeaker, .allowBluetooth, .mixWithOthers])
             try audioSession.setActive(true, options: .notifyOthersOnDeactivation)
+            print("🎙️ Audio session configured (default mode, full volume)")
         } catch {
             self.errorMessage = "Failed to setup audio session: \(error.localizedDescription)"
         }
@@ -224,7 +238,7 @@ class VoiceAssistant: NSObject, ObservableObject {
     
     private func speakWithNativeTTS(_ text: String) {
         let utterance = AVSpeechUtterance(string: text)
-        
+
         // Apply user preferences if available
         if let voiceSettings = voiceSettings {
             utterance.rate = voiceSettings.speechRate
@@ -233,41 +247,60 @@ class VoiceAssistant: NSObject, ObservableObject {
             utterance.rate = 0.5
             utterance.voice = AVSpeechSynthesisVoice(language: "en-US")
         }
-        
+
         isSpeaking = true
         synthesizer.speak(utterance)
+
+        // Start wake word listening during audio playback (if in hands-free mode)
+        // This allows user to interrupt audio by saying the wake word
+        if isHandsFreeMode && !isWakeWordListening && !isListening {
+            print("🎤 Starting wake word listening during native TTS playback")
+            startWakeWordListening()
+        }
     }
     
     // Server TTS audio playback (Polly, OpenAI TTS, etc.)
     private func playServerTTSAudio(data: Data) {
+        // Stop any existing audio first
+        currentAudioPlayer?.stop()
+        currentAudioPlayer = nil
+
         do {
             let audioPlayer = try AVAudioPlayer(data: data)
             audioPlayer.delegate = self
+            audioPlayer.volume = 1.0
             audioPlayer.prepareToPlay()
-
+            currentAudioPlayer = audioPlayer
             isSpeaking = true
             audioPlayer.play()
+            print("🔊 Started playing server TTS audio (\(data.count) bytes)")
 
-            // Store the player to keep it alive during playback
-            objc_setAssociatedObject(self, "currentAudioPlayer", audioPlayer, .OBJC_ASSOCIATION_RETAIN_NONATOMIC)
+            // Start wake word listening during audio playback (if in hands-free mode)
+            // This allows user to interrupt audio by saying the wake word
+            if isHandsFreeMode && !isWakeWordListening && !isListening {
+                print("🎤 Starting wake word listening during audio playback")
+                startWakeWordListening()
+            }
         } catch {
-            print("Failed to play server TTS audio: \(error)")
+            print("❌ Failed to play server TTS audio: \(error)")
             // Fallback to native TTS
             speakWithNativeTTS("Error playing audio")
         }
     }
-    
+
     func stopSpeaking() {
+        print("🔇 stopSpeaking() called - isSpeaking: \(isSpeaking)")
+
+        // Stop native TTS
         synthesizer.stopSpeaking(at: .immediate)
 
-        // Stop server TTS audio if playing
-        if let audioPlayer = objc_getAssociatedObject(self, "currentAudioPlayer") as? AVAudioPlayer {
-            audioPlayer.stop()
-        }
+        // Stop server TTS audio
+        currentAudioPlayer?.stop()
+        currentAudioPlayer = nil
 
         isSpeaking = false
     }
-    
+
     // MARK: - Convenience Methods
     
     func isReady() -> Bool {
@@ -286,18 +319,12 @@ class VoiceAssistant: NSObject, ObservableObject {
     
     private func playStartListeningSound() {
         print("🔊 Playing start listening sound")
-        DispatchQueue.main.async {
-            // Use iOS "Begin Recording" sound - designed for voice recording start
-            AudioServicesPlaySystemSound(1113) // Begin Recording sound
-        }
+        AudioServicesPlaySystemSound(1113) // Begin Recording sound
     }
-    
+
     private func playStopListeningSound() {
         print("🔊 Playing stop listening sound")
-        DispatchQueue.main.async {
-            // Use iOS "End Recording" sound - designed for voice recording stop
-            AudioServicesPlaySystemSound(1114) // End Recording sound
-        }
+        AudioServicesPlaySystemSound(1114) // End Recording sound
     }
     
     // MARK: - Wake Word Detection Algorithms
@@ -340,16 +367,25 @@ class VoiceAssistant: NSObject, ObservableObject {
     }
 
     /// Check for fuzzy matches using Levenshtein distance
-    /// Allows 1-2 character differences to account for minor recognition errors
+    /// Allows character differences to account for recognition errors in noisy environments
     private func checkFuzzyMatch(in text: String) -> String? {
         let allCandidates = wakeWords + phoneticVariants
 
-        for candidate in allCandidates {
-            let distance = levenshteinDistance(text, candidate)
-            let threshold = candidate.count / 5 // Allow ~20% character differences
+        // Check each sliding window of text against candidates
+        let words = text.components(separatedBy: " ")
+        for windowSize in 2...4 {
+            for i in 0...(max(0, words.count - windowSize)) {
+                let window = words[i..<min(i + windowSize, words.count)].joined(separator: " ")
 
-            if distance <= threshold {
-                return candidate
+                for candidate in allCandidates {
+                    let distance = levenshteinDistance(window, candidate)
+                    // Allow ~30% character differences for noisy environments
+                    let threshold = max(3, candidate.count / 3)
+
+                    if distance <= threshold {
+                        return candidate
+                    }
+                }
             }
         }
 
@@ -409,7 +445,7 @@ class VoiceAssistant: NSObject, ObservableObject {
     
     private func startWakeWordListening() {
         guard isAvailable, !isWakeWordListening else { return }
-        
+
         // Stop any ongoing tasks
         stopWakeWordListening()
         
@@ -489,12 +525,18 @@ class VoiceAssistant: NSObject, ObservableObject {
     }
     
     private func transitionToVoiceQuery() {
+        // Stop any playing audio first (allows wake word to interrupt audio)
+        if isSpeaking {
+            print("🔇 Wake word detected - stopping audio playback")
+            stopSpeaking()
+        }
+
         // Stop wake word listening temporarily
         stopWakeWordListening()
-        
+
         // Play sound to indicate we're now listening for the query
         playStartListeningSound()
-        
+
         // Add a small delay to let the sound play before starting recording
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
             // Start regular voice listening for the query
@@ -678,12 +720,13 @@ extension VoiceAssistant: AVSpeechSynthesizerDelegate {
 extension VoiceAssistant: AVAudioPlayerDelegate {
     func audioPlayerDidFinishPlaying(_ player: AVAudioPlayer, successfully flag: Bool) {
         DispatchQueue.main.async {
+            print("🔊 Audio player finished playing (success: \(flag))")
             self.isSpeaking = false
-            // Clear the stored audio player
-            objc_setAssociatedObject(self, "currentAudioPlayer", nil, .OBJC_ASSOCIATION_RETAIN_NONATOMIC)
+            self.currentAudioPlayer = nil
 
             // Resume wake word listening if in hands-free mode
             if self.isHandsFreeMode && !self.isWakeWordListening && !self.isListening {
+                print("🎤 Resuming wake word listening after audio finished")
                 self.startWakeWordListening()
             }
         }
@@ -691,12 +734,13 @@ extension VoiceAssistant: AVAudioPlayerDelegate {
 
     func audioPlayerDecodeErrorDidOccur(_ player: AVAudioPlayer, error: Error?) {
         DispatchQueue.main.async {
+            print("❌ Server TTS audio decode error: \(error?.localizedDescription ?? "Unknown error")")
             self.isSpeaking = false
-            objc_setAssociatedObject(self, "currentAudioPlayer", nil, .OBJC_ASSOCIATION_RETAIN_NONATOMIC)
-            print("Server TTS audio decode error: \(error?.localizedDescription ?? "Unknown error")")
+            self.currentAudioPlayer = nil
 
             // Resume wake word listening if in hands-free mode
             if self.isHandsFreeMode && !self.isWakeWordListening && !self.isListening {
+                print("🎤 Resuming wake word listening after audio error")
                 self.startWakeWordListening()
             }
         }
