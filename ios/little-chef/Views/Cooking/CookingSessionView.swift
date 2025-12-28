@@ -714,6 +714,12 @@ struct InputAreaView: View {
                     .onSubmit {
                         sendTextQuery()
                     }
+                    .onChange(of: isInputFocused) { focused in
+                        if focused {
+                            // Stop any playing audio when text field is focused
+                            voiceAssistant.stopSpeaking()
+                        }
+                    }
 
                 // Send button
                 Button(action: {
