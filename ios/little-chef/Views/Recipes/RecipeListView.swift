@@ -49,12 +49,12 @@ struct RecipeListView: View {
 
                 // Main content area with pull-to-refresh
                 ScrollView {
-                    if recipeManager.isLoading && recipeManager.recipes.isEmpty && !isRefreshing {
+                    if recipeManager.isSyncingWithCloud || (recipeManager.isLoading && recipeManager.recipes.isEmpty && !isRefreshing) {
                         // Loading state
                         VStack {
                             ProgressView()
                                 .scaleEffect(1.5)
-                            Text("Loading your recipes...")
+                            Text("Syncing with iCloud...")
                                 .foregroundColor(.secondary)
                                 .padding(.top)
                         }
@@ -156,17 +156,8 @@ struct RecipeListView: View {
             }
         }
         .task {
-            // Initial load when view is first created
-            await recipeManager.loadRecipes()
-        }
-        .onAppear {
-            // Refresh when view appears (e.g., switching tabs)
-            // Only refresh if not already loading to avoid duplicate calls
-            if !recipeManager.isLoading {
-                Task {
-                    await recipeManager.loadRecipes()
-                }
-            }
+            // Sync with iCloud only if no local recipes exist
+            await recipeManager.syncIfNeeded()
         }
     }
 }

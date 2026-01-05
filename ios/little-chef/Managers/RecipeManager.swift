@@ -14,19 +14,17 @@ import CoreData
 class RecipeManager: ObservableObject {
     @Published var recipes: [Recipe] = []
     @Published var isLoading = false
+    @Published var isSyncingWithCloud = false
     @Published var errorMessage: String?
 
     private let apiService = APIService.shared
     private let context: NSManagedObjectContext
+    private var hasPerformedInitialSync = false
 
     init(context: NSManagedObjectContext = PersistenceController.shared.container.viewContext) {
         self.context = context
         setupCloudKitNotifications()
-
-        // Trigger initial CloudKit import on app launch
-        Task {
-            await self.triggerCloudKitSync()
-        }
+        // Initial load handled by view's .task to ensure proper loading state
     }
 
     // MARK: - CloudKit Notifications
@@ -46,6 +44,36 @@ class RecipeManager: ObservableObject {
     }
 
     // MARK: - CloudKit Sync
+
+    /// Syncs with CloudKit only if local storage is empty (first time use)
+    func syncIfNeeded() async {
+        guard !hasPerformedInitialSync else { return }
+        hasPerformedInitialSync = true
+
+        // First, load local recipes
+        await loadRecipes()
+
+        // Only sync with iCloud if we have no local recipes
+        if recipes.isEmpty {
+            print("📱 No local recipes found, syncing with iCloud...")
+            print("🔄 Setting isSyncingWithCloud = true for CloudKit sync")
+            isSyncingWithCloud = true
+
+            await triggerCloudKitSync()
+
+            // Wait a moment for CloudKit to process
+            print("⏳ Waiting for CloudKit to sync...")
+            try? await Task.sleep(nanoseconds: 2_000_000_000) // 2 seconds
+
+            print("🔄 Loading recipes after CloudKit sync...")
+            await loadRecipes()
+
+            isSyncingWithCloud = false
+            print("✅ Finished CloudKit sync, isSyncingWithCloud = \(isSyncingWithCloud)")
+        } else {
+            print("📱 Local recipes found (\(recipes.count)), skipping initial sync")
+        }
+    }
 
     func triggerCloudKitSync() async {
         print("🔄 Triggering CloudKit sync...")
