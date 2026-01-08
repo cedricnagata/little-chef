@@ -87,10 +87,6 @@ class APIService {
             let decodedResponse = try jsonDecoder.decode(T.self, from: data)
             return decodedResponse
         } catch {
-            print("Decoding error: \(error)")
-            if let dataString = String(data: data, encoding: .utf8) {
-                print("Response data: \(dataString)")
-            }
             throw APIError.decodingError(error)
         }
     }

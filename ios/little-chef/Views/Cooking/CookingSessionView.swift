@@ -30,6 +30,28 @@ struct CookingSessionView: View {
             .sheet(isPresented: $showingRecipeSelector) {
                 RecipeSelectorView()
             }
+            .sheet(isPresented: $cookingSessionManager.showModificationReview) {
+                if let originalRecipe = cookingSessionManager.originalRecipe,
+                   let currentRecipe = cookingSessionManager.currentSession?.recipe,
+                   let originalRecipeId = cookingSessionManager.originalRecipeId {
+                    // TODO: Update cooking session modification flow to use new Cursor-style approach
+                    let reviewState = ModificationReviewState(
+                        original: originalRecipe,
+                        target: currentRecipe
+                    )
+                    InlineModificationReview(
+                        reviewState: reviewState,
+                        onComplete: { finalRecipe in
+                            // TODO: Implement proper cooking session recipe update
+                            print("⚠️ Cooking session modifications not yet implemented with Cursor-style approach")
+                            cookingSessionManager.showModificationReview = false
+                        },
+                        onCancel: {
+                            cookingSessionManager.showModificationReview = false
+                        }
+                    )
+                }
+            }
             .task {
                 await recipeManager.loadRecipes()
             }
@@ -100,8 +122,10 @@ struct StartCookingView: View {
 struct ActiveCookingView: View {
     @EnvironmentObject var cookingSessionManager: CookingSessionManager
     @EnvironmentObject var voiceAssistant: VoiceAssistant
+    @EnvironmentObject var recipeManager: RecipeManager
     @State private var textInput = ""
     @State private var showingEndSessionAlert = false
+    @State private var showingSaveRecipeDialog = false
     @State private var selectedTab: CookingTab = .recipe
     @FocusState private var isInputFocused: Bool
 
@@ -155,13 +179,37 @@ struct ActiveCookingView: View {
         .alert("End Cooking Session", isPresented: $showingEndSessionAlert) {
             Button("Cancel", role: .cancel) { }
             Button("End", role: .destructive) {
-                // Reset voice assistant state
-                voiceAssistant.stopHandsFreeMode()
-                // Reset session state
-                cookingSessionManager.endCookingSession()
+                // Check if recipe was modified
+                if cookingSessionManager.recipeWasModified {
+                    showingSaveRecipeDialog = true
+                } else {
+                    endSessionWithoutSaving()
+                }
             }
         } message: {
-            Text("Are you sure you want to end this cooking session?")
+            if cookingSessionManager.recipeWasModified {
+                Text("Your recipe was modified. Would you like to save the changes?")
+            } else {
+                Text("Are you sure you want to end this cooking session?")
+            }
+        }
+        .confirmationDialog("Save Modified Recipe", isPresented: $showingSaveRecipeDialog) {
+            Button("Save as New Recipe") {
+                saveModifiedRecipe(asNew: true)
+            }
+            Button("Overwrite Original") {
+                saveModifiedRecipe(asNew: false)
+            }
+            Button("Discard Changes", role: .destructive) {
+                endSessionWithoutSaving()
+            }
+            Button("Cancel", role: .cancel) { }
+        } message: {
+            if let summary = cookingSessionManager.modificationSummary {
+                Text("Changes: \(summary)")
+            } else {
+                Text("Save your recipe modifications?")
+            }
         }
         .onAppear {
             // Update voice assistant settings when view appears
@@ -180,6 +228,40 @@ struct ActiveCookingView: View {
             // Update voice assistant settings when voice preferences change
             updateVoiceAssistantSettings()
         }
+    }
+
+    private func saveModifiedRecipe(asNew: Bool) {
+        guard let session = cookingSessionManager.currentSession else {
+            endSessionWithoutSaving()
+            return
+        }
+
+        Task {
+            let recipeToSave = session.recipe  // RecipeBase
+
+            if asNew {
+                // Save as new recipe
+                _ = await recipeManager.createRecipe(recipeToSave)
+            } else {
+                // Overwrite original recipe
+                if let originalId = cookingSessionManager.originalRecipeId {
+                    _ = await recipeManager.updateRecipe(id: originalId, with: recipeToSave)
+                } else {
+                    // Fallback to save as new if no original ID
+                    _ = await recipeManager.createRecipe(recipeToSave)
+                }
+            }
+
+            // End session after saving
+            endSessionWithoutSaving()
+        }
+    }
+
+    private func endSessionWithoutSaving() {
+        // Reset voice assistant state
+        voiceAssistant.stopHandsFreeMode()
+        // Reset session state
+        cookingSessionManager.endCookingSession()
     }
 
     private func updateVoiceAssistantSettings() {

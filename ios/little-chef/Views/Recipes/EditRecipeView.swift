@@ -12,6 +12,9 @@ struct EditRecipeView: View {
     @Environment(\.editMode) private var editMode
     @FocusState private var isInputFocused: Bool
 
+    @EnvironmentObject var voiceAssistant: VoiceAssistant
+    @EnvironmentObject var preferencesManager: PreferencesManager
+
     let originalRecipe: RecipeData
     let onSave: (RecipeCreate) -> Void
 
@@ -29,6 +32,13 @@ struct EditRecipeView: View {
 
     @State private var newIngredient = ""
     @State private var newInstruction = ""
+
+    // AI Edit state
+    @State private var showAIEditor = false
+    @State private var isProcessingAIEdit = false
+    @State private var aiEditError: String?
+    @State private var pendingEditResponse: RecipeEditResponse?
+    @State private var showModificationReview = false
     
     init(recipe: RecipeData, onSave: @escaping (RecipeCreate) -> Void) {
         self.originalRecipe = recipe
@@ -190,19 +200,30 @@ struct EditRecipeView: View {
                 }
             }
             .scrollDismissesKeyboard(.interactively)
-            .navigationTitle("Edit Recipe")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .navigationBarLeading) {
-                    Button("Cancel") {
+                    Button(action: {
                         dismiss()
+                    }) {
+                        HStack(spacing: 4) {
+                            Image(systemName: "chevron.left")
+                                .font(.body.weight(.semibold))
+                            Text("Cancel")
+                        }
                     }
                 }
                 
                 ToolbarItem(placement: .navigationBarTrailing) {
                     HStack(spacing: 12) {
+                        Button(action: {
+                            showAIEditor = true
+                        }) {
+                            Image(systemName: "wand.and.stars")
+                        }
+
                         EditButton()
-                        
+
                         Button("Save") {
                             saveRecipe()
                         }
@@ -212,6 +233,65 @@ struct EditRecipeView: View {
             }
         }
         .navigationViewStyle(.stack)
+        .sheet(isPresented: $showAIEditor) {
+            AIEditSheet(
+                currentRecipe: currentRecipeBase,
+                onSubmit: { instructions in
+                    processAIEdit(instructions: instructions)
+                }
+            )
+            .environmentObject(voiceAssistant)
+        }
+        .fullScreenCover(isPresented: $showModificationReview) {
+            if let response = pendingEditResponse {
+                let reviewState = ModificationReviewState(
+                    original: currentRecipeBase,
+                    target: response.modifiedRecipe
+                )
+                InlineModificationReview(
+                    reviewState: reviewState,
+                    onComplete: { finalRecipe in
+                        applyFinalRecipe(finalRecipe)
+                        showModificationReview = false
+                        pendingEditResponse = nil
+                    },
+                    onCancel: {
+                        showModificationReview = false
+                        pendingEditResponse = nil
+                    }
+                )
+            }
+        }
+        .alert("AI Edit Error", isPresented: Binding<Bool>(
+            get: { aiEditError != nil },
+            set: { if !$0 { aiEditError = nil } }
+        )) {
+            Button("OK") {
+                aiEditError = nil
+            }
+        } message: {
+            if let error = aiEditError {
+                Text(error)
+            }
+        }
+        .overlay {
+            if isProcessingAIEdit {
+                ZStack {
+                    Color.black.opacity(0.4)
+                        .ignoresSafeArea()
+                    VStack(spacing: 16) {
+                        ProgressView()
+                            .scaleEffect(1.5)
+                        Text("Generating AI suggestions...")
+                            .font(.headline)
+                            .foregroundColor(.white)
+                    }
+                    .padding(32)
+                    .background(Color(.systemBackground))
+                    .cornerRadius(16)
+                }
+            }
+        }
     }
     
     private var isValid: Bool {
@@ -219,6 +299,22 @@ struct EditRecipeView: View {
         !ingredients.isEmpty &&
         !instructions.isEmpty &&
         servings > 0
+    }
+
+    private var currentRecipeBase: RecipeBase {
+        RecipeBase(
+            title: title,
+            description: description.isEmpty ? nil : description,
+            servings: servings,
+            prepTime: Int(prepTime),
+            cookTime: Int(cookTime),
+            ingredients: ingredients,
+            instructions: instructions,
+            tags: tags.split(separator: ",").map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }.filter { !$0.isEmpty },
+            sourceUrl: sourceUrl.isEmpty ? nil : sourceUrl,
+            cuisineType: cuisineType.isEmpty ? nil : cuisineType,
+            difficulty: difficulty.isEmpty ? nil : difficulty
+        )
     }
     
     private func addIngredient() {
@@ -252,7 +348,65 @@ struct EditRecipeView: View {
     private func moveInstructions(from source: IndexSet, to destination: Int) {
         instructions.move(fromOffsets: source, toOffset: destination)
     }
-    
+
+    // MARK: - AI Edit Methods
+
+    private func processAIEdit(instructions editInstructions: String) {
+        isProcessingAIEdit = true
+        aiEditError = nil
+
+        Task {
+            do {
+                let userPreferences = UserPreferencesDetailed(from: preferencesManager.preferences)
+
+                let response = try await RecipeEditorService.shared.editRecipe(
+                    recipe: currentRecipeBase,
+                    instructions: editInstructions,
+                    preferences: userPreferences
+                )
+
+                await MainActor.run {
+                    isProcessingAIEdit = false
+
+                    if response.modifications.isEmpty {
+                        aiEditError = "No modifications were suggested. Please try rephrasing your request."
+                        return
+                    }
+
+                    // Store response and show review
+                    pendingEditResponse = response
+                    showModificationReview = true
+                }
+            } catch let error as RecipeEditorError {
+                await MainActor.run {
+                    isProcessingAIEdit = false
+                    aiEditError = error.localizedDescription
+                }
+            } catch {
+                await MainActor.run {
+                    isProcessingAIEdit = false
+                    aiEditError = "Failed to process AI edit: \(error.localizedDescription)"
+                }
+            }
+        }
+    }
+
+    // MARK: - Apply Final Recipe (Cursor-Style)
+
+    /// Apply the final recipe from Cursor-style incremental diff review
+    private func applyFinalRecipe(_ recipe: RecipeBase) {
+        title = recipe.title
+        description = recipe.description ?? ""
+        servings = recipe.servings
+        prepTime = recipe.prepTime != nil ? "\(recipe.prepTime!)" : ""
+        cookTime = recipe.cookTime != nil ? "\(recipe.cookTime!)" : ""
+        ingredients = recipe.ingredients
+        instructions = recipe.instructions
+        tags = recipe.tags.joined(separator: ", ")
+        cuisineType = recipe.cuisineType ?? ""
+        difficulty = recipe.difficulty ?? ""
+    }
+
     private func saveRecipe() {
         let cleanedIngredients = ingredients.filter { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
         let cleanedInstructions = instructions.filter { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }

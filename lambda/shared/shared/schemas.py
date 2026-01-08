@@ -88,12 +88,58 @@ class RecipeParseResponse(BaseModel):
     warnings: List[str] = Field(default_factory=list)
 
 
+# ===== Recipe Modification Schemas =====
+
+class RecipeModification(BaseModel):
+    """Granular recipe modification tracking"""
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    modification_type: Literal[
+        "ingredient_substitute",
+        "ingredient_quantity",
+        "ingredient_add",
+        "ingredient_remove",
+        "instruction_modify",
+        "instruction_add",
+        "instruction_remove",
+        "servings_change",
+        "timing_change"
+    ]
+    field: str = Field(..., description="Field being modified (ingredients, instructions, servings, etc.)")
+    target_index: Optional[int] = Field(None, description="Index in array for ingredients/instructions")
+    old_value: Optional[str] = Field(None, description="Original value before modification")
+    new_value: Optional[str] = Field(None, description="New value after modification")
+    rationale: str = Field(..., description="Explanation for why this change is suggested")
+    confidence: float = Field(default=1.0, ge=0.0, le=1.0, description="Confidence score for this modification")
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+    @field_serializer('created_at')
+    def serialize_created_at(self, dt: datetime, _info):
+        """Serialize datetime to ISO8601 format with timezone (without microseconds)"""
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return dt.replace(microsecond=0).isoformat()
+
+
+class RecipeEditRequest(BaseModel):
+    """Schema for recipe editing request"""
+    recipe: RecipeBase
+    edit_instructions: str = Field(..., min_length=1, max_length=1000, description="User's instructions for recipe modifications")
+    user_preferences: UserPreferencesDetailed
+
+
+class RecipeEditResponse(BaseModel):
+    """Schema for recipe editing response"""
+    modified_recipe: RecipeBase = Field(..., description="Recipe with all modifications applied")
+    overall_confidence: float = Field(..., ge=0.0, le=1.0, description="Overall confidence in modifications")
+    warnings: List[str] = Field(default_factory=list, description="Warnings about modifications")
+
+
 # ===== Cooking Session Schemas =====
 
 class Command(BaseModel):
     """Universal command structure that AI can issue for various actions"""
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
-    command_type: Literal["timer"]  # Extensible to add more types later
+    command_type: Literal["timer", "recipe_modification"]  # Extended to support recipe modifications
     action: str  # The specific action to take
     target_id: Optional[str] = None  # ID of the target entity (e.g., timer_id)
     label: str

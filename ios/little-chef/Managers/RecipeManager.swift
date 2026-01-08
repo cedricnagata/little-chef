@@ -36,7 +36,6 @@ class RecipeManager: ObservableObject {
             object: nil,
             queue: .main
         ) { [weak self] _ in
-            print("📥 CloudKit remote change notification received")
             Task { @MainActor in
                 await self?.loadRecipes()
             }
@@ -55,59 +54,40 @@ class RecipeManager: ObservableObject {
 
         // Only sync with iCloud if we have no local recipes
         if recipes.isEmpty {
-            print("📱 No local recipes found, syncing with iCloud...")
-            print("🔄 Setting isSyncingWithCloud = true for CloudKit sync")
             isSyncingWithCloud = true
 
             await triggerCloudKitSync()
 
             // Wait a moment for CloudKit to process
-            print("⏳ Waiting for CloudKit to sync...")
             try? await Task.sleep(nanoseconds: 2_000_000_000) // 2 seconds
 
-            print("🔄 Loading recipes after CloudKit sync...")
             await loadRecipes()
 
             isSyncingWithCloud = false
-            print("✅ Finished CloudKit sync, isSyncingWithCloud = \(isSyncingWithCloud)")
-        } else {
-            print("📱 Local recipes found (\(recipes.count)), skipping initial sync")
         }
     }
 
     func triggerCloudKitSync() async {
-        print("🔄 Triggering CloudKit sync...")
-
-        guard let container = context.persistentStoreCoordinator?.persistentStores.first else {
-            print("❌ No persistent store found")
+        guard let _ = context.persistentStoreCoordinator?.persistentStores.first else {
             return
         }
 
         // Check if CloudKit is configured
         guard let cloudKitContainer = PersistenceController.shared.container as? NSPersistentCloudKitContainer else {
-            print("❌ Not using CloudKit container")
             return
         }
 
         do {
             // Try to initialize CloudKit schema if needed
             try await cloudKitContainer.initializeCloudKitSchema()
-            print("✅ CloudKit schema initialized")
         } catch {
-            print("⚠️ CloudKit schema initialization: \(error.localizedDescription)")
+            // Schema initialization failed, but sync may still work
         }
 
         // Force a save to trigger sync
         if context.hasChanges {
-            do {
-                try context.save()
-                print("✅ Context saved to trigger sync")
-            } catch {
-                print("❌ Failed to save context: \(error)")
-            }
+            try? context.save()
         }
-
-        print("✅ CloudKit sync triggered - data will sync in background")
     }
 
     deinit {

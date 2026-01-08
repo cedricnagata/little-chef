@@ -134,12 +134,25 @@ struct Command: Codable, Identifiable {
     let label: String
     let parameters: [String: AnyCodable]
     let createdAt: Date
-    
+
     enum CodingKeys: String, CodingKey {
         case id, action, label, parameters
         case commandType = "command_type"
         case targetId = "target_id"
         case createdAt = "created_at"
+    }
+
+    // Helper to check command type
+    var isTimerCommand: Bool {
+        commandType == "timer"
+    }
+
+    var isRecipeModification: Bool {
+        commandType == "recipe_modification"
+    }
+
+    var isRecipeModified: Bool {
+        commandType == "recipe_modified"
     }
 }
 

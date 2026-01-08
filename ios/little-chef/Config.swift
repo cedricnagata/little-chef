@@ -49,7 +49,28 @@ struct Config {
             return url
         #endif
     }
-    
+
+    /// Returns the Recipe Editor URL for AI-powered recipe editing based on the current environment
+    static var recipeEditorURL: String? {
+        #if DEBUG
+            // In debug mode, try to load from Config.plist first
+            if let url = loadConfigValue(key: "LOCAL_RECIPE_EDITOR_URL") {
+                print("Using local Recipe Editor URL from Config.plist: \(url)")
+                return url
+            }
+            print("⚠️ Recipe Editor URL not configured (will fail if AI Edit is used)")
+            return nil
+        #else
+            // In release mode, MUST have PRODUCTION_RECIPE_EDITOR_URL in Config.plist
+            guard let url = loadConfigValue(key: "PRODUCTION_RECIPE_EDITOR_URL") else {
+                print("⚠️ PRODUCTION_RECIPE_EDITOR_URL not found in Config.plist")
+                return nil
+            }
+            print("📱 Using production Recipe Editor URL from Config.plist: \(url)")
+            return url
+        #endif
+    }
+
     // MARK: - Private Methods
     
     /// Loads a value from Config.plist for the given key
@@ -89,6 +110,7 @@ extension Config {
         print("   Environment: \(environment)")
         print("   HTTP API URL: \(baseURL)")
         print("   WebSocket URL: \(webSocketURL)")
+        print("   Recipe Editor URL: \(recipeEditorURL ?? "Not configured")")
         print("   Debug Mode: \(isDebug)")
     }
 }

@@ -18,6 +18,7 @@ import sys
 sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
 
 from shared.schemas import Command
+from recipe_tools import create_recipe_tools
 
 # Set up logger
 logger = logging.getLogger(__name__)
@@ -48,7 +49,7 @@ class RemoveTimerInput(BaseModel):
 # ===== Tool Creation =====
 
 def create_cooking_tools() -> List[BaseTool]:
-    """Create and return all cooking-related tools for the agent"""
+    """Create and return all cooking-related tools for the agent (timers + recipe modifications)"""
 
     @tool("add_timer", args_schema=AddTimerInput)
     def add_timer(label: str, duration_minutes: int) -> str:
@@ -76,7 +77,11 @@ def create_cooking_tools() -> List[BaseTool]:
         logger.info(f"Timer remove: {timer_id}")
         return f"timer_removed:{timer_id}"
 
-    return [add_timer, start_timer, stop_timer, remove_timer]
+    # Combine timer tools with recipe modification tools
+    timer_tools = [add_timer, start_timer, stop_timer, remove_timer]
+    recipe_tools = create_recipe_tools()
+
+    return timer_tools + recipe_tools
 
 
 # ===== Tool Result Processing =====
@@ -91,6 +96,8 @@ def process_tool_result(cooking_session, tool_call: Dict, tool_result: str) -> N
     """
     tool_name = tool_call["name"]
 
+    # ===== Timer Tools =====
+
     if tool_name == "add_timer" and tool_result.startswith("timer_added:"):
         # Parse: "timer_added:timer_id:label:duration_seconds"
         parts = tool_result.split(":", 3)
@@ -99,7 +106,6 @@ def process_tool_result(cooking_session, tool_call: Dict, tool_result: str) -> N
             label = parts[2]
             duration_seconds = int(parts[3])
 
-            # Create universal command for timer add
             command = Command(
                 command_type="timer",
                 action="add",
@@ -138,3 +144,55 @@ def process_tool_result(cooking_session, tool_call: Dict, tool_result: str) -> N
             label="Remove timer"
         )
         cooking_session.commands.append(command)
+
+    # ===== Recipe Editing Tool =====
+
+    elif tool_name == "edit_recipe" and tool_result.startswith("recipe_modified:"):
+        # Parse: "recipe_modified:summary"
+        modification_summary = tool_result.split(":", 1)[1]
+
+        # Extract the tool call arguments which contain the actual recipe changes
+        tool_args = tool_call.get("args", {})
+
+        # Update recipe fields that were provided
+        if tool_args.get("title"):
+            cooking_session.recipe.title = tool_args["title"]
+
+        if tool_args.get("description") is not None:
+            cooking_session.recipe.description = tool_args["description"]
+
+        if tool_args.get("servings"):
+            cooking_session.recipe.servings = tool_args["servings"]
+
+        if tool_args.get("prep_time") is not None:
+            cooking_session.recipe.prep_time = tool_args["prep_time"]
+
+        if tool_args.get("cook_time") is not None:
+            cooking_session.recipe.cook_time = tool_args["cook_time"]
+
+        if tool_args.get("ingredients"):
+            cooking_session.recipe.ingredients = tool_args["ingredients"]
+
+        if tool_args.get("instructions"):
+            cooking_session.recipe.instructions = tool_args["instructions"]
+
+        if tool_args.get("tags"):
+            cooking_session.recipe.tags = tool_args["tags"]
+
+        if tool_args.get("cuisine_type") is not None:
+            cooking_session.recipe.cuisine_type = tool_args["cuisine_type"]
+
+        if tool_args.get("difficulty") is not None:
+            cooking_session.recipe.difficulty = tool_args["difficulty"]
+
+        # Create a command to notify iOS that recipe was modified
+        command = Command(
+            command_type="recipe_modified",
+            action="edit",
+            target_id="recipe",
+            label=modification_summary,
+            parameters={"summary": modification_summary}
+        )
+        cooking_session.commands.append(command)
+
+        logger.info(f"Recipe modified: {modification_summary}")

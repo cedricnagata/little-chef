@@ -11,6 +11,8 @@ import PhotosUI
 struct AddRecipeView: View {
     @Environment(\.dismiss) private var dismiss
     @EnvironmentObject var recipeManager: RecipeManager
+    @EnvironmentObject var voiceAssistant: VoiceAssistant
+    @EnvironmentObject var preferencesManager: PreferencesManager
     @FocusState private var isInputFocused: Bool
 
     @State private var selectedInputType: RecipeInputType = .url
@@ -150,6 +152,8 @@ struct AddRecipeView: View {
                             }
                         }
                     }
+                    .environmentObject(voiceAssistant)
+                    .environmentObject(preferencesManager)
                 }
             }
             .alert("Error", isPresented: $showingErrorAlert) {

@@ -17,6 +17,14 @@ class CookingSessionManager: ObservableObject {
     @Published var streamingResponse: String = ""  // Real-time accumulation
     @Published var lastAudioData: Data? = nil
 
+    // Recipe modification tracking
+    @Published var pendingModifications: [RecipeModification] = []
+    @Published var originalRecipe: RecipeBase? = nil
+    @Published var originalRecipeId: UUID? = nil  // Track for saving
+    @Published var showModificationReview = false
+    @Published var recipeWasModified = false  // Track if recipe was edited during session
+    @Published var modificationSummary: String? = nil  // Summary of what changed
+
     // Expose timers from TimerManager
     var localTimers: [LocalTimer] {
         timerManager.localTimers
@@ -117,6 +125,13 @@ class CookingSessionManager: ObservableObject {
     func startCookingSession(with recipe: Recipe) {
         let recipeBase = RecipeBase(from: recipe)
 
+        // Store original recipe and ID for modification tracking
+        self.originalRecipe = recipeBase
+        self.originalRecipeId = recipe.id
+        self.pendingModifications = []
+        self.recipeWasModified = false
+        self.modificationSummary = nil
+
         // Load preferences from local PreferencesManager
         let userPreferences = UserPreferencesDetailed(from: preferencesManager.preferences)
 
@@ -127,6 +142,7 @@ class CookingSessionManager: ObservableObject {
         webSocketService.connect()
 
         print("🔵 Started new cooking session with model: \(userPreferences.llmModel)")
+        print("📝 Stored original recipe for modification tracking")
 
         // Send warmup query after a brief delay to ensure WebSocket is connected
         // This query won't be added to conversation history
@@ -142,6 +158,18 @@ class CookingSessionManager: ObservableObject {
     }
 
     func endCookingSession() {
+        // Check if there are pending modifications
+        if !pendingModifications.isEmpty {
+            print("📝 Found \(pendingModifications.count) pending modifications - showing review screen")
+            showModificationReview = true
+            return  // Don't clear state yet - wait for user review
+        }
+
+        // No modifications, proceed with normal cleanup
+        finalizeSessionEnd()
+    }
+
+    private func finalizeSessionEnd() {
         // Disconnect WebSocket
         webSocketService.disconnect()
 
@@ -152,6 +180,11 @@ class CookingSessionManager: ObservableObject {
         lastAudioData = nil
         self.errorMessage = nil
         audioChunks.removeAll()
+
+        // Clear modification tracking
+        pendingModifications = []
+        originalRecipe = nil
+        originalRecipeId = nil
 
         // Clear all timers
         clearAllTimers()
@@ -252,14 +285,123 @@ class CookingSessionManager: ObservableObject {
         return currentSession?.recipe.servings ?? 0
     }
 
-    // MARK: - Timer Management
+    // MARK: - Command Processing
 
     func processCommands(from session: CookingSession) {
-        // Delegate timer command processing to TimerManager
-        timerManager.processTimerCommands(session.commands)
+        // Process timer commands
+        let timerCommands = session.commands.filter { $0.isTimerCommand }
+        timerManager.processTimerCommands(timerCommands)
 
-        // Future: Add handling for other command types here
+        // Check if recipe was modified
+        let recipeModifiedCommands = session.commands.filter { $0.isRecipeModified }
+        if !recipeModifiedCommands.isEmpty {
+            recipeWasModified = true
+            // Get the latest modification summary
+            if let latestModification = recipeModifiedCommands.last {
+                modificationSummary = latestModification.parameters["summary"]?.value as? String ?? latestModification.label
+            }
+        }
+
+        // Process recipe modification commands (legacy granular modifications)
+        let modificationCommands = session.commands.filter { $0.isRecipeModification }
+        processRecipeModifications(modificationCommands)
     }
+
+    private func processRecipeModifications(_ commands: [Command]) {
+        guard let original = originalRecipe else { return }
+
+        for command in commands {
+            // Convert command parameters to RecipeModification
+            if let modification = createModificationFromCommand(command) {
+                // Add to pending modifications if not already present
+                if !pendingModifications.contains(where: { $0.id == modification.id }) {
+                    pendingModifications.append(modification)
+                    print("📝 Added recipe modification: \(modification.displayTitle)")
+                }
+
+                // Apply modification to current session recipe immediately
+                if let session = currentSession {
+                    let modifiedRecipe = applyModificationToRecipe(modification, recipe: session.recipe)
+                    currentSession = CookingSession(
+                        recipe: modifiedRecipe,
+                        commands: session.commands,
+                        timerStatus: session.timerStatus,
+                        conversationHistory: session.conversationHistory,
+                        userPreferences: session.userPreferences,
+                        startedAt: session.startedAt
+                    )
+                }
+            }
+        }
+    }
+
+    private func createModificationFromCommand(_ command: Command) -> RecipeModification? {
+        guard command.isRecipeModification else { return nil }
+
+        // Extract modification data from command parameters
+        guard let modificationTypeStr = command.parameters["modification_type"]?.value as? String,
+              let modificationType = ModificationType(rawValue: modificationTypeStr),
+              let field = command.parameters["field"]?.value as? String,
+              let rationale = command.parameters["rationale"]?.value as? String else {
+            print("⚠️ Invalid modification command parameters")
+            return nil
+        }
+
+        let targetIndex = command.parameters["target_index"]?.value as? Int
+        let oldValue = command.parameters["old_value"]?.value as? String
+        let newValue = command.parameters["new_value"]?.value as? String
+
+        return RecipeModification(
+            id: command.targetId ?? command.id,
+            modificationType: modificationType,
+            field: field,
+            targetIndex: targetIndex,
+            oldValue: oldValue,
+            newValue: newValue,
+            rationale: rationale,
+            confidence: 1.0,  // From cooking assistant, assume high confidence
+            createdAt: Date()
+        )
+    }
+
+    // TODO: This method is disabled pending cooking session modifications refactor
+    // The cooking session modification flow needs to be updated to use the new Cursor-style
+    // incremental diff approach. For now, recipe modifications during cooking are not supported.
+    private func applyModificationToRecipe(_ modification: RecipeModification, recipe: RecipeBase) -> RecipeBase {
+        // Temporarily disabled - return original recipe unchanged
+        print("⚠️ applyModificationToRecipe is disabled - needs refactor for Cursor-style approach")
+        return recipe
+    }
+
+    // MARK: - Modification Review
+
+    // TODO: This method is disabled pending cooking session modifications refactor
+    func dismissModificationReview(saveModifications: Bool, selectedIds: Set<String>) {
+        // Temporarily disabled
+        print("⚠️ dismissModificationReview is disabled - needs refactor for Cursor-style approach")
+
+        if saveModifications && !selectedIds.isEmpty, let recipeId = originalRecipeId, let original = originalRecipe {
+            // Build recipe with only selected modifications
+            let selectedMods = pendingModifications.filter { selectedIds.contains($0.id) }
+            // Old code removed - needs refactor
+            let finalRecipe = original // Use original for now
+
+            // Post notification to save modified recipe
+            NotificationCenter.default.post(
+                name: .saveModifiedRecipe,
+                object: nil,
+                userInfo: ["recipeId": recipeId, "recipe": finalRecipe]
+            )
+
+            print("💾 Saved \(selectedIds.count) modifications to recipe")
+        }
+
+        // Clean up and finalize session end
+        showModificationReview = false
+        finalizeSessionEnd()
+    }
+
+    // MARK: - Timer Management
 
     // MARK: - Manual Timer Management (for UI)
 
@@ -324,4 +466,10 @@ class CookingSessionManager: ObservableObject {
             )
         }
     }
+}
+
+// MARK: - Notification Names
+
+extension Notification.Name {
+    static let saveModifiedRecipe = Notification.Name("saveModifiedRecipe")
 }

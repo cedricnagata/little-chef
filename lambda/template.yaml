@@ -6,7 +6,7 @@ Globals:
   Function:
     Timeout: 300
     MemorySize: 512
-    Runtime: python3.12
+    Runtime: python3.13
     # Environment variables removed to preserve manually-set API keys during deployment
     Architectures:
       - x86_64
@@ -158,6 +158,32 @@ Resources:
             - "*"
           MaxAge: 600
 
+  RecipeEditorFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub 'littlechef-recipe-editor-${Environment}'
+      CodeUri: recipe_editor/
+      Handler: handler.lambda_handler
+      Description: AI-powered recipe editing with granular change tracking
+      Timeout: 180
+      MemorySize: 1024
+      # Environment variables (OPENAI_API_KEY) are preserved from existing function config
+      # They will not be overwritten during deployment
+      Layers:
+        - !Ref SharedLayer
+      FunctionUrlConfig:
+        AuthType: NONE
+        Cors:
+          AllowOrigins:
+            - "*"
+          AllowHeaders:
+            - Content-Type
+            - X-Api-Key
+            - Authorization
+          AllowMethods:
+            - "*"
+          MaxAge: 600
+
   # ===== Lambda Layer for Shared Code =====
 
   SharedLayer:
@@ -167,9 +193,9 @@ Resources:
       Description: Shared schemas and utilities
       ContentUri: shared/
       CompatibleRuntimes:
-        - python3.12
+        - python3.13
     Metadata:
-      BuildMethod: python3.12
+      BuildMethod: python3.13
 
 Outputs:
   WebSocketUrl:
@@ -185,3 +211,19 @@ Outputs:
   RecipeParserFunctionArn:
     Description: Recipe Parser Lambda Function ARN
     Value: !GetAtt RecipeParserFunction.Arn
+
+  RecipeParserUrl:
+    Description: Recipe Parser Lambda Function URL
+    Value: !GetAtt RecipeParserFunctionUrl.FunctionUrl
+    Export:
+      Name: !Sub '${AWS::StackName}-RecipeParserUrl'
+
+  RecipeEditorFunctionArn:
+    Description: Recipe Editor Lambda Function ARN
+    Value: !GetAtt RecipeEditorFunction.Arn
+
+  RecipeEditorUrl:
+    Description: Recipe Editor Lambda Function URL
+    Value: !GetAtt RecipeEditorFunctionUrl.FunctionUrl
+    Export:
+      Name: !Sub '${AWS::StackName}-RecipeEditorUrl'
