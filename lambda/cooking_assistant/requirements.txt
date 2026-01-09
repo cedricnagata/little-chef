@@ -12,3 +12,5 @@ openai
 # AWS SDK (includes Polly TTS, API Gateway Management)
 boto3
 
+# Exclude problematic transitive dependency (no wheel for this version)
+uuid-utils!=0.13.0

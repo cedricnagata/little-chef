@@ -12,3 +12,6 @@ requests
 
 # AWS Lambda runtime helpers
 boto3
+
+# Exclude problematic transitive dependency (no wheel for this version)
+uuid-utils!=0.13.0
