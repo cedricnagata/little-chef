@@ -324,10 +324,10 @@ class VoiceAssistant: NSObject, ObservableObject {
                 try audioSession.setCategory(
                     .playAndRecord,
                     mode: .default,  // Use .default for better playback quality
-                    options: [.allowBluetooth, .allowBluetoothA2DP, .mixWithOthers, .duckOthers]
+                    options: [.defaultToSpeaker, .allowBluetooth, .allowBluetoothA2DP, .mixWithOthers, .duckOthers]
                 )
                 try audioSession.setActive(true, options: [])
-                print("🔊 Configured audio session for playback (.default mode)")
+                print("🔊 Configured audio session for playback (.default mode, speaker enabled)")
             }
 
             let audioPlayer = try AVAudioPlayer(data: data)
