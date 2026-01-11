@@ -14,7 +14,7 @@ class APIService {
     private init() {}
 
     // MARK: - Configuration
-    private let baseURL = Config.baseURL
+    private let baseURL = Config.recipeParserURL
     private let session = URLSession.shared
 
     private var jsonDecoder: JSONDecoder {

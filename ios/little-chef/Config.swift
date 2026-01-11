@@ -10,63 +10,53 @@ import Foundation
 struct Config {
     // MARK: - API Configuration
 
-    /// Returns the base URL for the HTTP API (recipe parser) based on the current environment
-    static var baseURL: String {
+    /// Returns the Recipe Parser URL for parsing recipes from URLs, text, or images
+    static var recipeParserURL: String {
         #if DEBUG
             // In debug mode, try to load from Config.plist first, fall back to localhost
-            if let url = loadConfigValue(key: "LOCAL_API_URL") {
-                print("Using local Parser Function URL from Config.plist: \(url)")
+            if let url = loadConfigValue(key: "RECIPE_PARSER_URL_DEV") {
                 return url
             }
-            print("⚠️ Using default localhost URL (SAM local API)")
             return "http://localhost:3000"
         #else
-            // In release mode, MUST have PRODUCTION_API_URL in Config.plist
-            guard let url = loadConfigValue(key: "PRODUCTION_API_URL") else {
-                fatalError("PRODUCTION_API_URL not found in Config.plist.")
+            // In release mode, MUST have RECIPE_PARSER_URL_PROD in Config.plist
+            guard let url = loadConfigValue(key: "RECIPE_PARSER_URL_PROD") else {
+                fatalError("RECIPE_PARSER_URL_PROD not found in Config.plist.")
             }
-            print("📱 Using production Parser Function URL from Config.plist: \(url)")
             return url
         #endif
     }
 
-    /// Returns the WebSocket URL for the cooking assistant based on the current environment
-    static var webSocketURL: String {
+    /// Returns the Cooking Assistant WebSocket URL for real-time cooking assistance
+    static var cookingAssistantURL: String {
         #if DEBUG
             // In debug mode, try to load from Config.plist first
-            if let url = loadConfigValue(key: "LOCAL_WEBSOCKET_URL") {
-                print("Using local WebSocket URL from Config.plist: \(url)")
+            if let url = loadConfigValue(key: "COOKING_ASSISTANT_URL_DEV") {
                 return url
             }
-            print("⚠️ Using default localhost WebSocket URL")
             return "ws://localhost:3001"
         #else
-            // In release mode, MUST have PRODUCTION_WEBSOCKET_URL in Config.plist
-            guard let url = loadConfigValue(key: "PRODUCTION_WEBSOCKET_URL") else {
-                fatalError("PRODUCTION_WEBSOCKET_URL not found in Config.plist.")
+            // In release mode, MUST have COOKING_ASSISTANT_URL_PROD in Config.plist
+            guard let url = loadConfigValue(key: "COOKING_ASSISTANT_URL_PROD") else {
+                fatalError("COOKING_ASSISTANT_URL_PROD not found in Config.plist.")
             }
-            print("📱 Using production WebSocket URL from Config.plist: \(url)")
             return url
         #endif
     }
 
-    /// Returns the Recipe Editor URL for AI-powered recipe editing based on the current environment
+    /// Returns the Recipe Editor URL for AI-powered recipe editing
     static var recipeEditorURL: String? {
         #if DEBUG
             // In debug mode, try to load from Config.plist first
-            if let url = loadConfigValue(key: "LOCAL_RECIPE_EDITOR_URL") {
-                print("Using local Recipe Editor URL from Config.plist: \(url)")
+            if let url = loadConfigValue(key: "RECIPE_EDITOR_URL_DEV") {
                 return url
             }
-            print("⚠️ Recipe Editor URL not configured (will fail if AI Edit is used)")
             return nil
         #else
-            // In release mode, MUST have PRODUCTION_RECIPE_EDITOR_URL in Config.plist
-            guard let url = loadConfigValue(key: "PRODUCTION_RECIPE_EDITOR_URL") else {
-                print("⚠️ PRODUCTION_RECIPE_EDITOR_URL not found in Config.plist")
+            // In release mode, MUST have RECIPE_EDITOR_URL_PROD in Config.plist
+            guard let url = loadConfigValue(key: "RECIPE_EDITOR_URL_PROD") else {
                 return nil
             }
-            print("📱 Using production Recipe Editor URL from Config.plist: \(url)")
             return url
         #endif
     }
@@ -106,11 +96,9 @@ struct Config {
 extension Config {
     /// Prints current configuration for debugging
     static func logConfiguration() {
-        print("🔧 Configuration:")
-        print("   Environment: \(environment)")
-        print("   HTTP API URL: \(baseURL)")
-        print("   WebSocket URL: \(webSocketURL)")
-        print("   Recipe Editor URL: \(recipeEditorURL ?? "Not configured")")
-        print("   Debug Mode: \(isDebug)")
+        print("🔧 LittleChef Configuration (\(environment) mode)")
+        print("   Recipe Parser: \(recipeParserURL)")
+        print("   Cooking Assistant: \(cookingAssistantURL)")
+        print("   Recipe Editor: \(recipeEditorURL ?? "Not configured")")
     }
 }

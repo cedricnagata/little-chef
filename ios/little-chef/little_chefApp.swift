@@ -19,6 +19,9 @@ struct little_chefApp: App {
         let timers = TimerManager()
         _preferencesManager = StateObject(wrappedValue: prefs)
         _cookingSessionManager = StateObject(wrappedValue: CookingSessionManager(preferencesManager: prefs, timerManager: timers))
+
+        // Log all configuration URLs at startup
+        Config.logConfiguration()
     }
 
     var body: some Scene {

@@ -34,7 +34,7 @@ class WebSocketService: NSObject, ObservableObject {
 
     // MARK: - Initialization
 
-    init(url: String = Config.webSocketURL) {
+    init(url: String = Config.cookingAssistantURL) {
         guard let wsURL = URL(string: url) else {
             fatalError("Invalid WebSocket URL: \(url)")
         }

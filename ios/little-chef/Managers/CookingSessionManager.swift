@@ -71,12 +71,20 @@ class CookingSessionManager: ObservableObject {
         webSocketService.onDone = { [weak self] response, session, commands, requestId in
             guard let self = self, requestId == self.currentRequestId else { return }
 
-            // Preserve the current (possibly scaled) recipe instead of using backend's original
-            let recipeToUse = self.currentSession?.recipe ?? session.recipe
+            // Check if there's a recipe modification command
+            let hasRecipeModification = session.commands.contains { $0.commandType == "recipe_modification" || $0.commandType == "recipe_modified" }
+
+            // If recipe was modified, use the updated recipe from backend
+            // Otherwise, preserve the current (possibly scaled) local recipe
+            let recipeToUse = hasRecipeModification ? session.recipe : (self.currentSession?.recipe ?? session.recipe)
+
+            if hasRecipeModification {
+                print("✏️ Recipe was modified by AI - using updated recipe from backend")
+            }
 
             // Process commands
             let updatedSession = CookingSession(
-                recipe: recipeToUse,  // Use local recipe (preserves scaling)
+                recipe: recipeToUse,
                 commands: session.commands,
                 timerStatus: session.timerStatus,
                 conversationHistory: session.conversationHistory,

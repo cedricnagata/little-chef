@@ -124,8 +124,7 @@ struct ActiveCookingView: View {
     @EnvironmentObject var voiceAssistant: VoiceAssistant
     @EnvironmentObject var recipeManager: RecipeManager
     @State private var textInput = ""
-    @State private var showingEndSessionAlert = false
-    @State private var showingSaveRecipeDialog = false
+    @State private var showingEndSessionDialog = false
     @State private var selectedTab: CookingTab = .recipe
     @FocusState private var isInputFocused: Bool
 
@@ -140,7 +139,7 @@ struct ActiveCookingView: View {
             HStack(spacing: 12) {
                 // End session button
                 Button(action: {
-                    showingEndSessionAlert = true
+                    showingEndSessionDialog = true
                 }) {
                     Image(systemName: "xmark.circle.fill")
                         .font(.title3)
@@ -176,39 +175,31 @@ struct ActiveCookingView: View {
             // Input area - always visible
             InputAreaView(textInput: $textInput, isInputFocused: _isInputFocused)
         }
-        .alert("End Cooking Session", isPresented: $showingEndSessionAlert) {
-            Button("Cancel", role: .cancel) { }
-            Button("End", role: .destructive) {
-                // Check if recipe was modified
-                if cookingSessionManager.recipeWasModified {
-                    showingSaveRecipeDialog = true
-                } else {
+        .alert("End Cooking Session", isPresented: $showingEndSessionDialog) {
+            if cookingSessionManager.recipeWasModified {
+                // Recipe was modified - show first option
+                Button("Save as New Recipe") {
+                    saveModifiedRecipe(asNew: true)
+                }
+                Button("Overwrite Original") {
+                    saveModifiedRecipe(asNew: false)
+                }
+                Button("Discard Changes", role: .destructive) {
                     endSessionWithoutSaving()
                 }
+                Button("Cancel", role: .cancel) { }
+            } else {
+                // No modifications - simple end session
+                Button("End Session", role: .destructive) {
+                    endSessionWithoutSaving()
+                }
+                Button("Cancel", role: .cancel) { }
             }
         } message: {
             if cookingSessionManager.recipeWasModified {
-                Text("Your recipe was modified. Would you like to save the changes?")
+                Text("Your recipe was modified during this cooking session. How would you like to save it?")
             } else {
                 Text("Are you sure you want to end this cooking session?")
-            }
-        }
-        .confirmationDialog("Save Modified Recipe", isPresented: $showingSaveRecipeDialog) {
-            Button("Save as New Recipe") {
-                saveModifiedRecipe(asNew: true)
-            }
-            Button("Overwrite Original") {
-                saveModifiedRecipe(asNew: false)
-            }
-            Button("Discard Changes", role: .destructive) {
-                endSessionWithoutSaving()
-            }
-            Button("Cancel", role: .cancel) { }
-        } message: {
-            if let summary = cookingSessionManager.modificationSummary {
-                Text("Changes: \(summary)")
-            } else {
-                Text("Save your recipe modifications?")
             }
         }
         .onAppear {

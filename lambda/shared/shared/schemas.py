@@ -139,7 +139,7 @@ class RecipeEditResponse(BaseModel):
 class Command(BaseModel):
     """Universal command structure that AI can issue for various actions"""
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
-    command_type: Literal["timer", "recipe_modification"]  # Extended to support recipe modifications
+    command_type: Literal["timer", "recipe_modification", "recipe_modified"]  # Extended to support recipe modifications
     action: str  # The specific action to take
     target_id: Optional[str] = None  # ID of the target entity (e.g., timer_id)
     label: str
