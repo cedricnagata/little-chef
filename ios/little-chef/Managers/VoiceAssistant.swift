@@ -25,7 +25,7 @@ class VoiceAssistant: NSObject, ObservableObject {
     private var voiceSettings: VoiceSettings?
     
     private let speechRecognizer = SFSpeechRecognizer(locale: Locale(identifier: "en-US"))
-    private let audioEngine = AVAudioEngine()
+    private var audioEngine = AVAudioEngine()
     private let synthesizer = AVSpeechSynthesizer()
     private var recognitionRequest: SFSpeechAudioBufferRecognitionRequest?
     private var recognitionTask: SFSpeechRecognitionTask?
@@ -37,6 +37,14 @@ class VoiceAssistant: NSObject, ObservableObject {
     // Wake word detection
     private var wakeWordRequest: SFSpeechAudioBufferRecognitionRequest?
     private var wakeWordTask: SFSpeechRecognitionTask?
+
+    // Audio route tracking for debouncing
+    private var lastAudioRoute: String = ""
+    private var routeChangeDebounceTimer: Timer?
+
+    // Pending route change restart operations
+    private var pendingWakeWordRestartWorkItem: DispatchWorkItem?
+    private var pendingListeningRestartWorkItem: DispatchWorkItem?
 
     // Primary wake words (exact matches)
     private let wakeWords = ["hey littlechef", "hey little chef"]
@@ -87,6 +95,14 @@ class VoiceAssistant: NSObject, ObservableObject {
             name: AVAudioSession.interruptionNotification,
             object: AVAudioSession.sharedInstance()
         )
+
+        // Add audio route change observer for Bluetooth device connections
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(handleAudioRouteChange),
+            name: AVAudioSession.routeChangeNotification,
+            object: AVAudioSession.sharedInstance()
+        )
     }
 
     deinit {
@@ -117,6 +133,115 @@ class VoiceAssistant: NSObject, ObservableObject {
             break
         }
     }
+
+    @objc private func handleAudioRouteChange(notification: Notification) {
+        guard let userInfo = notification.userInfo,
+              let reasonValue = userInfo["AVAudioSessionRouteChangeReasonKey"] as? UInt,
+              let reason = AVAudioSession.RouteChangeReason(rawValue: reasonValue) else {
+            return
+        }
+
+        let audioSession = AVAudioSession.sharedInstance()
+        let currentRoute = audioSession.currentRoute
+        let outputs = currentRoute.outputs.map { "\($0.portType.rawValue): \($0.portName)" }
+        let routeString = outputs.joined(separator: ", ")
+
+        // Debounce: ignore if we just handled this same route
+        if routeString == lastAudioRoute {
+            print("🔄 Audio route change (duplicate, ignoring): \(reason)")
+            return
+        }
+        lastAudioRoute = routeString
+
+        // Cancel any pending debounce timer
+        routeChangeDebounceTimer?.invalidate()
+
+        switch reason {
+        case .newDeviceAvailable:
+            print("🎧 New audio device connected: \(routeString)")
+
+            // CRITICAL: Reset the audio engine IMMEDIATELY to pick up new hardware format
+            // Bluetooth devices often have different sample rates (24kHz vs 48kHz)
+            // Not resetting causes "Input HW format and tap format not matching" crash
+            resetAudioEngine()
+
+            // Critical: Don't restart if audio is currently playing
+            if isSpeaking {
+                print("⏸️  Audio is playing - deferring device restart until audio finishes")
+                return
+            }
+
+            // If we're actively listening, restart listening to use the new device
+            if isWakeWordListening {
+                print("🔄 Restarting wake word listening with new device")
+                stopWakeWordListening()
+
+                // Create a work item for the restart, store it so it can be canceled
+                let workItem = DispatchWorkItem { [weak self] in
+                    self?.startWakeWordListening()
+                }
+                pendingWakeWordRestartWorkItem = workItem
+
+                // Small delay to ensure cleanup before restarting
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.15, execute: workItem)
+
+            } else if isListening {
+                print("🔄 Restarting voice listening with new device")
+                stopListening()
+
+                // Create a work item for the restart, store it so it can be canceled
+                let workItem = DispatchWorkItem { [weak self] in
+                    self?.startListening()
+                }
+                pendingListeningRestartWorkItem = workItem
+
+                // Small delay to ensure cleanup before restarting
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.15, execute: workItem)
+            }
+
+        case .oldDeviceUnavailable:
+            print("🎧 Audio device disconnected: \(routeString)")
+
+            // CRITICAL: Reset the audio engine IMMEDIATELY to pick up new hardware format
+            // When Bluetooth disconnects, sample rate switches back (24kHz -> 48kHz)
+            resetAudioEngine()
+
+            // If we're actively listening, restart listening to use the built-in device
+            if isWakeWordListening {
+                print("🔄 Restarting wake word listening after device disconnection")
+                stopWakeWordListening()
+
+                let workItem = DispatchWorkItem { [weak self] in
+                    self?.startWakeWordListening()
+                }
+                pendingWakeWordRestartWorkItem = workItem
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.15, execute: workItem)
+
+            } else if isListening {
+                print("🔄 Restarting voice listening after device disconnection")
+                stopListening()
+
+                let workItem = DispatchWorkItem { [weak self] in
+                    self?.startListening()
+                }
+                pendingListeningRestartWorkItem = workItem
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.15, execute: workItem)
+            }
+
+            lastAudioRoute = ""
+
+        case .routeConfigurationChange:
+            print("🔄 Audio route configuration changed: \(routeString)")
+            // Skip if audio is playing or listening
+            if isSpeaking || isListening || isWakeWordListening {
+                return
+            }
+            setupAudioSession()
+
+        default:
+            print("🔄 Audio route change: \(reason) - \(routeString)")
+        }
+    }
     
     // MARK: - Permissions
     
@@ -143,7 +268,8 @@ class VoiceAssistant: NSObject, ObservableObject {
             DispatchQueue.main.async {
                 if granted {
                     self.isAvailable = true
-                    self.setupAudioSession()
+                    // Don't configure audio session here - only configure when actually recording
+                    // This prevents affecting other apps (like Spotify) on startup
                 } else {
                     self.errorMessage = "Microphone permission denied"
                     self.isAvailable = false
@@ -156,11 +282,12 @@ class VoiceAssistant: NSObject, ObservableObject {
         do {
             let audioSession = AVAudioSession.sharedInstance()
             // Configure for voice chat with Bluetooth support
-            // Remove .defaultToSpeaker to allow proper AirPods routing
+            // Use .mixWithOthers to allow background audio (Spotify, etc.) to play alongside
+            // Added .defaultToSpeaker for speaker output (needed for iPhone earpiece issue)
             try audioSession.setCategory(
                 .playAndRecord,
                 mode: .voiceChat,  // Optimized for voice with echo cancellation
-                options: [.allowBluetooth, .allowBluetoothA2DP, .mixWithOthers]
+                options: [.allowBluetooth, .allowBluetoothA2DP, .mixWithOthers, .defaultToSpeaker]
             )
             try audioSession.setActive(true, options: .notifyOthersOnDeactivation)
 
@@ -168,12 +295,29 @@ class VoiceAssistant: NSObject, ObservableObject {
             let currentRoute = audioSession.currentRoute
             let inputs = currentRoute.inputs.map { "\($0.portType.rawValue): \($0.portName)" }
             let outputs = currentRoute.outputs.map { "\($0.portType.rawValue): \($0.portName)" }
-            print("🎙️ Audio session configured (.voiceChat mode)")
+            print("🎙️ Audio session configured (.voiceChat mode, background audio mix enabled)")
             print("   Inputs: \(inputs.isEmpty ? "none" : inputs.joined(separator: ", "))")
             print("   Outputs: \(outputs.isEmpty ? "none" : outputs.joined(separator: ", "))")
         } catch {
             self.errorMessage = "Failed to setup audio session: \(error.localizedDescription)"
         }
+    }
+
+    /// Reset the audio engine to pick up new hardware format after route changes
+    /// This is critical when Bluetooth devices connect, as the sample rate may change
+    private func resetAudioEngine() {
+        print("🔄 Resetting audio engine to pick up new hardware format...")
+
+        // Stop and clean up the old engine
+        if audioEngine.isRunning {
+            audioEngine.inputNode.removeTap(onBus: 0)
+            audioEngine.stop()
+        }
+
+        // Create a completely new audio engine instance
+        // This forces it to query the new hardware format
+        audioEngine = AVAudioEngine()
+        print("✨ Audio engine reset complete")
     }
     
     // MARK: - Speech Recognition
@@ -193,46 +337,60 @@ class VoiceAssistant: NSObject, ObservableObject {
         }
 
         do {
+            // Configure audio session for recording
+            setupAudioSession()
+
+            // CRITICAL: Ensure audio engine is in a completely clean state
+            // This prevents crashes from stale taps after route changes or previous listening sessions
+            if audioEngine.isRunning {
+                print("🔧 Audio engine already running, stopping and resetting...")
+                audioEngine.inputNode.removeTap(onBus: 0)
+                audioEngine.stop()
+
+                // Small delay to ensure complete shutdown before restarting
+                usleep(10000) // 10ms
+            }
+
             // Setup recognition request
             recognitionRequest = SFSpeechAudioBufferRecognitionRequest()
             guard let recognitionRequest = recognitionRequest else {
                 self.errorMessage = "Unable to create recognition request"
                 return
             }
-            
+
             recognitionRequest.shouldReportPartialResults = true
-            
+
             // Setup audio input
             let inputNode = audioEngine.inputNode
             let recordingFormat = inputNode.outputFormat(forBus: 0)
-            
+
             inputNode.installTap(onBus: 0, bufferSize: 1024, format: recordingFormat) { buffer, _ in
                 recognitionRequest.append(buffer)
             }
-            
+
             // Start recognition task
             recognitionTask = speechRecognizer.recognitionTask(with: recognitionRequest) { [weak self] result, error in
                 DispatchQueue.main.async {
                     if let result = result {
                         self?.recognizedText = result.bestTranscription.formattedString
-                        
+
                         // Auto-stop after a pause (when result is final)
                         if result.isFinal {
                             self?.stopListening()
                         }
                     }
-                    
+
                     if let error = error {
                         self?.errorMessage = "Recognition error: \(error.localizedDescription)"
                         self?.stopListening()
                     }
                 }
             }
-            
+
             // Start audio engine
             audioEngine.prepare()
             try audioEngine.start()
-            
+
             isListening = true
             recognizedText = ""
             self.errorMessage = nil
@@ -243,14 +401,35 @@ class VoiceAssistant: NSObject, ObservableObject {
     }
     
     func stopListening() {
-        guard isListening else { return }
-        
+        // CRITICAL: Don't guard on isListening here!
+        // We need to clean up even if isListening is already false
+        // (e.g., after a route change that cleaned up the engine but didn't set the flag)
+
+        // Cancel any pending restart operations
+        pendingListeningRestartWorkItem?.cancel()
+        pendingListeningRestartWorkItem = nil
+
         cancelSpeechTimeout()
-        audioEngine.stop()
-        audioEngine.inputNode.removeTap(onBus: 0)
+
+        print("🛑 stopListening called - current state: listening=\(isListening), engineRunning=\(audioEngine.isRunning)")
+
+        // End speech request FIRST (this signals to stop processing audio)
         recognitionRequest?.endAudio()
         recognitionTask?.cancel()
-        
+
+        // ALWAYS cleanup the audio engine taps, regardless of state flags
+        // This is critical to prevent "nullptr == Tap()" crashes when trying to install new taps
+        if audioEngine.isRunning {
+            print("   Removing listening tap...")
+            audioEngine.inputNode.removeTap(onBus: 0)
+
+            // Only stop the engine if wake word listening isn't active
+            if !isWakeWordListening {
+                print("   Stopping engine...")
+                audioEngine.stop()
+            }
+        }
+
         recognitionRequest = nil
         recognitionTask = nil
         isListening = false
@@ -324,10 +503,10 @@ class VoiceAssistant: NSObject, ObservableObject {
                 try audioSession.setCategory(
                     .playAndRecord,
                     mode: .default,  // Use .default for better playback quality
-                    options: [.defaultToSpeaker, .allowBluetooth, .allowBluetoothA2DP, .mixWithOthers, .duckOthers]
+                    options: [.defaultToSpeaker, .allowBluetooth, .allowBluetoothA2DP, .mixWithOthers]
                 )
-                try audioSession.setActive(true, options: [])
-                print("🔊 Configured audio session for playback (.default mode, speaker enabled)")
+                try audioSession.setActive(true, options: .notifyOthersOnDeactivation)
+                print("🔊 Configured audio session for playback (.default mode, speaker enabled, background audio mix enabled)")
             }
 
             let audioPlayer = try AVAudioPlayer(data: data)
@@ -508,40 +687,72 @@ class VoiceAssistant: NSObject, ObservableObject {
     
     func stopHandsFreeMode() {
         isHandsFreeMode = false
+
+        // Cancel any pending restart operations that might try to reinstall taps
+        pendingWakeWordRestartWorkItem?.cancel()
+        pendingWakeWordRestartWorkItem = nil
+        pendingListeningRestartWorkItem?.cancel()
+        pendingListeningRestartWorkItem = nil
+
         stopWakeWordListening()
         stopListening()
         cancelSpeechTimeout()
     }
     
     private func startWakeWordListening() {
-        guard isAvailable, !isWakeWordListening else { return }
+        guard isAvailable, !isWakeWordListening else {
+            print("⚠️ startWakeWordListening guard failed: available=\(isAvailable), alreadyListening=\(isWakeWordListening)")
+            return
+        }
 
-        // Stop any ongoing tasks
+        print("🎤 startWakeWordListening called - current state: listening=\(isListening), wakeWord=\(isWakeWordListening)")
+
+        // Always do aggressive cleanup regardless of state
+        print("🧹 Pre-cleanup: audioEngine.isRunning=\(audioEngine.isRunning)")
+        if audioEngine.isRunning {
+            print("   Removing tap...")
+            audioEngine.inputNode.removeTap(onBus: 0)
+            print("   Stopping engine...")
+            audioEngine.stop()
+            print("   Waiting for cleanup...")
+            usleep(20000) // 20ms
+            print("   Cleanup complete")
+        }
+
+        // Stop any ongoing tasks (but cleanup already happened above)
         stopWakeWordListening()
-        
+
         guard let speechRecognizer = speechRecognizer, speechRecognizer.isAvailable else {
             self.errorMessage = "Speech recognizer not available for wake word detection"
             return
         }
-        
+
         do {
+            // Configure audio session for wake word listening
+            setupAudioSession()
+
+            // Double-check engine is clean before installing tap
+            print("🔍 Pre-tap check: audioEngine.isRunning=\(audioEngine.isRunning)")
+
             // Setup wake word recognition request
             wakeWordRequest = SFSpeechAudioBufferRecognitionRequest()
             guard let wakeWordRequest = wakeWordRequest else {
                 self.errorMessage = "Unable to create wake word recognition request"
                 return
             }
-            
+
             wakeWordRequest.shouldReportPartialResults = true
-            
+
             // Setup audio input
             let inputNode = audioEngine.inputNode
             let recordingFormat = inputNode.outputFormat(forBus: 0)
-            
+
+            print("📌 About to install tap - engine running: \(audioEngine.isRunning), format: \(recordingFormat != nil ? "valid" : "nil")")
             inputNode.installTap(onBus: 0, bufferSize: 1024, format: recordingFormat) { buffer, _ in
                 wakeWordRequest.append(buffer)
             }
-            
+            print("✅ Tap installed successfully")
+
             // Start wake word recognition task
             wakeWordTask = speechRecognizer.recognitionTask(with: wakeWordRequest) { [weak self] result, error in
                 DispatchQueue.main.async {
@@ -565,30 +776,48 @@ class VoiceAssistant: NSObject, ObservableObject {
                     }
                 }
             }
-            
-            // Start audio engine if not already running
-            if !audioEngine.isRunning {
-                audioEngine.prepare()
-                try audioEngine.start()
-            }
-            
+
+            // Start audio engine
+            print("🔌 Starting audio engine...")
+            audioEngine.prepare()
+            try audioEngine.start()
+            print("✅ Audio engine started successfully")
+
             isWakeWordListening = true
-            
+
         } catch {
             self.errorMessage = "Failed to start wake word listening: \(error.localizedDescription)"
         }
     }
     
     private func stopWakeWordListening() {
-        guard isWakeWordListening else { return }
-        
-        if audioEngine.isRunning && !isListening {
-            audioEngine.stop()
-            audioEngine.inputNode.removeTap(onBus: 0)
-        }
+        // CRITICAL: Don't guard on isWakeWordListening here!
+        // We need to clean up even if isWakeWordListening is already false
+        // (e.g., after a route change that cleaned up the engine but didn't set the flag)
+
+        // Cancel any pending restart operations
+        pendingWakeWordRestartWorkItem?.cancel()
+        pendingWakeWordRestartWorkItem = nil
+
+        print("🛑 stopWakeWordListening called - current state: wakeWordListening=\(isWakeWordListening), engineRunning=\(audioEngine.isRunning)")
+
+        // End speech request FIRST (this signals to stop processing audio)
         wakeWordRequest?.endAudio()
         wakeWordTask?.cancel()
-        
+
+        // ALWAYS cleanup the audio engine taps, regardless of state flags
+        // This is critical to prevent "nullptr == Tap()" crashes when trying to install new taps
+        if audioEngine.isRunning {
+            print("   Removing wake word tap...")
+            audioEngine.inputNode.removeTap(onBus: 0)
+
+            // Only stop the engine if nothing else is using it (no regular listening active)
+            if !isListening {
+                print("   Stopping engine...")
+                audioEngine.stop()
+            }
+        }
+
         wakeWordRequest = nil
         wakeWordTask = nil
         isWakeWordListening = false
@@ -623,48 +852,62 @@ class VoiceAssistant: NSObject, ObservableObject {
         }
 
         do {
+            // Configure audio session for hands-free listening
+            setupAudioSession()
+
+            // CRITICAL: Ensure audio engine is in a completely clean state
+            // This prevents crashes from stale taps after route changes or previous listening sessions
+            if audioEngine.isRunning {
+                print("🔧 Audio engine already running, stopping and resetting...")
+                audioEngine.inputNode.removeTap(onBus: 0)
+                audioEngine.stop()
+
+                // Small delay to ensure complete shutdown before restarting
+                usleep(10000) // 10ms
+            }
+
             // Setup recognition request
             recognitionRequest = SFSpeechAudioBufferRecognitionRequest()
             guard let recognitionRequest = recognitionRequest else {
                 self.errorMessage = "Unable to create recognition request"
                 return
             }
-            
+
             recognitionRequest.shouldReportPartialResults = true
-            
+
             // Setup audio input
             let inputNode = audioEngine.inputNode
             let recordingFormat = inputNode.outputFormat(forBus: 0)
-            
+
             inputNode.installTap(onBus: 0, bufferSize: 1024, format: recordingFormat) { buffer, _ in
                 recognitionRequest.append(buffer)
             }
-            
+
             // Start recognition task with improved auto-send logic
             recognitionTask = speechRecognizer.recognitionTask(with: recognitionRequest) { [weak self] result, error in
                 DispatchQueue.main.async {
                     guard let self = self else { return }
-                    
+
                     if let result = result {
                         let newText = result.bestTranscription.formattedString
-                        
+
                         // Check if we got new speech content
                         if newText != self.recognizedText {
                             self.recognizedText = newText
                             self.lastSpeechTime = Date()
                             self.scheduleSpeechTimeout()
                         }
-                        
+
                         // If result is final and we have text, send immediately
                         if result.isFinal && !self.recognizedText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                             self.processSpeechResult()
                         }
                     }
-                    
+
                     if let error = error {
                         print("Hands-free recognition error: \(error.localizedDescription)")
                         self.stopListening()
-                        
+
                         // Resume wake word listening on error
                         if self.isHandsFreeMode {
                             DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
@@ -674,12 +917,10 @@ class VoiceAssistant: NSObject, ObservableObject {
                     }
                 }
             }
-            
-            // Start audio engine if not already running
-            if !audioEngine.isRunning {
-                audioEngine.prepare()
-                try audioEngine.start()
-            }
+
+            // Start audio engine
+            audioEngine.prepare()
+            try audioEngine.start()
             
             isListening = true
             recognizedText = ""
@@ -794,13 +1035,14 @@ extension VoiceAssistant: AVAudioPlayerDelegate {
             self.isSpeaking = false
             self.currentAudioPlayer = nil
 
-            // Restore audio session to voiceChat mode for wake word detection
-            self.setupAudioSession()
-
             // Resume wake word listening if in hands-free mode
+            // Note: Don't call setupAudioSession here - it will be called automatically when startWakeWordListening is called
             if self.isHandsFreeMode && !self.isWakeWordListening && !self.isListening {
                 print("🎤 Resuming wake word listening after audio finished")
-                self.startWakeWordListening()
+                // Small delay to ensure audio player cleanup is complete
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { [weak self] in
+                    self?.startWakeWordListening()
+                }
             }
         }
     }
@@ -811,13 +1053,14 @@ extension VoiceAssistant: AVAudioPlayerDelegate {
             self.isSpeaking = false
             self.currentAudioPlayer = nil
 
-            // Restore audio session to voiceChat mode
-            self.setupAudioSession()
-
             // Resume wake word listening if in hands-free mode
+            // Note: Don't call setupAudioSession here - it will be called automatically when startWakeWordListening is called
             if self.isHandsFreeMode && !self.isWakeWordListening && !self.isListening {
                 print("🎤 Resuming wake word listening after audio error")
-                self.startWakeWordListening()
+                // Small delay to ensure audio player cleanup is complete
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { [weak self] in
+                    self?.startWakeWordListening()
+                }
             }
         }
     }
