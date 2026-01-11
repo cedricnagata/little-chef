@@ -79,6 +79,43 @@ class VoiceAssistant: NSObject, ObservableObject {
         super.init()
         synthesizer.delegate = self
         requestPermissions()
+
+        // Add audio session interruption observer
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(handleAudioSessionInterruption),
+            name: AVAudioSession.interruptionNotification,
+            object: AVAudioSession.sharedInstance()
+        )
+    }
+
+    deinit {
+        NotificationCenter.default.removeObserver(self)
+    }
+
+    @objc private func handleAudioSessionInterruption(notification: Notification) {
+        guard let userInfo = notification.userInfo,
+              let typeValue = userInfo[AVAudioSessionInterruptionTypeKey] as? UInt,
+              let type = AVAudioSession.InterruptionType(rawValue: typeValue) else {
+            return
+        }
+
+        switch type {
+        case .began:
+            print("⚠️ Audio session interrupted - pausing")
+            // Don't reconfigure - just pause
+            currentAudioPlayer?.pause()
+        case .ended:
+            print("✅ Audio session interruption ended - resuming")
+            if let optionsValue = userInfo[AVAudioSessionInterruptionOptionKey] as? UInt {
+                let options = AVAudioSession.InterruptionOptions(rawValue: optionsValue)
+                if options.contains(.shouldResume) {
+                    currentAudioPlayer?.play()
+                }
+            }
+        @unknown default:
+            break
+        }
     }
     
     // MARK: - Permissions
@@ -278,23 +315,44 @@ class VoiceAssistant: NSObject, ObservableObject {
         currentAudioPlayer = nil
 
         do {
+            // Configure audio session for high-quality playback
+            // Only configure once - interruption handler will deal with keyboard/other events
+            let audioSession = AVAudioSession.sharedInstance()
+
+            // Check if we're already in the right mode to avoid unnecessary reconfiguration
+            if audioSession.mode != .default {
+                try audioSession.setCategory(
+                    .playAndRecord,
+                    mode: .default,  // Use .default for better playback quality
+                    options: [.allowBluetooth, .allowBluetoothA2DP, .mixWithOthers, .duckOthers]
+                )
+                try audioSession.setActive(true, options: [])
+                print("🔊 Configured audio session for playback (.default mode)")
+            }
+
             let audioPlayer = try AVAudioPlayer(data: data)
             audioPlayer.delegate = self
             audioPlayer.volume = 1.0
-            audioPlayer.prepareToPlay()
-            currentAudioPlayer = audioPlayer
-            isSpeaking = true
-            audioPlayer.play()
-            print("🔊 Started playing server TTS audio (\(data.count) bytes)")
+
+            // Important: Prepare and play immediately without delays
+            if audioPlayer.prepareToPlay() {
+                currentAudioPlayer = audioPlayer
+                isSpeaking = true
+                audioPlayer.play()
+                print("🔊 Playing server TTS audio (\(data.count) bytes)")
+            } else {
+                throw NSError(domain: "VoiceAssistant", code: -1, userInfo: [NSLocalizedDescriptionKey: "Failed to prepare audio player"])
+            }
 
             // Start wake word listening during audio playback (if in hands-free mode)
-            // This allows user to interrupt audio by saying the wake word
             if isHandsFreeMode && !isWakeWordListening && !isListening {
                 print("🎤 Starting wake word listening during audio playback")
                 startWakeWordListening()
             }
         } catch {
             print("❌ Failed to play server TTS audio: \(error)")
+            isSpeaking = false
+            currentAudioPlayer = nil
             // Fallback to native TTS
             speakWithNativeTTS("Error playing audio")
         }
@@ -736,6 +794,9 @@ extension VoiceAssistant: AVAudioPlayerDelegate {
             self.isSpeaking = false
             self.currentAudioPlayer = nil
 
+            // Restore audio session to voiceChat mode for wake word detection
+            self.setupAudioSession()
+
             // Resume wake word listening if in hands-free mode
             if self.isHandsFreeMode && !self.isWakeWordListening && !self.isListening {
                 print("🎤 Resuming wake word listening after audio finished")
@@ -749,6 +810,9 @@ extension VoiceAssistant: AVAudioPlayerDelegate {
             print("❌ Server TTS audio decode error: \(error?.localizedDescription ?? "Unknown error")")
             self.isSpeaking = false
             self.currentAudioPlayer = nil
+
+            // Restore audio session to voiceChat mode
+            self.setupAudioSession()
 
             // Resume wake word listening if in hands-free mode
             if self.isHandsFreeMode && !self.isWakeWordListening && !self.isListening {
