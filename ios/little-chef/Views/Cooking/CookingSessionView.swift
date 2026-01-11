@@ -748,7 +748,14 @@ struct InputAreaView: View {
                 // Voice button
                 Button(action: {
                     isInputFocused = false
-                    voiceAssistant.stopSpeaking()  // Stop any playing audio first
+
+                    // If audio is playing, stop it
+                    if voiceAssistant.isSpeaking {
+                        voiceAssistant.stopSpeaking()
+                        return
+                    }
+
+                    // Normal voice recording flow
                     if voiceAssistant.isListening {
                         voiceAssistant.stopListening()
                         if voiceAssistant.hasRecognizedText() {
@@ -758,15 +765,19 @@ struct InputAreaView: View {
                         voiceAssistant.startListening()
                     }
                 }) {
-                    Image(systemName: voiceAssistant.isListening ? "mic.fill" : "mic")
+                    // Show stop icon when audio is playing
+                    let iconName = voiceAssistant.isSpeaking ? "stop.fill" : (voiceAssistant.isListening ? "mic.fill" : "mic")
+                    let color = voiceAssistant.isSpeaking ? Color.red : (voiceAssistant.isListening ? DesignSystem.Colors.error : DesignSystem.Colors.primary)
+
+                    Image(systemName: iconName)
                         .font(.title2)
-                        .foregroundColor(voiceAssistant.isListening ? DesignSystem.Colors.error : DesignSystem.Colors.primary)
+                        .foregroundColor(color)
                         .scaleEffect(voiceAssistant.isListening && isAnimating ? 1.2 : 1.0)
                         .animation(.easeInOut(duration: 0.6).repeatForever(autoreverses: true), value: isAnimating)
                 }
                 .padding(DesignSystem.Spacing.sm)
                 .background(Circle().fill(DesignSystem.Colors.backgroundSecondary))
-                .disabled(!voiceAssistant.isAvailable || cookingSessionManager.isLoading || voiceAssistant.isHandsFreeMode)
+                .disabled(!voiceAssistant.isAvailable || cookingSessionManager.isLoading || (voiceAssistant.isHandsFreeMode && !voiceAssistant.isSpeaking))
                 .onAppear {
                     if voiceAssistant.isListening {
                         isAnimating = true
