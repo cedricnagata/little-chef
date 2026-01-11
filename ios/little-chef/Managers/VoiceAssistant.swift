@@ -118,10 +118,22 @@ class VoiceAssistant: NSObject, ObservableObject {
     private func setupAudioSession() {
         do {
             let audioSession = AVAudioSession.sharedInstance()
-            // Use .default mode for full volume audio playback
-            try audioSession.setCategory(.playAndRecord, mode: .default, options: [.defaultToSpeaker, .allowBluetooth, .mixWithOthers])
+            // Configure for voice chat with Bluetooth support
+            // Remove .defaultToSpeaker to allow proper AirPods routing
+            try audioSession.setCategory(
+                .playAndRecord,
+                mode: .voiceChat,  // Optimized for voice with echo cancellation
+                options: [.allowBluetooth, .allowBluetoothA2DP, .mixWithOthers]
+            )
             try audioSession.setActive(true, options: .notifyOthersOnDeactivation)
-            print("🎙️ Audio session configured (default mode, full volume)")
+
+            // Log current audio route for debugging
+            let currentRoute = audioSession.currentRoute
+            let inputs = currentRoute.inputs.map { "\($0.portType.rawValue): \($0.portName)" }
+            let outputs = currentRoute.outputs.map { "\($0.portType.rawValue): \($0.portName)" }
+            print("🎙️ Audio session configured (.voiceChat mode)")
+            print("   Inputs: \(inputs.isEmpty ? "none" : inputs.joined(separator: ", "))")
+            print("   Outputs: \(outputs.isEmpty ? "none" : outputs.joined(separator: ", "))")
         } catch {
             self.errorMessage = "Failed to setup audio session: \(error.localizedDescription)"
         }
