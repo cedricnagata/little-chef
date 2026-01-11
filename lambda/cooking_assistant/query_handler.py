@@ -60,7 +60,14 @@ async def handle_query(body: Dict[str, Any], sender: WebSocketSender) -> None:
 
         # Generate TTS audio with Polly (if enabled and not a warmup query)
         voice_settings = session.user_preferences.voice_settings
-        if not warmup and voice_settings and voice_settings.tts_provider == "polly":
+        should_generate_audio = (
+            not warmup and
+            voice_settings and
+            voice_settings.tts_provider == "polly" and
+            voice_settings.auto_speak_responses
+        )
+
+        if should_generate_audio:
             logger.info("Generating Polly TTS audio")
             polly = PollyService()
             chunk_index = 0
@@ -76,6 +83,9 @@ async def handle_query(body: Dict[str, Any], sender: WebSocketSender) -> None:
             except Exception as e:
                 logger.error(f"TTS error (non-fatal): {e}")
                 # Continue without audio - client will fall back to device TTS
+        else:
+            if not warmup and voice_settings:
+                logger.info(f"Skipping TTS audio generation (provider={voice_settings.tts_provider}, auto_speak={voice_settings.auto_speak_responses})")
 
         # Extract commands from updated session
         # Commands are added during agent processing (timer operations)
