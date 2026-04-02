@@ -11,12 +11,29 @@ import MLX
 import MLXLLM
 import MLXLMCommon
 
+/// Model configuration for Bonsai 8B 1-bit quantized model
+extension ModelConfiguration {
+    static let bonsai8B_1bit = ModelConfiguration(
+        id: "prism-ml/Bonsai-8B-mlx-1bit"
+    )
+}
+
 /// Service for managing local LLM inference
 @MainActor
 class MLXLLMService: ObservableObject {
     // Shared instances for different purposes
-    static let parsingService = MLXLLMService(modelConfiguration: LLMRegistry.llama3_2_3B_4bit, name: "Llama 3.2 3B (Parsing)")
-    static let cookingService = MLXLLMService(modelConfiguration: LLMRegistry.qwen3_1_7b_4bit, name: "Qwen 3 1.7B (Cooking)")
+    static let parsingService = MLXLLMService(
+        modelConfiguration: LLMRegistry.llama3_2_3B_4bit,
+        name: "Llama 3.2 3B (Parsing)",
+        quantization: "4-bit",
+        contextLength: 8192
+    )
+    static let cookingService = MLXLLMService(
+        modelConfiguration: .bonsai8B_1bit,
+        name: "Bonsai 8B (Cooking)",
+        quantization: "1-bit",
+        contextLength: 32768
+    )
 
     // MARK: - Published Properties
     @Published var isLoaded: Bool = false
@@ -34,12 +51,16 @@ class MLXLLMService: ObservableObject {
     private var loadState = LoadState.idle
     private let modelConfiguration: ModelConfiguration
     private let modelName: String
+    private let modelQuantization: String
+    private let modelContextLength: Int
     private let generateParameters = GenerateParameters(maxTokens: 2048, temperature: 0.7)
 
     // MARK: - Initialization
-    init(modelConfiguration: ModelConfiguration, name: String) {
+    init(modelConfiguration: ModelConfiguration, name: String, quantization: String = "4-bit", contextLength: Int = 8192) {
         self.modelConfiguration = modelConfiguration
         self.modelName = name
+        self.modelQuantization = quantization
+        self.modelContextLength = contextLength
     }
 
     // MARK: - Model Management
@@ -257,8 +278,8 @@ class MLXLLMService: ObservableObject {
         return ModelInfo(
             name: modelName,
             parameters: String(describing: modelConfiguration.id),
-            quantization: "4-bit",
-            contextLength: 8192
+            quantization: modelQuantization,
+            contextLength: modelContextLength
         )
     }
 }

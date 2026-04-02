@@ -33,7 +33,7 @@ struct ModelManagementView: View {
                     }
                 }
             } header: {
-                Text("Cooking Assistant Model (Qwen)")
+                Text("Cooking Assistant Model (Bonsai)")
             }
 
             // Parsing Model Section
@@ -73,7 +73,7 @@ struct ModelManagementView: View {
             } header: {
                 Text("Actions")
             } footer: {
-                Text("Little Chef uses two specialized models: Qwen for cooking assistance with tool calling support, and Llama for recipe parsing. Models are managed automatically by the app.")
+                Text("Little Chef uses two specialized models: Bonsai 8B for cooking assistance with tool calling support, and Llama for recipe parsing. Models are downloaded automatically on first use.")
             }
         }
         .navigationTitle("Model Management")
