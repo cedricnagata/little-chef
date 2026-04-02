@@ -11,3 +11,11 @@ Thumbs.db
 
 # Logs
 *.log
+
+# Xcode
+*.xcuserstate
+*.xcuserdatad/
+build/
+
+# Configuration files with sensitive data
+little-chef/Config.plist
