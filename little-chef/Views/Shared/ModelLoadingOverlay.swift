@@ -2,45 +2,69 @@
 //  ModelLoadingOverlay.swift
 //  little-chef
 //
-//  Loading overlay displayed when LLM models are downloading
-//
 
 import SwiftUI
 
 struct ModelLoadingOverlay: View {
-    let modelName: String
-    let progress: Double
+    @EnvironmentObject var llmService: LLMService
 
     var body: some View {
         ZStack {
-            Color.black.opacity(0.7)
+            Color.black.opacity(0.6)
                 .ignoresSafeArea()
 
-            VStack(spacing: 20) {
-                ProgressView(value: progress, total: 1.0)
-                    .progressViewStyle(CircularProgressViewStyle(tint: .orange))
-                    .scaleEffect(1.5)
+            VStack(spacing: 28) {
+                // Animated icon
+                Image(systemName: "arrow.down.circle")
+                    .font(.system(size: 48, weight: .light))
+                    .foregroundStyle(.orange)
+                    .symbolEffect(.pulse, options: .repeating)
 
-                VStack(spacing: 8) {
-                    Text("Loading \(modelName)")
+                VStack(spacing: 12) {
+                    Text(statusText)
                         .font(.headline)
-                        .foregroundColor(.white)
 
-                    if progress > 0 {
-                        Text("\(Int(progress * 100))%")
-                            .font(.subheadline)
-                            .foregroundColor(.white.opacity(0.8))
-                    } else {
-                        Text("Preparing...")
-                            .font(.subheadline)
-                            .foregroundColor(.white.opacity(0.8))
-                    }
+                    Text("Bonsai 8B")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
                 }
+
+                // Progress bar
+                VStack(spacing: 8) {
+                    ProgressView(value: llmService.loadProgress, total: 1.0)
+                        .progressViewStyle(.linear)
+                        .tint(.orange)
+
+                    Text(progressText)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .monospacedDigit()
+                }
+                .padding(.horizontal, 8)
             }
             .padding(32)
-            .background(Color(.systemBackground))
-            .cornerRadius(16)
-            .shadow(radius: 10)
+            .frame(width: 280)
+            .background(.regularMaterial)
+            .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
+            .shadow(color: .black.opacity(0.2), radius: 20, y: 10)
+        }
+        .transition(.opacity)
+        .animation(.easeInOut(duration: 0.25), value: llmService.isLoadingModel)
+    }
+
+    private var statusText: String {
+        if llmService.loadProgress > 0 && llmService.loadProgress < 1.0 {
+            return "Downloading Model..."
+        } else {
+            return "Loading Model..."
+        }
+    }
+
+    private var progressText: String {
+        if llmService.loadProgress > 0 {
+            return "\(Int(llmService.loadProgress * 100))%"
+        } else {
+            return "Preparing..."
         }
     }
 }

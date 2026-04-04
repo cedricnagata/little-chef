@@ -12,7 +12,7 @@ import Foundation
 @MainActor
 class LocalCookingAgent: ObservableObject {
     // MARK: - Dependencies
-    private let llmService: MLXLLMService
+    private let llmService: LLMService
     private let timerManager: TimerManager
 
     // MARK: - State
@@ -24,7 +24,7 @@ class LocalCookingAgent: ObservableObject {
 
     // MARK: - Initialization
 
-    init(llmService: MLXLLMService = .cookingService, timerManager: TimerManager) {
+    init(llmService: LLMService = .shared, timerManager: TimerManager) {
         self.llmService = llmService
         self.timerManager = timerManager
     }
@@ -60,7 +60,7 @@ class LocalCookingAgent: ObservableObject {
         // Generate response - LLM will decide which tools to use
         let response = try await llmService.generateChatCompletion(
             messages: messages,
-            cookingTools: cookingTools
+            tools: cookingTools
         )
 
         // Tool calls are now handled automatically within generateChatCompletion

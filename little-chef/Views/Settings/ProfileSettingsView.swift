@@ -2,13 +2,13 @@
 //  ProfileSettingsView.swift
 //  little-chef
 //
-//  Simplified for local-only operation (no LLM selection, no ElevenLabs)
-//
 
 import SwiftUI
 import AVFoundation
 
 struct ProfileSettingsView: View {
+    @EnvironmentObject var llmService: LLMService
+
     @State private var measurementSystem = "imperial"
     @State private var dietaryRestrictions: [String] = []
     @State private var speechRate: Float = 0.5
@@ -16,8 +16,9 @@ struct ProfileSettingsView: View {
     @State private var autoSpeakResponses = true
     @State private var isLoading = false
     @State private var showingSuccess = false
+    @State private var showingDeleteAlert = false
+    @State private var isDeleting = false
 
-    // Available iOS voices
     private let iosVoices = [
         ("com.apple.ttsbundle.Samantha-compact", "Samantha (English US)"),
         ("com.apple.ttsbundle.Alex-compact", "Alex (English US)"),
@@ -27,21 +28,50 @@ struct ProfileSettingsView: View {
 
     var body: some View {
         Form {
-            // AI Model Info (Read-only)
+            // MARK: - AI Model
             Section {
                 HStack {
-                    Text("AI Model")
+                    Text("Model")
                     Spacer()
-                    Text("Llama 3.2 3B")
+                    Text("Bonsai 8B (1-bit)")
                         .foregroundColor(.secondary)
                 }
+
+                HStack {
+                    Text("Status")
+                    Spacer()
+                    if llmService.isLoaded {
+                        Label("Loaded", systemImage: "checkmark.circle.fill")
+                            .foregroundColor(.green)
+                    } else {
+                        Label("Not Loaded", systemImage: "xmark.circle.fill")
+                            .foregroundColor(.red)
+                    }
+                }
+
+                if llmService.isLoaded {
+                    Button("Unload Model") {
+                        llmService.unloadModel()
+                    }
+                    .foregroundColor(.orange)
+                } else {
+                    Button("Download & Load Model") {
+                        Task {
+                            do {
+                                try await llmService.preloadModel()
+                            } catch {
+                                print("Failed to load model: \(error)")
+                            }
+                        }
+                    }
+                }
             } header: {
-                Text("AI Assistant")
+                Text("AI Model")
             } footer: {
-                Text("Using local on-device Llama 3.2 3B model for privacy and offline capability.")
+                Text("On-device model for recipe parsing and cooking assistance. Downloads and loads automatically on first use. Pre-load here to avoid wait times.")
             }
 
-            // Measurement System
+            // MARK: - Cooking Preferences
             Section {
                 Picker("Measurement System", selection: $measurementSystem) {
                     Text("Imperial (cups, oz, °F)").tag("imperial")
@@ -52,15 +82,14 @@ struct ProfileSettingsView: View {
                 Text("Measurements")
             }
 
-            // Dietary Restrictions
             Section {
                 ForEach(dietaryRestrictions, id: \.self) { restriction in
                     HStack {
                         Text(restriction)
                         Spacer()
-                        Button(action: {
+                        Button {
                             dietaryRestrictions.removeAll { $0 == restriction }
-                        }) {
+                        } label: {
                             Image(systemName: "xmark.circle.fill")
                                 .foregroundColor(.red)
                         }
@@ -72,20 +101,16 @@ struct ProfileSettingsView: View {
                 }
             } header: {
                 Text("Dietary Restrictions")
-            } footer: {
-                Text("Specify any dietary restrictions or preferences.")
             }
 
-            // Voice Settings
+            // MARK: - Voice
             Section {
                 VStack(alignment: .leading, spacing: 8) {
                     Text("Speech Rate")
                     HStack {
-                        Text("Slow")
-                            .font(.caption)
+                        Text("Slow").font(.caption)
                         Slider(value: $speechRate, in: 0.1...2.0, step: 0.1)
-                        Text("Fast")
-                            .font(.caption)
+                        Text("Fast").font(.caption)
                     }
                     Text("\(speechRate, specifier: "%.1f")x")
                         .font(.caption)
@@ -101,16 +126,14 @@ struct ProfileSettingsView: View {
 
                 Toggle("Auto-speak responses", isOn: $autoSpeakResponses)
             } header: {
-                Text("Voice Settings")
-            } footer: {
-                Text("Configure text-to-speech settings for voice responses.")
+                Text("Voice")
             }
 
-            // Save Button
+            // MARK: - Save
             Section {
-                Button(action: {
+                Button {
                     savePreferences()
-                }) {
+                } label: {
                     if isLoading {
                         ProgressView()
                             .frame(maxWidth: .infinity)
@@ -121,18 +144,39 @@ struct ProfileSettingsView: View {
                 }
                 .disabled(isLoading)
             }
+
+            // MARK: - Data Management
+            Section {
+                Button(role: .destructive) {
+                    showingDeleteAlert = true
+                } label: {
+                    HStack {
+                        Image(systemName: "trash")
+                        Text("Delete All Data")
+                    }
+                }
+                .disabled(isDeleting)
+            } footer: {
+                Text("Permanently deletes all recipes and resets preferences.")
+            }
         }
-        .navigationTitle("Preferences")
+        .navigationTitle("Settings")
         .navigationBarTitleDisplayMode(.large)
-        .onAppear {
-            loadPreferences()
-        }
+        .onAppear { loadPreferences() }
         .alert("Saved", isPresented: $showingSuccess) {
             Button("OK", role: .cancel) { }
         } message: {
-            Text("Your preferences have been saved successfully.")
+            Text("Your preferences have been saved.")
+        }
+        .alert("Delete All Data", isPresented: $showingDeleteAlert) {
+            Button("Cancel", role: .cancel) { }
+            Button("Delete", role: .destructive) { deleteAllData() }
+        } message: {
+            Text("This will permanently delete all your recipes and reset preferences. This cannot be undone.")
         }
     }
+
+    // MARK: - Data Operations
 
     private func loadPreferences() {
         Task {
@@ -156,7 +200,6 @@ struct ProfileSettingsView: View {
 
     private func savePreferences() {
         isLoading = true
-
         Task {
             do {
                 let dataManager = try LocalDataManager()
@@ -167,16 +210,31 @@ struct ProfileSettingsView: View {
                     voiceIdentifier: voiceIdentifier,
                     autoSpeakResponses: autoSpeakResponses
                 )
-
                 await MainActor.run {
                     isLoading = false
                     showingSuccess = true
                 }
             } catch {
                 print("Failed to save preferences: \(error)")
+                await MainActor.run { isLoading = false }
+            }
+        }
+    }
+
+    private func deleteAllData() {
+        isDeleting = true
+        Task {
+            do {
+                let dataManager = try LocalDataManager()
+                try dataManager.deleteAllRecipes()
+                try dataManager.resetPreferences()
                 await MainActor.run {
-                    isLoading = false
+                    isDeleting = false
+                    loadPreferences()
                 }
+            } catch {
+                print("Failed to delete data: \(error)")
+                await MainActor.run { isDeleting = false }
             }
         }
     }
@@ -189,28 +247,20 @@ struct DietaryRestrictionPicker: View {
     @Environment(\.dismiss) private var dismiss
 
     private let commonRestrictions = [
-        "Vegetarian",
-        "Vegan",
-        "Gluten-Free",
-        "Dairy-Free",
-        "Nut-Free",
-        "Shellfish-Free",
-        "Kosher",
-        "Halal",
-        "Low-Carb",
-        "Keto",
-        "Paleo"
+        "Vegetarian", "Vegan", "Gluten-Free", "Dairy-Free",
+        "Nut-Free", "Shellfish-Free", "Kosher", "Halal",
+        "Low-Carb", "Keto", "Paleo"
     ]
 
     var body: some View {
         List {
             ForEach(commonRestrictions, id: \.self) { restriction in
-                Button(action: {
+                Button {
                     if !selectedRestrictions.contains(restriction) {
                         selectedRestrictions.append(restriction)
                         dismiss()
                     }
-                }) {
+                } label: {
                     HStack {
                         Text(restriction)
                         Spacer()
@@ -231,5 +281,6 @@ struct DietaryRestrictionPicker: View {
 #Preview {
     NavigationStack {
         ProfileSettingsView()
+            .environmentObject(LLMService.shared)
     }
 }

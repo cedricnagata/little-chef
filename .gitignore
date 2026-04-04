@@ -19,3 +19,7 @@ build/
 
 # Configuration files with sensitive data
 little-chef/Config.plist
+
+# Local MLX packages (PrismML fork + mlx-swift-lm)
+mlx-swift/
+mlx-swift-lm/

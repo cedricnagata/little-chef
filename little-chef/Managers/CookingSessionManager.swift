@@ -2,7 +2,7 @@
 //  CookingSessionManager.swift
 //  little-chef
 //
-//  Updated to use local LLM (MLXLLMService) and LocalCookingAgent
+//  Updated to use local LLM (LLMService) and LocalCookingAgent
 //
 
 import Foundation
@@ -18,10 +18,10 @@ class CookingSessionManager: ObservableObject, TimerManager {
 
     private var dataManager: LocalDataManager
     private var cookingAgent: LocalCookingAgent?
-    private let cookingService: MLXLLMService
+    private let llmService: LLMService
 
-    init(cookingService: MLXLLMService = .cookingService) {
-        self.cookingService = cookingService
+    init(llmService: LLMService = .shared) {
+        self.llmService = llmService
         do {
             dataManager = try LocalDataManager()
         } catch {
@@ -43,21 +43,9 @@ class CookingSessionManager: ObservableObject, TimerManager {
         print("🔵 Started new cooking session locally (model will load on page)")
     }
 
-    func loadModelForSession() async {
-        do {
-            // Load cooking model into memory after navigating to session page
-            print("🔵 Loading cooking model for session...")
-            _ = try await cookingService.loadLocalModel()
-            print("✅ Cooking model loaded")
-
-            // Initialize cooking agent with timer manager (uses Qwen model by default)
-            cookingAgent = LocalCookingAgent(timerManager: self)
-
-            error = nil
-        } catch {
-            self.error = "Failed to load cooking model: \(error.localizedDescription)"
-            print("❌ Failed to load cooking model: \(error)")
-        }
+    func initAgentForSession() {
+        cookingAgent = LocalCookingAgent(timerManager: self)
+        error = nil
     }
 
     private func loadLocalPreferences() async -> UserPreferencesDetailed {
@@ -83,10 +71,7 @@ class CookingSessionManager: ObservableObject, TimerManager {
         // Clear all timers
         clearAllTimers()
 
-        // Unload cooking model from memory when ending session
-        cookingService.unloadModel()
-
-        print("🔴 Ended cooking session, unloaded model, and reset state")
+        print("🔴 Ended cooking session and reset state")
     }
 
     private func clearAllTimers() {

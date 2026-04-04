@@ -99,7 +99,7 @@ struct LocalVoiceSettings: Codable, Equatable {
     )
 }
 
-/// Local user preferences (no LLM model selection - fixed to Llama 3.2)
+/// Local user preferences (no LLM model selection - fixed to Bonsai 8B)
 struct LocalUserPreferences: Codable {
     let measurementSystem: String
     let dietaryRestrictions: [String]

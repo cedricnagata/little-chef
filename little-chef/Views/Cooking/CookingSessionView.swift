@@ -9,7 +9,6 @@ import SwiftUI
 
 struct CookingSessionView: View {
     @EnvironmentObject var cookingSessionManager: CookingSessionManager
-    @EnvironmentObject var cookingService: MLXLLMService
     @EnvironmentObject var voiceAssistant: VoiceAssistant
     @EnvironmentObject var recipeManager: RecipeManager
     @State private var showingRecipeSelector = false
@@ -22,14 +21,6 @@ struct CookingSessionView: View {
             ZStack {
                 if cookingSessionManager.hasActiveSession() {
                     ActiveCookingView(isLoadingModel: $isLoadingCookingModel)
-                    .overlay {
-                        if isLoadingCookingModel {
-                            ModelLoadingOverlay(
-                                modelName: "Cooking Assistant Model",
-                                progress: cookingService.loadProgress
-                            )
-                        }
-                    }
                 } else {
                     StartCookingView(showingRecipeSelector: $showingRecipeSelector)
                         .navigationTitle("Cook with LittleChef")
@@ -163,12 +154,8 @@ struct ActiveCookingView: View {
             Text("Are you sure you want to end this cooking session?")
         }
         .onAppear {
-            // Load cooking model when view appears
-            Task {
-                isLoadingModel = true
-                await cookingSessionManager.loadModelForSession()
-                isLoadingModel = false
-            }
+            // Init the cooking agent (model must already be loaded from Settings)
+            cookingSessionManager.initAgentForSession()
 
             // Update voice assistant settings when view appears
             updateVoiceAssistantSettings()
@@ -1190,5 +1177,4 @@ struct AddTimerView: View {
         .environmentObject(CookingSessionManager())
         .environmentObject(VoiceAssistant())
         .environmentObject(RecipeManager())
-        .environmentObject(MLXLLMService.cookingService)
 }

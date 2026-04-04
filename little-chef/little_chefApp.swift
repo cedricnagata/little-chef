@@ -2,7 +2,7 @@
 //  little_chefApp.swift
 //  little-chef
 //
-//  Updated for local-only operation (no backend authentication)
+//  Local-only operation with on-device Bonsai 8B model
 //
 
 import SwiftUI
@@ -10,33 +10,26 @@ import SwiftData
 
 @main
 struct little_chefApp: App {
-    @StateObject private var parsingService = MLXLLMService.parsingService
-    @StateObject private var cookingService = MLXLLMService.cookingService
+    @StateObject private var llmService = LLMService.shared
     @StateObject private var voiceAssistant = VoiceAssistant()
-
-    // Initialize CookingSessionManager with the cooking service instance
     @StateObject private var cookingSessionManager: CookingSessionManager
 
     // SwiftData container for local storage
-    let modelContainer: ModelContainer
+    let dataModelContainer: SwiftData.ModelContainer
 
     init() {
-        // Initialize services first
-        let cooking = MLXLLMService.cookingService
-        _cookingService = StateObject(wrappedValue: cooking)
-        _parsingService = StateObject(wrappedValue: MLXLLMService.parsingService)
+        let llm = LLMService.shared
+        _llmService = StateObject(wrappedValue: llm)
         _voiceAssistant = StateObject(wrappedValue: VoiceAssistant())
-
-        // Initialize CookingSessionManager with the same cooking service instance
-        _cookingSessionManager = StateObject(wrappedValue: CookingSessionManager(cookingService: cooking))
+        _cookingSessionManager = StateObject(wrappedValue: CookingSessionManager(llmService: llm))
 
         do {
             let schema = Schema([
                 RecipeEntity.self,
                 UserPreferencesEntity.self
             ])
-            let modelConfiguration = ModelConfiguration(schema: schema, isStoredInMemoryOnly: false)
-            modelContainer = try ModelContainer(for: schema, configurations: [modelConfiguration])
+            let swiftDataConfig = SwiftData.ModelConfiguration(schema: schema, isStoredInMemoryOnly: false)
+            dataModelContainer = try SwiftData.ModelContainer(for: schema, configurations: [swiftDataConfig])
         } catch {
             fatalError("Failed to create ModelContainer: \(error)")
         }
@@ -47,9 +40,8 @@ struct little_chefApp: App {
             ContentView()
                 .environmentObject(cookingSessionManager)
                 .environmentObject(voiceAssistant)
-                .environmentObject(parsingService)
-                .environmentObject(cookingService)
-                .modelContainer(modelContainer)
+                .environmentObject(llmService)
+                .modelContainer(dataModelContainer)
         }
     }
 }

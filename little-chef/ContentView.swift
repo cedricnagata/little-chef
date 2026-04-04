@@ -2,25 +2,25 @@
 //  ContentView.swift
 //  little-chef
 //
-//  Updated for local-only operation with MLXLLM
-//
 
 import SwiftUI
 
 struct ContentView: View {
-    @EnvironmentObject var parsingService: MLXLLMService
-    @EnvironmentObject var cookingService: MLXLLMService
+    @EnvironmentObject var llmService: LLMService
 
     var body: some View {
-        // Models are loaded lazily when needed - don't pre-load to save memory
         MainView()
+            .overlay {
+                if llmService.isLoadingModel {
+                    ModelLoadingOverlay()
+                }
+            }
     }
 }
 
 #Preview {
     ContentView()
-        .environmentObject(MLXLLMService.parsingService)
-        .environmentObject(MLXLLMService.cookingService)
+        .environmentObject(LLMService.shared)
         .environmentObject(CookingSessionManager())
         .environmentObject(VoiceAssistant())
 }

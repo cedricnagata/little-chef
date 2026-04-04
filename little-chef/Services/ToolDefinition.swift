@@ -2,15 +2,13 @@
 //  ToolDefinition.swift
 //  little-chef
 //
-//  Defines available tools for the local LLM agent
+//  Timer tool definitions for the cooking assistant
 //
 
 import Foundation
-import MLXLMCommon
 
 // MARK: - Timer Manager Protocol
 
-/// Protocol for managing timers (implemented by CookingSessionManager)
 protocol TimerManager {
     func setTimer(name: String, durationMinutes: Int) throws
     func startTimer(name: String) throws
@@ -20,110 +18,94 @@ protocol TimerManager {
     func getAllTimers() -> [LocalTimer]
 }
 
-// MARK: - Timer Tool Types
-
-/// Timer tool input/output types
-struct SetTimerInput: Codable {
-    let name: String
-    let minutes: Int
-}
-
-struct StartTimerInput: Codable {
-    let name: String
-}
-
-struct PauseTimerInput: Codable {
-    let name: String
-}
-
-struct DeleteTimerInput: Codable {
-    let name: String
-}
-
-struct TimerOutput: Codable {
-    let success: Bool
-    let message: String
-}
-
 // MARK: - Cooking Tools
 
-/// Timer tools for cooking assistant using MLXLLM Tool format
 struct CookingTools {
-    let setTimer: Tool<SetTimerInput, TimerOutput>
-    let startTimer: Tool<StartTimerInput, TimerOutput>
-    let pauseTimer: Tool<PauseTimerInput, TimerOutput>
-    let deleteTimer: Tool<DeleteTimerInput, TimerOutput>
+    let timerManager: TimerManager
 
-    init(timerManager: TimerManager) {
-        // Set Timer Tool - creates and starts a timer
-        setTimer = Tool<SetTimerInput, TimerOutput>(
-            name: "set_timer",
-            description: "Creates and starts a new cooking timer with a specified name and duration in minutes",
-            parameters: [
-                .required("name", type: .string, description: "Descriptive name for the timer (e.g., 'boil pasta', 'marinate chicken')"),
-                .required("minutes", type: .int, description: "Duration in minutes for the timer")
-            ]
-        ) { input in
-            do {
-                try timerManager.setTimer(name: input.name, durationMinutes: input.minutes)
-                return TimerOutput(success: true, message: "Timer '\(input.name)' set for \(input.minutes) minutes and started")
-            } catch {
-                return TimerOutput(success: false, message: "Failed to set timer: \(error.localizedDescription)")
-            }
-        }
+    /// Text description of tool schemas for injection into system prompt
+    var toolSchemaText: String {
+        """
+        ## set_timer
+        Creates and starts a new cooking timer.
+        Arguments: {"name": "<descriptive name>", "minutes": <integer>}
+        Example: {"name": "set_timer", "arguments": {"name": "boil pasta", "minutes": 10}}
 
-        // Start Timer Tool - starts a new or paused timer
-        startTimer = Tool<StartTimerInput, TimerOutput>(
-            name: "start_timer",
-            description: "Starts a timer that is in 'new' or 'paused' state (use this to resume paused timers)",
-            parameters: [
-                .required("name", type: .string, description: "Name of the timer to start")
-            ]
-        ) { input in
-            do {
-                try timerManager.startTimer(name: input.name)
-                return TimerOutput(success: true, message: "Timer '\(input.name)' started")
-            } catch {
-                return TimerOutput(success: false, message: "Failed to start timer: \(error.localizedDescription)")
-            }
-        }
+        ## start_timer
+        Starts or resumes a paused timer.
+        Arguments: {"name": "<timer name>"}
+        Example: {"name": "start_timer", "arguments": {"name": "boil pasta"}}
 
-        // Pause Timer Tool
-        pauseTimer = Tool<PauseTimerInput, TimerOutput>(
-            name: "pause_timer",
-            description: "Pauses a currently running timer (can be resumed with start_timer)",
-            parameters: [
-                .required("name", type: .string, description: "Name of the timer to pause")
-            ]
-        ) { input in
-            do {
-                try timerManager.pauseTimer(name: input.name)
-                return TimerOutput(success: true, message: "Timer '\(input.name)' paused")
-            } catch {
-                return TimerOutput(success: false, message: "Failed to pause timer: \(error.localizedDescription)")
-            }
-        }
+        ## pause_timer
+        Pauses a running timer.
+        Arguments: {"name": "<timer name>"}
+        Example: {"name": "pause_timer", "arguments": {"name": "boil pasta"}}
 
-        // Delete Timer Tool
-        deleteTimer = Tool<DeleteTimerInput, TimerOutput>(
-            name: "delete_timer",
-            description: "Removes/deletes a timer completely",
-            parameters: [
-                .required("name", type: .string, description: "Name of the timer to delete")
-            ]
-        ) { input in
-            do {
-                try timerManager.deleteTimer(name: input.name)
-                return TimerOutput(success: true, message: "Timer '\(input.name)' deleted")
-            } catch {
-                return TimerOutput(success: false, message: "Failed to delete timer: \(error.localizedDescription)")
-            }
-        }
+        ## delete_timer
+        Removes a timer completely.
+        Arguments: {"name": "<timer name>"}
+        Example: {"name": "delete_timer", "arguments": {"name": "boil pasta"}}
+        """
     }
 
-    /// Get all tool schemas for passing to UserInput
-    var allSchemas: [[String: Any]] {
-        [setTimer.schema, startTimer.schema, pauseTimer.schema, deleteTimer.schema]
+    /// Execute a tool by name with the given arguments
+    @MainActor
+    func execute(toolName: String, arguments: [String: Any]) -> String {
+        switch toolName {
+        case "set_timer":
+            guard let name = arguments["name"] as? String else {
+                return "Error: missing 'name' argument"
+            }
+            let minutes: Int
+            if let m = arguments["minutes"] as? Int {
+                minutes = m
+            } else if let m = arguments["minutes"] as? Double {
+                minutes = Int(m)
+            } else {
+                return "Error: missing or invalid 'minutes' argument"
+            }
+            do {
+                try timerManager.setTimer(name: name, durationMinutes: minutes)
+                return "Timer '\(name)' set for \(minutes) minutes and started."
+            } catch {
+                return "Failed to set timer: \(error.localizedDescription)"
+            }
+
+        case "start_timer":
+            guard let name = arguments["name"] as? String else {
+                return "Error: missing 'name' argument"
+            }
+            do {
+                try timerManager.startTimer(name: name)
+                return "Timer '\(name)' started."
+            } catch {
+                return "Failed to start timer: \(error.localizedDescription)"
+            }
+
+        case "pause_timer":
+            guard let name = arguments["name"] as? String else {
+                return "Error: missing 'name' argument"
+            }
+            do {
+                try timerManager.pauseTimer(name: name)
+                return "Timer '\(name)' paused."
+            } catch {
+                return "Failed to pause timer: \(error.localizedDescription)"
+            }
+
+        case "delete_timer":
+            guard let name = arguments["name"] as? String else {
+                return "Error: missing 'name' argument"
+            }
+            do {
+                try timerManager.deleteTimer(name: name)
+                return "Timer '\(name)' deleted."
+            } catch {
+                return "Failed to delete timer: \(error.localizedDescription)"
+            }
+
+        default:
+            return "Unknown tool: \(toolName)"
+        }
     }
 }
-

@@ -13,7 +13,7 @@ import UIKit
 @MainActor
 class LocalRecipeParser: ObservableObject {
     // MARK: - Dependencies
-    private let llmService: MLXLLMService
+    private let llmService: LLMService
     private let webScraper: WebScraperService
     private let ocrService: OCRService
 
@@ -24,7 +24,7 @@ class LocalRecipeParser: ObservableObject {
     // MARK: - Initialization
 
     init(
-        llmService: MLXLLMService = .parsingService,
+        llmService: LLMService = .shared,
         webScraper: WebScraperService = .shared,
         ocrService: OCRService = .shared
     ) {

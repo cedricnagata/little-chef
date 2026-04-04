@@ -16,11 +16,11 @@ class RecipeManager: ObservableObject {
 
     private var dataManager: LocalDataManager
     private let recipeParser: LocalRecipeParser
-    private let parsingService: MLXLLMService
+    private let llmService: LLMService
 
-    init(parsingService: MLXLLMService = .parsingService) {
-        self.parsingService = parsingService
-        self.recipeParser = LocalRecipeParser(llmService: parsingService)
+    init(llmService: LLMService = .shared) {
+        self.llmService = llmService
+        self.recipeParser = LocalRecipeParser(llmService: llmService)
         do {
             dataManager = try LocalDataManager()
         } catch {
