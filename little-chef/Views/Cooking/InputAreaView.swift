@@ -165,13 +165,16 @@ struct InputAreaView: View {
         textInput = ""
         isTextFieldFocused = false
 
-        Task {
-            await cookingSessionManager.sendQuery(query)
+        let shouldSpeak = cookingSessionManager.currentSession?.userPreferences.voiceSettings.autoSpeakResponses == true
 
-            if let session = cookingSessionManager.currentSession,
-               session.userPreferences.voiceSettings.autoSpeakResponses,
-               !cookingSessionManager.lastResponse.isEmpty {
-                voiceAssistant.speak(cookingSessionManager.lastResponse)
+        Task {
+            await cookingSessionManager.sendQueryStreaming(query) { sentence in
+                if shouldSpeak {
+                    voiceAssistant.enqueueSentence(sentence)
+                }
+            }
+            if shouldSpeak {
+                voiceAssistant.flushSentenceQueue()
             }
         }
     }
@@ -183,11 +186,10 @@ struct InputAreaView: View {
         voiceAssistant.clearRecognizedText()
 
         Task {
-            await cookingSessionManager.sendQuery(query)
-
-            if !cookingSessionManager.lastResponse.isEmpty {
-                voiceAssistant.speak(cookingSessionManager.lastResponse)
+            await cookingSessionManager.sendQueryStreaming(query) { sentence in
+                voiceAssistant.enqueueSentence(sentence)
             }
+            voiceAssistant.flushSentenceQueue()
         }
     }
 
@@ -202,11 +204,10 @@ struct InputAreaView: View {
 
         voiceAssistant.onVoiceQueryReady = { [weak cookingSessionManager, weak voiceAssistant] query in
             Task {
-                await cookingSessionManager?.sendQuery(query)
-
-                if let response = cookingSessionManager?.lastResponse, !response.isEmpty {
-                    voiceAssistant?.speak(response)
+                await cookingSessionManager?.sendQueryStreaming(query) { sentence in
+                    voiceAssistant?.enqueueSentence(sentence)
                 }
+                voiceAssistant?.flushSentenceQueue()
             }
         }
 

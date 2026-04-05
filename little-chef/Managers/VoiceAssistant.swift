@@ -23,7 +23,11 @@ class VoiceAssistant: NSObject, ObservableObject {
     
     // Voice preferences
     private var voiceSettings: LocalVoiceSettings?
-    
+
+    // Sentence queue for streaming TTS
+    private var sentenceQueue: [String] = []
+    private var isSpeakingFromQueue = false
+
     private let speechRecognizer = SFSpeechRecognizer(locale: Locale(identifier: "en-US"))
     private let audioEngine = AVAudioEngine()
     private let synthesizer = AVSpeechSynthesizer()
@@ -204,7 +208,49 @@ class VoiceAssistant: NSObject, ObservableObject {
 
     func stopSpeaking() {
         synthesizer.stopSpeaking(at: .immediate)
+        sentenceQueue.removeAll()
+        isSpeakingFromQueue = false
         isSpeaking = false
+    }
+
+    // MARK: - Streaming TTS (sentence queue)
+
+    /// Enqueue a completed sentence for TTS. Sentences are spoken sequentially —
+    /// if the synthesizer is idle the sentence starts immediately, otherwise it
+    /// waits until the current utterance finishes.
+    func enqueueSentence(_ sentence: String) {
+        let trimmed = sentence.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        sentenceQueue.append(trimmed)
+        speakNextInQueue()
+    }
+
+    /// Call when streaming is done to flush any remaining buffered text.
+    func flushSentenceQueue() {
+        // Nothing extra needed — the queue drains via the delegate.
+        // But if nothing is currently playing and the queue has items, kick it.
+        if !isSpeakingFromQueue {
+            speakNextInQueue()
+        }
+    }
+
+    private func speakNextInQueue() {
+        guard !sentenceQueue.isEmpty, !isSpeakingFromQueue else { return }
+        isSpeakingFromQueue = true
+
+        let sentence = sentenceQueue.removeFirst()
+
+        let utterance = AVSpeechUtterance(string: sentence)
+        if let voiceSettings = voiceSettings {
+            utterance.rate = voiceSettings.speechRate
+            utterance.voice = AVSpeechSynthesisVoice(identifier: voiceSettings.voiceIdentifier)
+        } else {
+            utterance.rate = 0.5
+            utterance.voice = AVSpeechSynthesisVoice(language: "en-US")
+        }
+
+        isSpeaking = true
+        synthesizer.speak(utterance)
     }
     
     // MARK: - Convenience Methods
@@ -502,12 +548,19 @@ class VoiceAssistant: NSObject, ObservableObject {
 extension VoiceAssistant: @preconcurrency AVSpeechSynthesizerDelegate {
     func speechSynthesizer(_ synthesizer: AVSpeechSynthesizer, didFinish utterance: AVSpeechUtterance) {
         DispatchQueue.main.async {
-            self.isSpeaking = false
+            self.isSpeakingFromQueue = false
+            if self.sentenceQueue.isEmpty {
+                self.isSpeaking = false
+            } else {
+                self.speakNextInQueue()
+            }
         }
     }
-    
+
     func speechSynthesizer(_ synthesizer: AVSpeechSynthesizer, didCancel utterance: AVSpeechUtterance) {
         DispatchQueue.main.async {
+            self.isSpeakingFromQueue = false
+            self.sentenceQueue.removeAll()
             self.isSpeaking = false
         }
     }

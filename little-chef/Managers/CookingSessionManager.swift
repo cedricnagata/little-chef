@@ -129,9 +129,10 @@ class CookingSessionManager: ObservableObject, TimerManager {
         isLoading = false
     }
 
-    /// Stream response for real-time feedback
-    func sendQueryStreaming(_ query: String, onToken: @escaping (String) -> Void) async {
-        guard let session = currentSession else {
+    /// Streaming query — updates the assistant message progressively as chunks arrive.
+    /// Calls `onSentence` each time a complete sentence is ready (for TTS).
+    func sendQueryStreaming(_ query: String, onSentence: ((String) -> Void)? = nil) async {
+        guard currentSession != nil else {
             error = "No active cooking session"
             return
         }
@@ -141,54 +142,83 @@ class CookingSessionManager: ObservableObject, TimerManager {
             return
         }
 
-        // Clear any previous errors
         error = nil
         isLoading = true
 
-        // Add user message to history
-        var updatedSession = session
-        updatedSession.conversationHistory.append(
-            Message(
-                id: UUID(),
-                role: "user",
-                content: query,
-                timestamp: Date()
-            )
+        // Add user message immediately
+        currentSession?.conversationHistory.append(
+            Message(id: UUID(), role: "user", content: query, timestamp: Date())
         )
 
+        // Add a placeholder assistant message that we'll update progressively
+        let assistantMessageId = UUID()
+        currentSession?.conversationHistory.append(
+            Message(id: assistantMessageId, role: "assistant", content: "", timestamp: Date())
+        )
+
+        // Sentence buffer for TTS
+        var sentenceBuffer = ""
+
         do {
-            // Convert session to Recipe for agent
-            let recipe = createRecipeFromSession(session)
+            let recipe = createRecipeFromSession(currentSession!)
+            let conversationContext = currentSession!.conversationHistory
 
-            // Convert conversation history
-            let conversationContext = session.conversationHistory
-
-            // Process query (no streaming - get full response)
-            let fullResponse = try await agent.processQuery(
+            let response = try await agent.processQueryStreaming(
                 userMessage: query,
                 recipe: recipe,
                 conversationContext: conversationContext
-            )
+            ) { [weak self] chunk in
+                guard let self else { return }
 
-            // Send full response via onToken callback
-            onToken(fullResponse)
+                // Update the assistant message in-place
+                if let index = self.currentSession?.conversationHistory.firstIndex(where: { $0.id == assistantMessageId }) {
+                    let current = self.currentSession?.conversationHistory[index].content ?? ""
+                    self.currentSession?.conversationHistory[index] = Message(
+                        id: assistantMessageId,
+                        role: "assistant",
+                        content: current + chunk,
+                        timestamp: Date()
+                    )
+                }
 
-            // Add assistant response to history
-            updatedSession.conversationHistory.append(
-                Message(
-                    id: UUID(),
+                // Buffer sentences for TTS
+                if let onSentence {
+                    sentenceBuffer += chunk
+                    // Extract complete sentences (ending with . ! or ?)
+                    while let range = sentenceBuffer.range(of: "[.!?]\\s+|[.!?]$", options: .regularExpression) {
+                        let sentence = String(sentenceBuffer[sentenceBuffer.startIndex...range.lowerBound])
+                        onSentence(sentence)
+                        sentenceBuffer = String(sentenceBuffer[range.upperBound...])
+                    }
+                }
+            }
+
+            // Flush any remaining text as a final sentence
+            let remainingSentence = sentenceBuffer.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !remainingSentence.isEmpty {
+                onSentence?(remainingSentence)
+            }
+
+            // Update the final message content (cleaned by the agent)
+            if let index = currentSession?.conversationHistory.firstIndex(where: { $0.id == assistantMessageId }) {
+                currentSession?.conversationHistory[index] = Message(
+                    id: assistantMessageId,
                     role: "assistant",
-                    content: fullResponse,
+                    content: response,
                     timestamp: Date()
                 )
-            )
+            }
 
-            currentSession = updatedSession
-            lastResponse = fullResponse
+            lastResponse = response
 
         } catch {
             self.error = "Failed to get response: \(error.localizedDescription)"
             print("Agent query error: \(error)")
+
+            // Remove the empty placeholder on error
+            if let index = currentSession?.conversationHistory.firstIndex(where: { $0.id == assistantMessageId }) {
+                currentSession?.conversationHistory.remove(at: index)
+            }
         }
 
         isLoading = false

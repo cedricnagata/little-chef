@@ -177,6 +177,90 @@ class LLMService: ObservableObject {
         return afterTextTools
     }
 
+    // MARK: - Streaming Chat Completion
+
+    /// Streaming variant — calls `onChunk` with each text fragment as it arrives.
+    /// Returns the full response. If the model emits tool calls, they are executed
+    /// and the result is returned (no streaming for tool responses).
+    func generateChatCompletionStreaming(
+        messages: [ChatMessage],
+        temperature: Float? = nil,
+        maxTokens: Int? = nil,
+        tools: CookingTools? = nil,
+        onChunk: @escaping (String) -> Void
+    ) async throws -> String {
+        isGenerating = true
+        defer { isGenerating = false }
+
+        let container = try await loadModel()
+
+        let chatMessages: [Chat.Message] = messages.map { msg in
+            switch msg.role {
+            case .system: return .system(msg.content)
+            case .user: return .user(msg.content)
+            case .assistant: return .assistant(msg.content)
+            }
+        }
+
+        let toolSpecs: [ToolSpec]? = tools?.nativeToolSpecs
+        let userInput = UserInput(chat: chatMessages, tools: toolSpecs)
+
+        let stream: AsyncStream<Generation> = try await container.perform { (context: ModelContext) in
+            let lmInput = try await context.processor.prepare(input: userInput)
+            let parameters = GenerateParameters(
+                maxTokens: maxTokens ?? 2048,
+                temperature: temperature ?? 0.7
+            )
+            return try MLXLMCommon.generate(
+                input: lmInput, parameters: parameters, context: context
+            )
+        }
+
+        var output = ""
+        var nativeToolCalls: [(name: String, arguments: [String: Any])] = []
+
+        for await generation in stream {
+            switch generation {
+            case .chunk(let chunk):
+                output += chunk
+                // Stream text chunks to caller in real-time
+                if !chunk.isEmpty {
+                    onChunk(chunk)
+                }
+            case .info(_):
+                break
+            case .toolCall(let toolCall):
+                let args = toolCall.function.arguments.mapValues { $0.anyValue }
+                nativeToolCalls.append((name: toolCall.function.name, arguments: args))
+            @unknown default:
+                break
+            }
+        }
+
+        // Execute native tool calls (not streamed — delivered as final result)
+        if !nativeToolCalls.isEmpty, let tools {
+            var toolResults: [String] = []
+            for call in nativeToolCalls {
+                let result = tools.execute(toolName: call.name, arguments: call.arguments)
+                toolResults.append(result)
+            }
+            let textPart = stripThinkingTags(from: output)
+            let toolPart = toolResults.joined(separator: "\n")
+            let finalResult = textPart.isEmpty ? toolPart : textPart + "\n" + toolPart
+            return finalResult
+        }
+
+        // No native tool calls — clean up text and try fallbacks
+        let cleaned = stripThinkingTags(from: output)
+        let afterTextTools = processTextToolCalls(output: cleaned, tools: tools)
+
+        if let tools, nativeToolCalls.isEmpty {
+            inferTimerAction(from: afterTextTools, tools: tools)
+        }
+
+        return afterTextTools
+    }
+
     // MARK: - Model Info
 
     func getModelInfo() -> ModelInfo? {

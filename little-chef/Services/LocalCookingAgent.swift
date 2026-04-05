@@ -66,6 +66,43 @@ class LocalCookingAgent: ObservableObject {
         return response
     }
 
+    /// Streaming variant — calls `onChunk` with each text fragment as it arrives.
+    func processQueryStreaming(
+        userMessage: String,
+        recipe: Recipe?,
+        conversationContext: [Message],
+        onChunk: @escaping (String) -> Void
+    ) async throws -> String {
+        isProcessing = true
+        defer { isProcessing = false }
+
+        let systemMessage = buildSystemMessage(recipe: recipe)
+        let userChatMessage = ChatMessage(role: .user, content: userMessage)
+
+        var messages: [ChatMessage] = [systemMessage] + conversationHistory + [userChatMessage]
+
+        if messages.count > maxHistoryLength {
+            messages = [systemMessage] + Array(messages.suffix(maxHistoryLength - 1))
+        }
+
+        let cookingTools = CookingTools(timerManager: timerManager)
+
+        let response = try await llmService.generateChatCompletionStreaming(
+            messages: messages,
+            tools: cookingTools,
+            onChunk: onChunk
+        )
+
+        conversationHistory.append(ChatMessage(role: .user, content: userMessage))
+        conversationHistory.append(ChatMessage(role: .assistant, content: response))
+
+        if conversationHistory.count > maxHistoryLength {
+            conversationHistory = Array(conversationHistory.suffix(maxHistoryLength))
+        }
+
+        return response
+    }
+
     func clearHistory() {
         conversationHistory.removeAll()
     }
