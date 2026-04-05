@@ -32,23 +32,6 @@ struct AddRecipeView: View {
         NavigationView {
             ScrollView {
                 VStack(spacing: 24) {
-                    // Header
-                    VStack(spacing: 8) {
-                        Image(systemName: "plus.circle.fill")
-                            .font(.system(size: 50))
-                            .foregroundColor(.orange)
-                        
-                        Text("Add New Recipe")
-                            .font(.title2)
-                            .fontWeight(.bold)
-                        
-                        Text("Choose how you'd like to add your recipe")
-                            .font(.subheadline)
-                            .foregroundColor(.secondary)
-                            .multilineTextAlignment(.center)
-                    }
-                    .padding(.top)
-                    
                     // Input type selector
                     VStack(spacing: 16) {
                         Text("Recipe Source")
@@ -97,15 +80,31 @@ struct AddRecipeView: View {
                                 }
                                 Text(isParsingRecipe ? "Parsing Recipe..." : "Parse Recipe")
                             }
-                        .font(.headline)
-                        .foregroundColor(.white)
-                        .frame(maxWidth: .infinity)
-                        .padding()
-                        .background(canParseRecipe ? Color.orange : Color.gray)
-                        .cornerRadius(12)
-                    }
-                    .disabled(!canParseRecipe || isParsingRecipe)
-                    .padding(.horizontal)
+                            .font(.headline)
+                            .foregroundColor(.white)
+                            .frame(maxWidth: .infinity)
+                            .padding()
+                            .background(canParseRecipe ? Color.orange : Color.gray)
+                            .cornerRadius(12)
+                        }
+                        .disabled(!canParseRecipe || isParsingRecipe)
+                        .padding(.horizontal)
+
+                        // Parsing status
+                        if isParsingRecipe {
+                            VStack(spacing: 8) {
+                                if !recipeManager.parseStatus.isEmpty {
+                                    Text(recipeManager.parseStatus)
+                                        .font(.subheadline)
+                                        .foregroundColor(.secondary)
+                                }
+                                Text("Please keep the app open while parsing")
+                                    .font(.caption)
+                                    .foregroundColor(.secondary)
+                                    .italic()
+                            }
+                            .padding(.horizontal)
+                        }
                     
                     // Show parsed recipe if available
                     if let recipe = parsedRecipe {
@@ -192,6 +191,7 @@ struct AddRecipeView: View {
     }
     
     private func parseRecipe() {
+        UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
         Task {
             isParsingRecipe = true
             

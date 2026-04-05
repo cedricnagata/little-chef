@@ -8,12 +8,14 @@
 import Foundation
 import SwiftUI
 import UIKit
+import Combine
 
 @MainActor
 class RecipeManager: ObservableObject {
     @Published var recipes: [Recipe] = []
     @Published var isLoading = false
     @Published var errorMessage: String?
+    @Published var parseStatus: String = ""
 
     private var dataManager: LocalDataManager
     private let recipeParser: LocalRecipeParser
@@ -129,18 +131,16 @@ class RecipeManager: ObservableObject {
     
     // MARK: - Recipe Parsing
 
-    /// Wraps a parsing operation in a UIKit background task so iOS gives extra
-    /// execution time if the app is backgrounded or the screen locks.
-    private func withBackgroundTask<T>(_ work: @escaping () async throws -> T) async rethrows -> T {
-        var bgTaskID: UIBackgroundTaskIdentifier = .invalid
-        bgTaskID = UIApplication.shared.beginBackgroundTask(withName: "RecipeParsing") {
-            UIApplication.shared.endBackgroundTask(bgTaskID)
-            bgTaskID = .invalid
+    /// Keeps the screen awake during GPU-based parsing and forwards status updates.
+    private func withParsingContext<T>(_ work: @escaping () async throws -> T) async rethrows -> T {
+        UIApplication.shared.isIdleTimerDisabled = true
+        let observation = recipeParser.$statusMessage.receive(on: RunLoop.main).sink { [weak self] status in
+            self?.parseStatus = status
         }
         defer {
-            if bgTaskID != .invalid {
-                UIApplication.shared.endBackgroundTask(bgTaskID)
-            }
+            UIApplication.shared.isIdleTimerDisabled = false
+            observation.cancel()
+            parseStatus = ""
         }
         return try await work()
     }
@@ -150,7 +150,7 @@ class RecipeManager: ObservableObject {
         errorMessage = nil
 
         do {
-            let response = try await withBackgroundTask {
+            let response = try await withParsingContext {
                 try await self.recipeParser.parseFromURL(url)
             }
             isLoading = false
@@ -167,7 +167,7 @@ class RecipeManager: ObservableObject {
         errorMessage = nil
 
         do {
-            let response = try await withBackgroundTask {
+            let response = try await withParsingContext {
                 try await self.recipeParser.parseFromText(text)
             }
             isLoading = false
@@ -184,7 +184,7 @@ class RecipeManager: ObservableObject {
         errorMessage = nil
 
         do {
-            let response = try await withBackgroundTask {
+            let response = try await withParsingContext {
                 try await self.recipeParser.parseFromImages(images)
             }
             isLoading = false

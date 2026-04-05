@@ -16,6 +16,7 @@ class LocalRecipeParser: ObservableObject {
 
     @Published var isProcessing = false
     @Published var progress: Double = 0.0
+    @Published var statusMessage: String = ""
 
     convenience init(llmService: LLMService) {
         self.init(llmService: llmService, webScraper: .shared, ocrService: .shared)
@@ -32,7 +33,12 @@ class LocalRecipeParser: ObservableObject {
     func parseFromURL(_ url: String) async throws -> RecipeParseResponse {
         isProcessing = true
         progress = 0.1
-        defer { isProcessing = false; progress = 1.0 }
+        statusMessage = "Loading webpage..."
+        defer {
+            isProcessing = false
+            progress = 1.0
+            statusMessage = ""
+        }
 
         print("📖 [PARSER] Parsing URL: \(url)")
         let webContent: String
@@ -44,23 +50,29 @@ class LocalRecipeParser: ObservableObject {
             throw error
         }
         progress = 0.3
+        statusMessage = "Extracting recipe data..."
 
         var recipeData: RecipeData
 
-        // Try direct schema.org parsing first, then always do an LLM cleanup pass
+        // Try direct schema.org parsing first
         if webContent.hasPrefix("Schema.org Recipe JSON:"),
            let parsed = try? parseSchemaOrgRecipe(from: webContent, sourceUrl: url) {
-            print("📖 [PARSER] ✅ Parsed from schema.org, running LLM cleanup pass")
-            if let cleaned = try? await cleanupWithLLM(schema: parsed, sourceUrl: url) {
-                recipeData = cleaned
-            } else {
-                print("📖 [PARSER] LLM cleanup failed, using raw schema.org result")
-                recipeData = parsed
+            print("📖 [PARSER] ✅ Parsed from schema.org")
+            recipeData = parsed
+
+            // Only run LLM if something is missing
+            let (confidence, _) = evaluateRecipe(recipeData)
+            if confidence < 1.0 {
+                print("📖 [PARSER] Schema.org incomplete (confidence \(confidence)), running LLM cleanup")
+                statusMessage = "Filling in missing details..."
+                if let cleaned = try? await cleanupWithLLM(schema: recipeData, sourceUrl: url) {
+                    recipeData = cleaned
+                }
             }
         } else {
             // No schema.org — full LLM parse with higher token limit
             print("📖 [PARSER] No schema.org data, falling back to LLM")
-            print("📖 [PARSER] Content preview (first 500 chars):\n\(String(webContent.prefix(500)))")
+            statusMessage = "Analyzing recipe with AI..."
             recipeData = try await parseWithLLM(text: webContent, sourceUrl: url, maxTokens: 4096)
         }
 
@@ -77,7 +89,8 @@ class LocalRecipeParser: ObservableObject {
     func parseFromText(_ text: String) async throws -> RecipeParseResponse {
         isProcessing = true
         progress = 0.2
-        defer { isProcessing = false; progress = 1.0 }
+        statusMessage = "Analyzing recipe with AI..."
+        defer { isProcessing = false; progress = 1.0; statusMessage = "" }
 
         let recipeData = try await parseWithLLM(text: text, sourceUrl: nil)
         progress = 1.0
@@ -89,7 +102,8 @@ class LocalRecipeParser: ObservableObject {
     func parseFromImages(_ images: [UIImage]) async throws -> RecipeParseResponse {
         isProcessing = true
         progress = 0.1
-        defer { isProcessing = false; progress = 1.0 }
+        statusMessage = "Reading text from images..."
+        defer { isProcessing = false; progress = 1.0; statusMessage = "" }
 
         guard !images.isEmpty else { throw RecipeParserError.noImagesProvided }
 
@@ -98,6 +112,7 @@ class LocalRecipeParser: ObservableObject {
 
         guard !extractedText.isEmpty else { throw RecipeParserError.noTextExtracted }
 
+        statusMessage = "Analyzing recipe with AI..."
         let recipeData = try await parseWithLLM(text: extractedText, sourceUrl: nil)
         progress = 1.0
 
