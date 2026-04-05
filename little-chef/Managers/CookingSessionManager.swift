@@ -20,7 +20,11 @@ class CookingSessionManager: ObservableObject, TimerManager {
     private var cookingAgent: LocalCookingAgent?
     private let llmService: LLMService
 
-    init(llmService: LLMService = .shared) {
+    convenience init() {
+        self.init(llmService: .shared)
+    }
+
+    init(llmService: LLMService) {
         self.llmService = llmService
         do {
             dataManager = try LocalDataManager()
@@ -82,7 +86,7 @@ class CookingSessionManager: ObservableObject, TimerManager {
     // MARK: - Agent Communication
 
     func sendQuery(_ query: String) async {
-        guard let session = currentSession else {
+        guard currentSession != nil else {
             error = "No active cooking session"
             return
         }
@@ -94,42 +98,27 @@ class CookingSessionManager: ObservableObject, TimerManager {
 
         // Clear any previous errors
         error = nil
+
+        // Add user message immediately so it shows in the chat
+        currentSession?.conversationHistory.append(
+            Message(id: UUID(), role: "user", content: query, timestamp: Date())
+        )
+
         isLoading = true
 
         do {
-            // Convert session to Recipe for agent
-            let recipe = createRecipeFromSession(session)
+            let recipe = createRecipeFromSession(currentSession!)
+            let conversationContext = currentSession!.conversationHistory
 
-            // Convert conversation history
-            let conversationContext = session.conversationHistory
-
-            // Process query with agent
             let response = try await agent.processQuery(
                 userMessage: query,
                 recipe: recipe,
                 conversationContext: conversationContext
             )
 
-            // Add to conversation history
-            var updatedSession = session
-            updatedSession.conversationHistory.append(
-                Message(
-                    id: UUID(),
-                    role: "user",
-                    content: query,
-                    timestamp: Date()
-                )
+            currentSession?.conversationHistory.append(
+                Message(id: UUID(), role: "assistant", content: response, timestamp: Date())
             )
-            updatedSession.conversationHistory.append(
-                Message(
-                    id: UUID(),
-                    role: "assistant",
-                    content: response,
-                    timestamp: Date()
-                )
-            )
-
-            currentSession = updatedSession
             lastResponse = response
 
         } catch {
@@ -260,8 +249,6 @@ class CookingSessionManager: ObservableObject, TimerManager {
         // Create new session with the scaled recipe
         currentSession = CookingSession(
             recipe: scaledRecipe,
-            commands: session.commands,
-            timerStatus: session.timerStatus,
             conversationHistory: session.conversationHistory,
             userPreferences: session.userPreferences,
             startedAt: session.startedAt
@@ -366,8 +353,8 @@ class CookingSessionManager: ObservableObject, TimerManager {
 
     func setTimer(name: String, durationMinutes: Int) {
         // Check if timer with this name already exists
-        if localTimers.contains(where: { $0.label == name }) {
-            print("⚠️ Timer '\(name)' already exists, not creating duplicate")
+        if findTimer(named: name) != nil {
+            print("Timer '\(name)' already exists, not creating duplicate")
             return
         }
 
@@ -383,43 +370,83 @@ class CookingSessionManager: ObservableObject, TimerManager {
             createdAt: Date()
         )
         localTimers.append(timer)
-        print("🕐 Set timer: \(name) (\(durationMinutes)min)")
+        print("Set timer: \(name) (\(durationMinutes)min)")
 
-        // Automatically start the timer - dispatch to next RunLoop cycle
         DispatchQueue.main.async {
             timer.start()
-            print("▶️ Timer started automatically")
         }
     }
 
     func startTimer(name: String) {
-        if let index = localTimers.firstIndex(where: { $0.label == name }) {
-            // Dispatch to next RunLoop cycle to ensure proper timing
+        if let index = findTimerIndex(named: name) {
             DispatchQueue.main.async { [weak self] in
                 self?.localTimers[index].start()
-                print("▶️ Started timer: \(name)")
             }
         } else {
-            print("⚠️ Timer '\(name)' not found, cannot start")
+            print("Timer '\(name)' not found")
         }
     }
 
     func pauseTimer(name: String) {
-        if let index = localTimers.firstIndex(where: { $0.label == name }) {
+        if let index = findTimerIndex(named: name) {
             localTimers[index].pause()
-            print("⏸️ Paused timer: \(name)")
         } else {
-            print("⚠️ Timer '\(name)' not found, cannot pause")
+            print("Timer '\(name)' not found")
         }
     }
 
     func deleteTimer(name: String) {
-        localTimers.removeAll { $0.label == name }
-        print("🗑️ Deleted timer: \(name)")
+        if let index = findTimerIndex(named: name) {
+            localTimers[index].pause()
+            localTimers.remove(at: index)
+        } else {
+            // Fallback: if only one timer exists, delete it
+            if localTimers.count == 1 {
+                localTimers[0].pause()
+                localTimers.removeAll()
+            }
+        }
     }
 
     func getTimer(name: String) -> LocalTimer? {
-        return localTimers.first { $0.label == name }
+        return findTimer(named: name)
+    }
+
+    /// Fuzzy match a timer by name — handles the model using slightly different names
+    private func findTimer(named name: String) -> LocalTimer? {
+        let query = name.lowercased()
+        print("=== FIND TIMER: query='\(query)', existing timers: \(localTimers.map { "'\($0.label)'" }) ===")
+        // Exact match first
+        if let timer = localTimers.first(where: { $0.label.lowercased() == query }) {
+            return timer
+        }
+        // Contains match
+        if let timer = localTimers.first(where: {
+            $0.label.lowercased().contains(query) || query.contains($0.label.lowercased())
+        }) {
+            return timer
+        }
+        // If only one timer, assume they mean that one
+        if localTimers.count == 1 {
+            return localTimers.first
+        }
+        return nil
+    }
+
+    private func findTimerIndex(named name: String) -> Int? {
+        let query = name.lowercased()
+        if let index = localTimers.firstIndex(where: { $0.label.lowercased() == query }) {
+            return index
+        }
+        if let index = localTimers.firstIndex(where: {
+            $0.label.lowercased().contains(query) || query.contains($0.label.lowercased())
+        }) {
+            return index
+        }
+        if localTimers.count == 1 {
+            return 0
+        }
+        return nil
     }
 
     func getAllTimers() -> [LocalTimer] {

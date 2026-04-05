@@ -8,6 +8,7 @@
 import SwiftUI
 
 // MARK: - Tab Selection Environment Key
+
 struct TabSelectionKey: EnvironmentKey {
     static let defaultValue: Binding<Int> = .constant(0)
 }
@@ -29,67 +30,38 @@ struct MainView: View {
     var body: some View {
         Group {
             if cookingSessionManager.currentSession != nil {
-                // Show cooking session without TabView
                 CookingSessionView()
-                    .environmentObject(recipeManager)
-                    .environmentObject(cookingSessionManager)
-                    .environmentObject(voiceAssistant)
             } else {
-                // Show normal TabView when not in cooking session
                 mainTabView
             }
         }
-        .onAppear {
-            Task {
-                await recipeManager.loadRecipes()
-            }
-        }
+        .environmentObject(recipeManager)
+        .environment(\.selectedTab, $selectedTab)
     }
 
     private var mainTabView: some View {
         TabView(selection: $selectedTab) {
-            // Recipes Tab
             RecipeListView()
                 .tabItem {
-                    Image(systemName: "book.fill")
-                    Text("Recipes")
+                    Label("Recipes", systemImage: "book.fill")
                 }
                 .tag(0)
-                .environmentObject(recipeManager)
-                .environmentObject(cookingSessionManager)
-                .environmentObject(llmService)
-            
-            // Cooking Tab
+
             CookingSessionView()
                 .tabItem {
-                    Image(systemName: "flame.fill")
-                    Text("Cook")
+                    Label("Cook", systemImage: "flame.fill")
                 }
                 .tag(1)
-                .environmentObject(recipeManager)
-                .environmentObject(cookingSessionManager)
-                .environmentObject(voiceAssistant)
-            
-            // Settings Tab
-            SettingsTab()
-                .tabItem {
-                    Image(systemName: "gearshape.fill")
-                    Text("Settings")
-                }
-                .tag(2)
+
+            NavigationStack {
+                ProfileSettingsView()
+            }
+            .tabItem {
+                Label("Settings", systemImage: "gearshape.fill")
+            }
+            .tag(2)
         }
         .accentColor(.orange)
-        .environment(\.selectedTab, $selectedTab)
-    }
-}
-
-// MARK: - Settings Tab
-
-struct SettingsTab: View {
-    var body: some View {
-        NavigationStack {
-            ProfileSettingsView()
-        }
     }
 }
 

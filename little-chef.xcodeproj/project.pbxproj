@@ -7,7 +7,6 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
-		8B86B5AD2EB964AD00DDD3B2 /* SwiftSoup in Frameworks */ = {isa = PBXBuildFile; productRef = 8B86B5AC2EB964AD00DDD3B2 /* SwiftSoup */; };
 		8BD0A0012EBF000000BB0001 /* MLX in Frameworks */ = {isa = PBXBuildFile; productRef = 8BD0A0002EBF000000BB0001 /* MLX */; };
 		8BD0A0032EBF000000BB0001 /* MLXLLM in Frameworks */ = {isa = PBXBuildFile; productRef = 8BD0A0022EBF000000BB0001 /* MLXLLM */; };
 		8BD0A0052EBF000000BB0001 /* MLXLMCommon in Frameworks */ = {isa = PBXBuildFile; productRef = 8BD0A0042EBF000000BB0001 /* MLXLMCommon */; };
@@ -72,7 +71,6 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				8B86B5AD2EB964AD00DDD3B2 /* SwiftSoup in Frameworks */,
 				8BD0A0012EBF000000BB0001 /* MLX in Frameworks */,
 				8BD0A0032EBF000000BB0001 /* MLXLLM in Frameworks */,
 				8BD0A0052EBF000000BB0001 /* MLXLMCommon in Frameworks */,
@@ -136,7 +134,6 @@
 			);
 			name = "little-chef";
 			packageProductDependencies = (
-				8B86B5AC2EB964AD00DDD3B2 /* SwiftSoup */,
 				8BD0A0002EBF000000BB0001 /* MLX */,
 				8BD0A0022EBF000000BB0001 /* MLXLLM */,
 				8BD0A0042EBF000000BB0001 /* MLXLMCommon */,
@@ -224,7 +221,6 @@
 			mainGroup = 8B89280F2E6B467600A3BADD;
 			minimizedProjectReferenceProxies = 1;
 			packageReferences = (
-				8B86B5AB2EB964AD00DDD3B2 /* XCRemoteSwiftPackageReference "SwiftSoup" */,
 				8BD0A0062EBF000000BB0001 /* XCLocalSwiftPackageReference "mlx-swift" */,
 				8BD0A0072EBF000000BB0001 /* XCLocalSwiftPackageReference "mlx-swift-lm" */,
 			);
@@ -617,23 +613,7 @@
 		};
 /* End XCLocalSwiftPackageReference section */
 
-/* Begin XCRemoteSwiftPackageReference section */
-		8B86B5AB2EB964AD00DDD3B2 /* XCRemoteSwiftPackageReference "SwiftSoup" */ = {
-			isa = XCRemoteSwiftPackageReference;
-			repositoryURL = "https://github.com/scinfu/SwiftSoup.git";
-			requirement = {
-				kind = upToNextMajorVersion;
-				minimumVersion = 2.11.1;
-			};
-		};
-/* End XCRemoteSwiftPackageReference section */
-
 /* Begin XCSwiftPackageProductDependency section */
-		8B86B5AC2EB964AD00DDD3B2 /* SwiftSoup */ = {
-			isa = XCSwiftPackageProductDependency;
-			package = 8B86B5AB2EB964AD00DDD3B2 /* XCRemoteSwiftPackageReference "SwiftSoup" */;
-			productName = SwiftSoup;
-		};
 		8BD0A0002EBF000000BB0001 /* MLX */ = {
 			isa = XCSwiftPackageProductDependency;
 			package = 8BD0A0062EBF000000BB0001 /* XCLocalSwiftPackageReference "mlx-swift" */;

@@ -7,46 +7,39 @@
 
 import Foundation
 
-// MARK: - Cooking Session Models
+// MARK: - Cooking Session
 
 struct CookingSession: Codable, Identifiable {
-    // Local-only ID for SwiftUI, not sent to backend
     var id: UUID { UUID() }
 
     let recipe: RecipeBase
-    let commands: [Command]
-    let timerStatus: [TimerStatus]
     var conversationHistory: [Message]
     let userPreferences: UserPreferencesDetailed
     let startedAt: Date
-    
+
     enum CodingKeys: String, CodingKey {
         case recipe
-        case commands = "commands"
-        case timerStatus = "timer_status"
         case conversationHistory = "conversation_history"
         case userPreferences = "user_preferences"
         case startedAt = "started_at"
     }
-    
+
     init(recipe: RecipeBase, userPreferences: UserPreferencesDetailed) {
         self.recipe = recipe
-        self.commands = []
-        self.timerStatus = []
         self.conversationHistory = []
         self.userPreferences = userPreferences
         self.startedAt = Date()
     }
-    
-    init(recipe: RecipeBase, commands: [Command], timerStatus: [TimerStatus], conversationHistory: [Message], userPreferences: UserPreferencesDetailed, startedAt: Date) {
+
+    init(recipe: RecipeBase, conversationHistory: [Message], userPreferences: UserPreferencesDetailed, startedAt: Date) {
         self.recipe = recipe
-        self.commands = commands
-        self.timerStatus = timerStatus
         self.conversationHistory = conversationHistory
         self.userPreferences = userPreferences
         self.startedAt = startedAt
     }
 }
+
+// MARK: - Recipe Base
 
 struct RecipeBase: Codable {
     let title: String
@@ -60,7 +53,7 @@ struct RecipeBase: Codable {
     let sourceUrl: String?
     let cuisineType: String?
     let difficulty: String?
-    
+
     enum CodingKeys: String, CodingKey {
         case title, description, servings, ingredients, instructions, tags, difficulty
         case prepTime = "prep_time"
@@ -68,8 +61,7 @@ struct RecipeBase: Codable {
         case sourceUrl = "source_url"
         case cuisineType = "cuisine_type"
     }
-    
-    // Memberwise initializer
+
     init(title: String, description: String?, servings: Int, prepTime: Int?, cookTime: Int?, ingredients: [String], instructions: [String], tags: [String], sourceUrl: String?, cuisineType: String?, difficulty: String?) {
         self.title = title
         self.description = description
@@ -83,8 +75,7 @@ struct RecipeBase: Codable {
         self.cuisineType = cuisineType
         self.difficulty = difficulty
     }
-    
-    // Convert from existing Recipe model
+
     init(from recipe: Recipe) {
         self.title = recipe.title
         self.description = recipe.description
@@ -100,85 +91,13 @@ struct RecipeBase: Codable {
     }
 }
 
-// Helper for flexible JSON encoding/decoding
-struct FlexibleValue: Codable {
-    let value: Any
-    
-    init(_ value: Any) {
-        self.value = value
-    }
-    
-    init(from decoder: Decoder) throws {
-        let container = try decoder.singleValueContainer()
-        if let stringValue = try? container.decode(String.self) {
-            value = stringValue
-        } else if let intValue = try? container.decode(Int.self) {
-            value = intValue
-        } else if let doubleValue = try? container.decode(Double.self) {
-            value = doubleValue
-        } else if let boolValue = try? container.decode(Bool.self) {
-            value = boolValue
-        } else {
-            throw DecodingError.typeMismatch(FlexibleValue.self, DecodingError.Context(codingPath: decoder.codingPath, debugDescription: "Unsupported type"))
-        }
-    }
-    
-    func encode(to encoder: Encoder) throws {
-        var container = encoder.singleValueContainer()
-        if let stringValue = value as? String {
-            try container.encode(stringValue)
-        } else if let intValue = value as? Int {
-            try container.encode(intValue)
-        } else if let doubleValue = value as? Double {
-            try container.encode(doubleValue)
-        } else if let boolValue = value as? Bool {
-            try container.encode(boolValue)
-        } else {
-            throw EncodingError.invalidValue(value, EncodingError.Context(codingPath: encoder.codingPath, debugDescription: "Unsupported type"))
-        }
-    }
-}
-
-struct Command: Codable, Identifiable {
-    let id: String
-    let commandType: String
-    let action: String
-    let targetId: String?
-    let label: String
-    let parameters: [String: FlexibleValue]
-    let createdAt: Date
-    
-    enum CodingKeys: String, CodingKey {
-        case id, action, label, parameters
-        case commandType = "command_type"
-        case targetId = "target_id"
-        case createdAt = "created_at"
-    }
-}
-
-struct TimerStatus: Codable, Identifiable {
-    let id: String
-    let label: String
-    let durationSeconds: Int
-    let status: TimerStatusType
-    let remainingSeconds: Int
-    let createdAt: Date
-    let startedAt: Date?
-    let completedAt: Date?
-    
-    enum CodingKeys: String, CodingKey {
-        case id, label, status
-        case durationSeconds = "duration_seconds"
-        case remainingSeconds = "remaining_seconds"
-        case createdAt = "created_at"
-        case startedAt = "started_at"
-        case completedAt = "completed_at"
-    }
-}
+// MARK: - Timer Status Type
 
 enum TimerStatusType: String, Codable {
     case new, running, paused, ended
 }
+
+// MARK: - Message
 
 struct Message: Codable, Identifiable {
     let id: UUID
@@ -186,6 +105,8 @@ struct Message: Codable, Identifiable {
     let content: String
     let timestamp: Date
 }
+
+// MARK: - User Preferences
 
 struct UserPreferencesDetailed: Codable {
     let llmModel: String
@@ -201,14 +122,14 @@ struct UserPreferencesDetailed: Codable {
     }
 
     init() {
-        self.llmModel = "llama-3.2-3b-4bit"
+        self.llmModel = "bonsai-8b-1bit"
         self.measurementSystem = "imperial"
         self.dietaryRestrictions = []
         self.voiceSettings = LocalVoiceSettings.defaultSettings
     }
 
     init(from userPreferences: LocalUserPreferences) {
-        self.llmModel = "llama-3.2-3b-4bit"
+        self.llmModel = "bonsai-8b-1bit"
         self.measurementSystem = userPreferences.measurementSystem
         self.dietaryRestrictions = userPreferences.dietaryRestrictions
         self.voiceSettings = userPreferences.voiceSettings

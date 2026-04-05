@@ -72,7 +72,7 @@ class VoiceAssistant: NSObject, ObservableObject {
     }
     
     private func requestMicrophonePermission() {
-        AVAudioSession.sharedInstance().requestRecordPermission { granted in
+        AVAudioApplication.requestRecordPermission { granted in
             DispatchQueue.main.async {
                 if granted {
                     self.isAvailable = true
@@ -499,7 +499,7 @@ class VoiceAssistant: NSObject, ObservableObject {
 
 // MARK: - AVSpeechSynthesizerDelegate
 
-extension VoiceAssistant: AVSpeechSynthesizerDelegate {
+extension VoiceAssistant: @preconcurrency AVSpeechSynthesizerDelegate {
     func speechSynthesizer(_ synthesizer: AVSpeechSynthesizer, didFinish utterance: AVSpeechUtterance) {
         DispatchQueue.main.async {
             self.isSpeaking = false

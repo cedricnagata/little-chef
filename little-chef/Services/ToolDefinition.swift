@@ -6,14 +6,16 @@
 //
 
 import Foundation
+import Tokenizers
 
 // MARK: - Timer Manager Protocol
 
+@MainActor
 protocol TimerManager {
-    func setTimer(name: String, durationMinutes: Int) throws
-    func startTimer(name: String) throws
-    func pauseTimer(name: String) throws
-    func deleteTimer(name: String) throws
+    func setTimer(name: String, durationMinutes: Int)
+    func startTimer(name: String)
+    func pauseTimer(name: String)
+    func deleteTimer(name: String)
     func getTimer(name: String) -> LocalTimer?
     func getAllTimers() -> [LocalTimer]
 }
@@ -23,29 +25,67 @@ protocol TimerManager {
 struct CookingTools {
     let timerManager: TimerManager
 
-    /// Text description of tool schemas for injection into system prompt
-    var toolSchemaText: String {
-        """
-        ## set_timer
-        Creates and starts a new cooking timer.
-        Arguments: {"name": "<descriptive name>", "minutes": <integer>}
-        Example: {"name": "set_timer", "arguments": {"name": "boil pasta", "minutes": 10}}
-
-        ## start_timer
-        Starts or resumes a paused timer.
-        Arguments: {"name": "<timer name>"}
-        Example: {"name": "start_timer", "arguments": {"name": "boil pasta"}}
-
-        ## pause_timer
-        Pauses a running timer.
-        Arguments: {"name": "<timer name>"}
-        Example: {"name": "pause_timer", "arguments": {"name": "boil pasta"}}
-
-        ## delete_timer
-        Removes a timer completely.
-        Arguments: {"name": "<timer name>"}
-        Example: {"name": "delete_timer", "arguments": {"name": "boil pasta"}}
-        """
+    /// Native MLX tool specs for passing to UserInput
+    var nativeToolSpecs: [ToolSpec] {
+        [
+            [
+                "type": "function",
+                "function": [
+                    "name": "set_timer",
+                    "description": "Set a new cooking timer with a name and duration in minutes",
+                    "parameters": [
+                        "type": "object",
+                        "properties": [
+                            "name": ["type": "string", "description": "Timer label e.g. pasta, chicken"] as [String: any Sendable],
+                            "minutes": ["type": "integer", "description": "Duration in minutes"] as [String: any Sendable]
+                        ] as [String: any Sendable],
+                        "required": ["name", "minutes"]
+                    ] as [String: any Sendable]
+                ] as [String: any Sendable]
+            ] as ToolSpec,
+            [
+                "type": "function",
+                "function": [
+                    "name": "start_timer",
+                    "description": "Start an existing timer by name",
+                    "parameters": [
+                        "type": "object",
+                        "properties": [
+                            "name": ["type": "string", "description": "Timer name to start"] as [String: any Sendable]
+                        ] as [String: any Sendable],
+                        "required": ["name"]
+                    ] as [String: any Sendable]
+                ] as [String: any Sendable]
+            ] as ToolSpec,
+            [
+                "type": "function",
+                "function": [
+                    "name": "pause_timer",
+                    "description": "Pause a running timer by name",
+                    "parameters": [
+                        "type": "object",
+                        "properties": [
+                            "name": ["type": "string", "description": "Timer name to pause"] as [String: any Sendable]
+                        ] as [String: any Sendable],
+                        "required": ["name"]
+                    ] as [String: any Sendable]
+                ] as [String: any Sendable]
+            ] as ToolSpec,
+            [
+                "type": "function",
+                "function": [
+                    "name": "delete_timer",
+                    "description": "Delete a timer by name",
+                    "parameters": [
+                        "type": "object",
+                        "properties": [
+                            "name": ["type": "string", "description": "Timer name to delete"] as [String: any Sendable]
+                        ] as [String: any Sendable],
+                        "required": ["name"]
+                    ] as [String: any Sendable]
+                ] as [String: any Sendable]
+            ] as ToolSpec,
+        ]
     }
 
     /// Execute a tool by name with the given arguments
@@ -54,7 +94,7 @@ struct CookingTools {
         switch toolName {
         case "set_timer":
             guard let name = arguments["name"] as? String else {
-                return "Error: missing 'name' argument"
+                return "Error: missing 'name'"
             }
             let minutes: Int
             if let m = arguments["minutes"] as? Int {
@@ -62,47 +102,31 @@ struct CookingTools {
             } else if let m = arguments["minutes"] as? Double {
                 minutes = Int(m)
             } else {
-                return "Error: missing or invalid 'minutes' argument"
+                return "Error: missing 'minutes'"
             }
-            do {
-                try timerManager.setTimer(name: name, durationMinutes: minutes)
-                return "Timer '\(name)' set for \(minutes) minutes and started."
-            } catch {
-                return "Failed to set timer: \(error.localizedDescription)"
-            }
+            timerManager.setTimer(name: name, durationMinutes: minutes)
+            return "Timer '\(name)' set for \(minutes) minutes."
 
         case "start_timer":
             guard let name = arguments["name"] as? String else {
-                return "Error: missing 'name' argument"
+                return "Error: missing 'name'"
             }
-            do {
-                try timerManager.startTimer(name: name)
-                return "Timer '\(name)' started."
-            } catch {
-                return "Failed to start timer: \(error.localizedDescription)"
-            }
+            timerManager.startTimer(name: name)
+            return "Timer '\(name)' started."
 
         case "pause_timer":
             guard let name = arguments["name"] as? String else {
-                return "Error: missing 'name' argument"
+                return "Error: missing 'name'"
             }
-            do {
-                try timerManager.pauseTimer(name: name)
-                return "Timer '\(name)' paused."
-            } catch {
-                return "Failed to pause timer: \(error.localizedDescription)"
-            }
+            timerManager.pauseTimer(name: name)
+            return "Timer '\(name)' paused."
 
         case "delete_timer":
             guard let name = arguments["name"] as? String else {
-                return "Error: missing 'name' argument"
+                return "Error: missing 'name'"
             }
-            do {
-                try timerManager.deleteTimer(name: name)
-                return "Timer '\(name)' deleted."
-            } catch {
-                return "Failed to delete timer: \(error.localizedDescription)"
-            }
+            timerManager.deleteTimer(name: name)
+            return "Timer '\(name)' deleted."
 
         default:
             return "Unknown tool: \(toolName)"

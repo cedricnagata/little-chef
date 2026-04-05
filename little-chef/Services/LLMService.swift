@@ -4,12 +4,14 @@
 //
 //  On-device LLM inference using MLX with PrismML Bonsai 8B 1-bit model.
 //  Follows MLXChatExample patterns: lazy load, AsyncStream generation, Memory.cacheLimit.
+//  Uses MLX native tool calling for timer operations.
 //
 
 import Foundation
 import MLX
 import MLXLLM
 import MLXLMCommon
+import Tokenizers
 
 @MainActor
 class LLMService: ObservableObject {
@@ -32,15 +34,12 @@ class LLMService: ObservableObject {
 
     // MARK: - Model Lifecycle
 
-    /// Load model into memory. Called lazily on first inference, or manually from Settings.
     private func loadModel() async throws -> MLXLMCommon.ModelContainer {
-        // Return cached container if already loaded
         if let container = modelContainer {
             return container
         }
 
         guard !isLoadingModel else {
-            // Wait for in-progress load to finish
             while isLoadingModel {
                 try await Task.sleep(nanoseconds: 100_000_000)
             }
@@ -52,7 +51,6 @@ class LLMService: ObservableObject {
         loadProgress = 0.0
         loadError = nil
 
-        // Cap GPU cache to 20MB (matches MLXChatExample)
         MLX.Memory.cacheLimit = 20 * 1024 * 1024
 
         do {
@@ -76,12 +74,10 @@ class LLMService: ObservableObject {
         }
     }
 
-    /// Pre-warm: download and load model ahead of time (called from Settings).
     func preloadModel() async throws {
         _ = try await loadModel()
     }
 
-    /// Release model and free GPU memory.
     func unloadModel() {
         modelContainer = nil
         isLoaded = false
@@ -102,14 +98,10 @@ class LLMService: ObservableObject {
         isGenerating = true
         defer { isGenerating = false }
 
-        // Lazy load model on first use
         let container = try await loadModel()
 
-        // Inject tool schemas into system message
-        let processedMessages = injectToolSchemas(messages: messages, tools: tools)
-
-        // Convert to Chat.Message (modern MLXLMCommon API)
-        let chatMessages: [Chat.Message] = processedMessages.map { msg in
+        // Convert to Chat.Message
+        let chatMessages: [Chat.Message] = messages.map { msg in
             switch msg.role {
             case .system: return .system(msg.content)
             case .user: return .user(msg.content)
@@ -117,9 +109,12 @@ class LLMService: ObservableObject {
             }
         }
 
-        let userInput = UserInput(chat: chatMessages)
+        // Build native tool specs if tools are provided
+        let toolSpecs: [ToolSpec]? = tools?.nativeToolSpecs
 
-        // Generate using modern AsyncStream API (matches MLXChatExample exactly)
+        let userInput = UserInput(chat: chatMessages, tools: toolSpecs)
+
+        // Generate using AsyncStream API
         let stream: AsyncStream<Generation> = try await container.perform { (context: ModelContext) in
             let lmInput = try await context.processor.prepare(input: userInput)
             let parameters = GenerateParameters(
@@ -131,24 +126,55 @@ class LLMService: ObservableObject {
             )
         }
 
-        // Consume stream to collect output
+        // Consume stream — collect text chunks and native tool calls
         var output = ""
+        var nativeToolCalls: [(name: String, arguments: [String: Any])] = []
+
         for await generation in stream {
             switch generation {
             case .chunk(let chunk):
                 output += chunk
             case .info(_):
                 break
-            case .toolCall(_):
+            case .toolCall(let toolCall):
+                let args = toolCall.function.arguments.mapValues { $0.anyValue }
+                nativeToolCalls.append((name: toolCall.function.name, arguments: args))
+            @unknown default:
                 break
             }
         }
+        print("=== OUTPUT: '\(output.prefix(200))' | TOOL CALLS: \(nativeToolCalls.count) ===")
 
-        // Parse and execute tool calls
-        let finalOutput = await processToolCalls(output: output, tools: tools)
+        // Execute native tool calls
+        if !nativeToolCalls.isEmpty, let tools {
+            var toolResults: [String] = []
+            for call in nativeToolCalls {
+                print("=== TOOL CALL: \(call.name), args: \(call.arguments) ===")
+                let result = tools.execute(toolName: call.name, arguments: call.arguments)
+                print("=== TOOL RESULT: \(result) ===")
+                toolResults.append(result)
+            }
+            // Combine any text output with tool results
+            let textPart = stripThinkingTags(from: output)
+            let toolPart = toolResults.joined(separator: "\n")
+            if textPart.isEmpty {
+                return toolPart
+            }
+            return textPart + "\n" + toolPart
+        }
 
-        // Strip thinking tags
-        return stripThinkingTags(from: finalOutput)
+        // No native tool calls — clean up text and try fallbacks
+        let cleaned = stripThinkingTags(from: output)
+
+        // Try text-based <tool_call> tags first
+        let afterTextTools = processTextToolCalls(output: cleaned, tools: tools)
+
+        // If tools are available and no tool calls were found, try to infer timer actions from the text
+        if let tools, nativeToolCalls.isEmpty {
+            inferTimerAction(from: afterTextTools, tools: tools)
+        }
+
+        return afterTextTools
     }
 
     // MARK: - Model Info
@@ -163,36 +189,10 @@ class LLMService: ObservableObject {
         )
     }
 
-    // MARK: - Tool Calling
+    // MARK: - Text-based Tool Call Fallback
 
-    private func injectToolSchemas(messages: [ChatMessage], tools: CookingTools?) -> [ChatMessage] {
-        guard let tools else { return messages }
-
-        var processed = messages
-        if let sysIndex = processed.firstIndex(where: { $0.role == .system }) {
-            let toolPrompt = """
-
-            # Available Tools
-
-            When the user explicitly asks you to set, start, pause, or delete a timer, respond with a tool call in this exact format:
-
-            <tool_call>
-            {"name": "tool_name", "arguments": {"key": "value"}}
-            </tool_call>
-
-            \(tools.toolSchemaText)
-
-            IMPORTANT: Only use tools when the user explicitly requests timer actions. For all other questions, respond normally without tool calls.
-            """
-            processed[sysIndex] = ChatMessage(
-                role: .system,
-                content: processed[sysIndex].content + toolPrompt
-            )
-        }
-        return processed
-    }
-
-    private func processToolCalls(output: String, tools: CookingTools?) async -> String {
+    /// Fallback parser for models that output <tool_call> tags as text instead of native tool calls
+    private func processTextToolCalls(output: String, tools: CookingTools?) -> String {
         guard let tools else { return output }
 
         let pattern = "<tool_call>\\s*(.+?)\\s*</tool_call>"
@@ -202,27 +202,54 @@ class LLMService: ObservableObject {
 
         let range = NSRange(output.startIndex..., in: output)
         let matches = regex.matches(in: output, options: [], range: range)
-
         guard !matches.isEmpty else { return output }
 
         var result = output
         for match in matches.reversed() {
-            guard let jsonRange = Range(match.range(at: 1), in: output) else { continue }
-            let jsonStr = String(output[jsonRange])
+            guard let jsonRange = Range(match.range(at: 1), in: result),
+                  let fullRange = Range(match.range, in: result) else { continue }
 
-            guard let data = jsonStr.data(using: .utf8),
-                  let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-                  let toolName = json["name"] as? String,
-                  let arguments = json["arguments"] as? [String: Any] else { continue }
+            let jsonStr = String(result[jsonRange]).trimmingCharacters(in: .whitespacesAndNewlines)
 
-            let toolResult = await tools.execute(toolName: toolName, arguments: arguments)
-
-            if let fullRange = Range(match.range, in: result) {
+            if let data = jsonStr.data(using: .utf8),
+               let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+               let toolName = json["name"] as? String,
+               let arguments = json["arguments"] as? [String: Any] {
+                let toolResult = tools.execute(toolName: toolName, arguments: arguments)
                 result.replaceSubrange(fullRange, with: toolResult)
+            } else {
+                result.replaceSubrange(fullRange, with: "")
             }
         }
 
-        return result
+        let trimmed = result.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? "Done!" : trimmed
+    }
+
+    // MARK: - Timer Action Inference
+
+    /// When the model responds with text like "Timer stopped" without a tool call,
+    /// infer the action and execute it.
+    private func inferTimerAction(from text: String, tools: CookingTools) {
+        let lower = text.lowercased()
+
+        // Extract a quoted timer name if present, e.g. 'pasta' or "pasta"
+        let namePattern = "['\"]([^'\"]+)['\"]"
+        let nameRegex = try? NSRegularExpression(pattern: namePattern)
+        let nameRange = NSRange(text.startIndex..., in: text)
+        let timerName = nameRegex?.firstMatch(in: text, range: nameRange)
+            .flatMap { Range($0.range(at: 1), in: text) }
+            .map { String(text[$0]) }
+
+        let name = timerName ?? "timer"
+
+        if lower.contains("stop") || lower.contains("paus") {
+            _ = tools.execute(toolName: "pause_timer", arguments: ["name": name])
+        } else if lower.contains("delet") || lower.contains("remov") || lower.contains("cancel") {
+            _ = tools.execute(toolName: "delete_timer", arguments: ["name": name])
+        } else if lower.contains("start") || lower.contains("resum") {
+            _ = tools.execute(toolName: "start_timer", arguments: ["name": name])
+        }
     }
 
     // MARK: - Text Processing

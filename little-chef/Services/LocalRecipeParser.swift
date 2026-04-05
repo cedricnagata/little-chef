@@ -2,32 +2,26 @@
 //  LocalRecipeParser.swift
 //  little-chef
 //
-//  Unified recipe parser using local LLM, web scraping, and OCR
-//  Replaces backend recipe_parser.py service
+//  Recipe parser using local LLM, web scraping, and OCR
 //
 
 import Foundation
 import UIKit
 
-/// Service for parsing recipes from various input sources
 @MainActor
 class LocalRecipeParser: ObservableObject {
-    // MARK: - Dependencies
     private let llmService: LLMService
     private let webScraper: WebScraperService
     private let ocrService: OCRService
 
-    // MARK: - Published State
     @Published var isProcessing = false
     @Published var progress: Double = 0.0
 
-    // MARK: - Initialization
+    convenience init(llmService: LLMService) {
+        self.init(llmService: llmService, webScraper: .shared, ocrService: .shared)
+    }
 
-    init(
-        llmService: LLMService = .shared,
-        webScraper: WebScraperService = .shared,
-        ocrService: OCRService = .shared
-    ) {
+    init(llmService: LLMService, webScraper: WebScraperService, ocrService: OCRService) {
         self.llmService = llmService
         self.webScraper = webScraper
         self.ocrService = ocrService
@@ -35,185 +29,146 @@ class LocalRecipeParser: ObservableObject {
 
     // MARK: - Public Methods
 
-    /// Parse recipe from URL
     func parseFromURL(_ url: String) async throws -> RecipeParseResponse {
         isProcessing = true
-        progress = 0.0
-        defer {
-            isProcessing = false
-            progress = 1.0
-        }
-
-        // Step 1: Scrape web content (30%)
         progress = 0.1
+        defer { isProcessing = false; progress = 1.0 }
+
         let webContent = try await webScraper.scrapeRecipe(from: url)
         progress = 0.3
 
-        // Step 2: Parse with LLM (70%)
         let recipeData = try await parseWithLLM(text: webContent, sourceUrl: url)
         progress = 1.0
 
-        // Step 3: Calculate confidence and warnings
         let (confidence, warnings) = evaluateRecipe(recipeData)
-
-        return RecipeParseResponse(
-            recipe: recipeData,
-            confidence: confidence,
-            warnings: warnings
-        )
+        return RecipeParseResponse(recipe: recipeData, confidence: confidence, warnings: warnings)
     }
 
-    /// Parse recipe from text
     func parseFromText(_ text: String) async throws -> RecipeParseResponse {
         isProcessing = true
-        progress = 0.0
-        defer {
-            isProcessing = false
-            progress = 1.0
-        }
-
-        // Parse with LLM
         progress = 0.2
+        defer { isProcessing = false; progress = 1.0 }
+
         let recipeData = try await parseWithLLM(text: text, sourceUrl: nil)
         progress = 1.0
 
-        // Calculate confidence and warnings
         let (confidence, warnings) = evaluateRecipe(recipeData)
-
-        return RecipeParseResponse(
-            recipe: recipeData,
-            confidence: confidence,
-            warnings: warnings
-        )
+        return RecipeParseResponse(recipe: recipeData, confidence: confidence, warnings: warnings)
     }
 
-    /// Parse recipe from images
     func parseFromImages(_ images: [UIImage]) async throws -> RecipeParseResponse {
         isProcessing = true
-        progress = 0.0
-        defer {
-            isProcessing = false
-            progress = 1.0
-        }
-
-        guard !images.isEmpty else {
-            throw RecipeParserError.noImagesProvided
-        }
-
-        // Step 1: Extract text from images using OCR (40%)
         progress = 0.1
+        defer { isProcessing = false; progress = 1.0 }
+
+        guard !images.isEmpty else { throw RecipeParserError.noImagesProvided }
+
         let extractedText = try await ocrService.extractText(from: images)
         progress = 0.4
 
-        guard !extractedText.isEmpty else {
-            throw RecipeParserError.noTextExtracted
-        }
+        guard !extractedText.isEmpty else { throw RecipeParserError.noTextExtracted }
 
-        // Step 2: Parse with LLM (60%)
         let recipeData = try await parseWithLLM(text: extractedText, sourceUrl: nil)
         progress = 1.0
 
-        // Step 3: Calculate confidence and warnings
         let (confidence, warnings) = evaluateRecipe(recipeData)
-
-        return RecipeParseResponse(
-            recipe: recipeData,
-            confidence: confidence,
-            warnings: warnings
-        )
+        return RecipeParseResponse(recipe: recipeData, confidence: confidence, warnings: warnings)
     }
 
     // MARK: - Private Methods
 
     private func parseWithLLM(text: String, sourceUrl: String?) async throws -> RecipeData {
-        let prompt = buildRecipeExtractionPrompt(text: text)
+        let prompt = """
+        Extract the recipe from the text below into JSON. Return ONLY the JSON object.
 
-        // Generate structured response
+        Example output:
+        {"title": "Pasta Carbonara", "description": "Classic Roman pasta dish", "servings": 4, "prep_time": 10, "cook_time": 20, "ingredients": ["400g spaghetti", "200g guanciale", "4 egg yolks", "100g pecorino"], "instructions": ["Boil pasta in salted water until al dente.", "Cut guanciale into strips and fry until crispy.", "Mix egg yolks with grated pecorino.", "Toss drained pasta with guanciale, then stir in egg mixture off heat."], "tags": ["italian", "pasta"], "cuisine_type": "Italian", "difficulty": "medium"}
+
+        IMPORTANT:
+        - Each instruction must be the actual step text only, NOT prefixed with numbers like "Step 1:" or "1."
+        - Do NOT duplicate or number steps. Just the plain instruction text.
+        - prep_time and cook_time MUST be integers representing MINUTES. For example: 1 hour = 60, 1.5 hours = 90, 30 minutes = 30. Do NOT use hours or seconds.
+        - Use null for unknown fields.
+        - difficulty must be "easy", "medium", or "hard"
+
+        Text:
+        \(text.prefix(3000))
+        """
+
         let response = try await llmService.generateChatCompletion(
             messages: [
-                ChatMessage(role: .system, content: "You are a recipe extraction assistant. Extract recipe information from the provided text and return it as JSON."),
+                ChatMessage(role: .system, content: "You are a recipe extraction tool. Output only valid JSON. No commentary, no markdown, no numbering of steps.")
+            ,
                 ChatMessage(role: .user, content: prompt)
             ],
-            temperature: 0.3, // Lower temperature for more consistent output
-            maxTokens: 2048
+            temperature: 0.2,
+            maxTokens: 1024
         )
 
-        // Parse JSON response
-        let recipeData = try parseRecipeJSON(from: response, sourceUrl: sourceUrl)
+        var recipeData = try parseRecipeJSON(from: response)
+
+        if let sourceUrl {
+            recipeData = RecipeData(
+                title: recipeData.title,
+                description: recipeData.description,
+                servings: recipeData.servings,
+                prepTime: recipeData.prepTime,
+                cookTime: recipeData.cookTime,
+                ingredients: recipeData.ingredients,
+                instructions: recipeData.instructions,
+                tags: recipeData.tags,
+                sourceUrl: sourceUrl,
+                cuisineType: recipeData.cuisineType,
+                difficulty: recipeData.difficulty
+            )
+        }
 
         return recipeData
     }
 
-    private func buildRecipeExtractionPrompt(text: String) -> String {
-        return """
-        Extract recipe information from the following text and return it as a JSON object with this exact structure:
-
-        {
-            "title": "Recipe title",
-            "description": "Brief description (optional)",
-            "servings": 4,
-            "prep_time": 15,
-            "cook_time": 30,
-            "ingredients": ["ingredient 1", "ingredient 2", ...],
-            "instructions": ["step 1", "step 2", ...],
-            "tags": ["tag1", "tag2", ...],
-            "cuisine_type": "Italian",
-            "difficulty": "easy"
-        }
-
-        Guidelines:
-        - Extract all ingredients as a list
-        - Extract all instructions/steps as a list
-        - Times should be in minutes (convert if needed)
-        - If information is missing, use null for optional fields
-        - Difficulty should be: "easy", "medium", or "hard"
-        - Tags should include relevant keywords (e.g., "vegetarian", "quick", "dessert")
-
-        Text to parse:
-        \(text)
-
-        Return ONLY the JSON object, no additional text.
-        """
-    }
-
-    private func parseRecipeJSON(from response: String, sourceUrl: String?) throws -> RecipeData {
-        // Extract JSON from response (may have text before/after)
+    private func parseRecipeJSON(from response: String) throws -> RecipeData {
+        // Find JSON in response
         guard let jsonStart = response.firstIndex(of: "{"),
               let jsonEnd = response.lastIndex(of: "}") else {
             throw RecipeParserError.invalidJSONResponse
         }
 
-        let jsonString = String(response[jsonStart...jsonEnd])
+        var jsonString = String(response[jsonStart...jsonEnd])
+
+        // Fix common LLM JSON issues
+        jsonString = jsonString
+            .replacingOccurrences(of: ",\\s*}", with: "}", options: .regularExpression)  // trailing commas
+            .replacingOccurrences(of: ",\\s*]", with: "]", options: .regularExpression)  // trailing commas in arrays
 
         guard let jsonData = jsonString.data(using: .utf8) else {
             throw RecipeParserError.invalidJSONResponse
         }
 
-        // Custom decoder to handle both snake_case and camelCase
         let decoder = JSONDecoder()
-        decoder.keyDecodingStrategy = .convertFromSnakeCase
 
         do {
-            var recipeData = try decoder.decode(RecipeData.self, from: jsonData)
-
-            // Add source URL if provided
-            if sourceUrl != nil {
-                recipeData = RecipeData(
-                    title: recipeData.title,
-                    description: recipeData.description,
-                    servings: recipeData.servings,
-                    prepTime: recipeData.prepTime,
-                    cookTime: recipeData.cookTime,
-                    ingredients: recipeData.ingredients,
-                    instructions: recipeData.instructions,
-                    tags: recipeData.tags,
-                    sourceUrl: sourceUrl,
-                    cuisineType: recipeData.cuisineType,
-                    difficulty: recipeData.difficulty
-                )
-            }
-
-            return recipeData
+            var recipe = try decoder.decode(RecipeData.self, from: jsonData)
+            // Strip numbered prefixes like "1. ", "Step 1: ", "1: " from instructions
+            recipe = RecipeData(
+                title: recipe.title,
+                description: recipe.description,
+                servings: recipe.servings,
+                prepTime: recipe.prepTime,
+                cookTime: recipe.cookTime,
+                ingredients: recipe.ingredients,
+                instructions: recipe.instructions.map { step in
+                    step.replacingOccurrences(
+                        of: "^\\s*(?:step\\s*)?\\d+[.:)\\-]\\s*",
+                        with: "",
+                        options: [.regularExpression, .caseInsensitive]
+                    )
+                }.filter { !$0.isEmpty },
+                tags: recipe.tags,
+                sourceUrl: recipe.sourceUrl,
+                cuisineType: recipe.cuisineType,
+                difficulty: recipe.difficulty
+            )
+            return recipe
         } catch {
             print("JSON decoding error: \(error)")
             throw RecipeParserError.invalidJSONResponse
@@ -224,50 +179,22 @@ class LocalRecipeParser: ObservableObject {
         var confidence: Double = 1.0
         var warnings: [String] = []
 
-        // Check required fields
         if recipe.title.isEmpty {
             confidence -= 0.5
             warnings.append("Missing title")
         }
-
         if recipe.ingredients.isEmpty {
             confidence -= 0.3
             warnings.append("Missing ingredients")
         }
-
         if recipe.instructions.isEmpty {
             confidence -= 0.3
             warnings.append("Missing instructions")
         }
+        if recipe.prepTime == nil { confidence -= 0.05 }
+        if recipe.cookTime == nil { confidence -= 0.05 }
 
-        // Check optional fields
-        if recipe.description == nil || recipe.description?.isEmpty == true {
-            confidence -= 0.05
-            warnings.append("Missing description")
-        }
-
-        if recipe.prepTime == nil {
-            confidence -= 0.05
-            warnings.append("Missing prep time")
-        }
-
-        if recipe.cookTime == nil {
-            confidence -= 0.05
-            warnings.append("Missing cook time")
-        }
-
-        if recipe.cuisineType == nil || recipe.cuisineType?.isEmpty == true {
-            confidence -= 0.05
-        }
-
-        if recipe.difficulty == nil {
-            confidence -= 0.05
-        }
-
-        // Ensure confidence is between 0 and 1
-        confidence = max(0.0, min(1.0, confidence))
-
-        return (confidence, warnings)
+        return (max(0.0, min(1.0, confidence)), warnings)
     }
 }
 
@@ -284,9 +211,9 @@ enum RecipeParserError: LocalizedError {
         case .noImagesProvided:
             return "No images provided for parsing"
         case .noTextExtracted:
-            return "Failed to extract text from images. Please ensure images contain readable text."
+            return "Could not read text from images. Ensure images contain readable text."
         case .invalidJSONResponse:
-            return "Failed to parse recipe from LLM response. Please try again."
+            return "Failed to parse recipe. Please try again."
         case .parsingFailed(let error):
             return "Recipe parsing failed: \(error.localizedDescription)"
         }

@@ -15,7 +15,7 @@ struct RecipeDetailView: View {
     @EnvironmentObject var cookingSessionManager: CookingSessionManager
     @Environment(\.dismiss) private var dismiss
     @Environment(\.selectedTab) private var selectedTab
-    
+
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 20) {
@@ -24,31 +24,26 @@ struct RecipeDetailView: View {
                     Text(recipe.title)
                         .font(.title)
                         .fontWeight(.bold)
-                    
+
                     if let description = recipe.description {
                         Text(description)
                             .font(.body)
                             .foregroundColor(.secondary)
                     }
-                    
-                    // Recipe info grid
+
                     LazyVGrid(columns: Array(repeating: GridItem(.flexible()), count: 2), spacing: 12) {
                         if let prepTime = recipe.prepTime {
                             InfoCard(title: "Prep Time", value: "\(prepTime) min", icon: "clock")
                         }
-                        
                         if let cookTime = recipe.cookTime {
                             InfoCard(title: "Cook Time", value: "\(cookTime) min", icon: "flame")
                         }
-                        
                         InfoCard(title: "Servings", value: "\(recipe.servings)", icon: "person.2")
-                        
                         if let difficulty = recipe.difficulty {
                             InfoCard(title: "Difficulty", value: difficulty.capitalized, icon: "star")
                         }
                     }
-                    
-                    // Tags
+
                     if !recipe.tags.isEmpty {
                         ScrollView(.horizontal, showsIndicators: false) {
                             HStack(spacing: 8) {
@@ -62,63 +57,55 @@ struct RecipeDetailView: View {
                                         .cornerRadius(12)
                                 }
                             }
-                            .padding(.horizontal)
                         }
-                        .padding(.horizontal, -16)
                     }
                 }
                 .padding(.horizontal)
-                
+
                 Divider()
-                
+
                 // Ingredients
                 VStack(alignment: .leading, spacing: 12) {
                     HStack {
                         Text("Ingredients")
                             .font(.title2)
                             .fontWeight(.semibold)
-                        
                         Spacer()
-                        
                         Text("\(recipe.ingredients.count) items")
                             .font(.caption)
                             .foregroundColor(.secondary)
                     }
-                    
+
                     LazyVStack(alignment: .leading, spacing: 8) {
-                        ForEach(Array(recipe.ingredients.enumerated()), id: \.offset) { index, ingredient in
+                        ForEach(Array(recipe.ingredients.enumerated()), id: \.offset) { _, ingredient in
                             HStack(alignment: .top, spacing: 12) {
                                 Circle()
                                     .fill(Color.orange.opacity(0.2))
                                     .frame(width: 8, height: 8)
                                     .padding(.top, 6)
-                                
                                 Text(ingredient)
                                     .font(.body)
-                                
                                 Spacer()
                             }
                         }
                     }
                 }
                 .padding(.horizontal)
-                
+
                 Divider()
-                
+
                 // Instructions
                 VStack(alignment: .leading, spacing: 12) {
                     HStack {
                         Text("Instructions")
                             .font(.title2)
                             .fontWeight(.semibold)
-                        
                         Spacer()
-                        
                         Text("\(recipe.instructions.count) steps")
                             .font(.caption)
                             .foregroundColor(.secondary)
                     }
-                    
+
                     LazyVStack(alignment: .leading, spacing: 16) {
                         ForEach(Array(recipe.instructions.enumerated()), id: \.offset) { index, instruction in
                             HStack(alignment: .top, spacing: 12) {
@@ -126,49 +113,63 @@ struct RecipeDetailView: View {
                                     Circle()
                                         .fill(Color.orange)
                                         .frame(width: 24, height: 24)
-                                    
                                     Text("\(index + 1)")
                                         .font(.caption)
                                         .fontWeight(.semibold)
                                         .foregroundColor(.white)
                                 }
-                                
                                 Text(instruction)
                                     .font(.body)
                                     .fixedSize(horizontal: false, vertical: true)
-                                
                                 Spacer()
                             }
                         }
                     }
                 }
                 .padding(.horizontal)
-                
-                // Source URL (if available)
+
+                // Source URL
                 if let sourceUrl = recipe.sourceUrl, !sourceUrl.isEmpty {
                     Divider()
-                    
+
                     VStack(alignment: .leading, spacing: 8) {
                         Text("Source")
                             .font(.title2)
                             .fontWeight(.semibold)
-                        
-                        Link(destination: URL(string: sourceUrl) ?? URL(string: "https://example.com")!) {
-                            HStack {
-                                Image(systemName: "link")
-                                Text("View Original Recipe")
-                                Spacer()
-                                Image(systemName: "arrow.up.right")
+
+                        if let url = URL(string: sourceUrl) {
+                            Link(destination: url) {
+                                HStack {
+                                    Image(systemName: "link")
+                                    Text("View Original Recipe")
+                                    Spacer()
+                                    Image(systemName: "arrow.up.right")
+                                }
+                                .foregroundColor(.orange)
+                                .padding()
+                                .background(Color.orange.opacity(0.1))
+                                .cornerRadius(8)
                             }
-                            .foregroundColor(.orange)
-                            .padding()
-                            .background(Color.orange.opacity(0.1))
-                            .cornerRadius(8)
                         }
                     }
                     .padding(.horizontal)
                 }
-                
+
+                // Start Cooking button
+                Button(action: { startCookingSession() }) {
+                    HStack {
+                        Image(systemName: "flame.fill")
+                        Text("Start Cooking")
+                            .fontWeight(.semibold)
+                    }
+                    .frame(maxWidth: .infinity)
+                    .padding()
+                    .background(Color.orange)
+                    .foregroundColor(.white)
+                    .cornerRadius(12)
+                }
+                .padding(.horizontal)
+
                 Spacer(minLength: 20)
             }
         }
@@ -177,29 +178,10 @@ struct RecipeDetailView: View {
         .toolbar {
             ToolbarItem(placement: .navigationBarTrailing) {
                 Menu {
-                    Button(action: {
-                        // TODO: Share recipe
-                    }) {
-                        Label("Share Recipe", systemImage: "square.and.arrow.up")
-                    }
-                    
-                    Button(action: {
-                        startCookingSession()
-                    }) {
-                        Label("Start Cooking", systemImage: "flame")
-                    }
-                    
-                    Divider()
-                    
-                    Button(action: {
-                        showingEditSheet = true
-                    }) {
+                    Button(action: { showingEditSheet = true }) {
                         Label("Edit Recipe", systemImage: "pencil")
                     }
-                    
-                    Button(role: .destructive, action: {
-                        showingDeleteAlert = true
-                    }) {
+                    Button(role: .destructive, action: { showingDeleteAlert = true }) {
                         Label("Delete Recipe", systemImage: "trash")
                     }
                 } label: {
@@ -212,9 +194,7 @@ struct RecipeDetailView: View {
             Button("Delete", role: .destructive) {
                 Task {
                     let success = await recipeManager.deleteRecipe(recipe)
-                    if success {
-                        dismiss()
-                    }
+                    if success { dismiss() }
                 }
             }
         } message: {
@@ -236,51 +216,41 @@ struct RecipeDetailView: View {
                     difficulty: recipe.difficulty
                 ),
                 onSave: { updatedRecipe in
-                    Task {
-                        await updateRecipe(updatedRecipe)
-                    }
+                    Task { await updateRecipe(updatedRecipe) }
                 }
             )
         }
     }
-    
+
     private func startCookingSession() {
-        // Start the cooking session with this recipe
-        Task {
-            await cookingSessionManager.startCookingSession(with: recipe)
-        }
-
-        // Dismiss the current view
+        Task { await cookingSessionManager.startCookingSession(with: recipe) }
         dismiss()
-
-        // Switch to the Cook tab (tab index 1)
         selectedTab.wrappedValue = 1
     }
-    
+
     private func updateRecipe(_ updatedRecipe: RecipeData) async {
         let success = await recipeManager.updateRecipe(id: recipe.id, with: updatedRecipe)
         if !success {
-            // Handle error - could show an alert
             print("Failed to update recipe: \(recipeManager.errorMessage ?? "Unknown error")")
         }
     }
 }
 
+// MARK: - Info Card
+
 struct InfoCard: View {
     let title: String
     let value: String
     let icon: String
-    
+
     var body: some View {
         VStack(spacing: 4) {
             Image(systemName: icon)
                 .font(.title3)
                 .foregroundColor(.orange)
-            
             Text(value)
                 .font(.headline)
                 .fontWeight(.semibold)
-            
             Text(title)
                 .font(.caption)
                 .foregroundColor(.secondary)
@@ -290,44 +260,4 @@ struct InfoCard: View {
         .background(Color(.systemGray6))
         .cornerRadius(12)
     }
-}
-
-#Preview {
-    NavigationStack {
-        RecipeDetailView(recipe: Recipe(
-            id: UUID(),
-            title: "Chocolate Chip Cookies",
-            description: "Classic homemade chocolate chip cookies that are crispy on the outside and chewy on the inside.",
-            servings: 24,
-            prepTime: 15,
-            cookTime: 12,
-            ingredients: [
-                "2 cups all-purpose flour",
-                "1 cup butter, softened",
-                "3/4 cup brown sugar",
-                "1/2 cup white sugar",
-                "2 large eggs",
-                "2 tsp vanilla extract",
-                "1 cup chocolate chips"
-            ],
-            instructions: [
-                "Preheat oven to 375°F (190°C).",
-                "In a medium bowl, whisk together flour, baking soda, and salt.",
-                "In a large bowl, cream together butter and both sugars until light and fluffy.",
-                "Beat in eggs one at a time, then vanilla.",
-                "Gradually mix in flour mixture until just combined.",
-                "Stir in chocolate chips.",
-                "Drop rounded tablespoons of dough onto ungreased baking sheets.",
-                "Bake for 9-11 minutes until golden brown.",
-                "Cool on baking sheet for 5 minutes before transferring to wire rack."
-            ],
-            tags: ["dessert", "cookies", "chocolate"],
-            sourceUrl: "https://example.com/cookies",
-            cuisineType: "American",
-            difficulty: "easy",
-            createdAt: Date(),
-            updatedAt: Date()
-        ))
-    }
-    .environmentObject(RecipeManager())
 }

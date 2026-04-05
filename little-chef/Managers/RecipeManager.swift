@@ -18,7 +18,11 @@ class RecipeManager: ObservableObject {
     private let recipeParser: LocalRecipeParser
     private let llmService: LLMService
 
-    init(llmService: LLMService = .shared) {
+    convenience init() {
+        self.init(llmService: .shared)
+    }
+
+    init(llmService: LLMService) {
         self.llmService = llmService
         self.recipeParser = LocalRecipeParser(llmService: llmService)
         do {

@@ -11,7 +11,6 @@ import PhotosUI
 struct AddRecipeView: View {
     @Environment(\.dismiss) private var dismiss
     @EnvironmentObject var recipeManager: RecipeManager
-    @EnvironmentObject var llmService: LLMService
 
     @State private var selectedInputType: RecipeInputType = .url
     @State private var urlInput = ""
@@ -122,6 +121,10 @@ struct AddRecipeView: View {
                     
                     Spacer(minLength: 20)
                 }
+            }
+            .scrollDismissesKeyboard(.interactively)
+            .onTapGesture {
+                UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
             }
             .navigationTitle("Add Recipe")
             .navigationBarTitleDisplayMode(.inline)

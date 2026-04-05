@@ -2,176 +2,149 @@
 //  WebScraperService.swift
 //  little-chef
 //
-//  Scrapes recipe content from URLs using SwiftSoup
-//  Replaces Firecrawl API
+//  Scrapes recipe content from URLs using WKWebView for full JS rendering
 //
 
 import Foundation
-import SwiftSoup
+import WebKit
 
-/// Service for scraping recipe content from web URLs
-class WebScraperService {
+/// Service for scraping recipe content from web URLs using WKWebView
+@MainActor
+class WebScraperService: NSObject {
     static let shared = WebScraperService()
 
-    private init() {}
+    private var webView: WKWebView?
+    private var continuation: CheckedContinuation<String, Error>?
+    private var timeoutTask: Task<Void, Never>?
 
-    // MARK: - Public Methods
+    override private init() {
+        super.init()
+    }
 
-    /// Scrape recipe content from a URL
+    // MARK: - Public API
+
+    /// Scrape recipe content from a URL. Loads the page in WKWebView to execute JavaScript,
+    /// then extracts text content from the rendered DOM.
     func scrapeRecipe(from url: String) async throws -> String {
         guard let urlObj = URL(string: url) else {
             throw WebScraperError.invalidURL
         }
 
-        // Fetch HTML content
-        let html = try await fetchHTML(from: urlObj)
+        return try await withCheckedThrowingContinuation { continuation in
+            self.continuation = continuation
 
-        // Parse and extract main content
-        let content = try extractMainContent(from: html)
+            // Create a fresh offscreen WKWebView
+            let config = WKWebViewConfiguration()
+            let wv = WKWebView(frame: .zero, configuration: config)
+            wv.navigationDelegate = self
+            self.webView = wv
 
-        return content
-    }
-
-    // MARK: - Private Methods
-
-    private func fetchHTML(from url: URL) async throws -> String {
-        let (data, response) = try await URLSession.shared.data(from: url)
-
-        guard let httpResponse = response as? HTTPURLResponse,
-              (200...299).contains(httpResponse.statusCode) else {
-            throw WebScraperError.fetchFailed
-        }
-
-        guard let html = String(data: data, encoding: .utf8) else {
-            throw WebScraperError.decodingFailed
-        }
-
-        return html
-    }
-
-    private func extractMainContent(from html: String) throws -> String {
-        let document = try SwiftSoup.parse(html)
-
-        // Try multiple strategies to extract recipe content
-
-        // Strategy 1: Look for recipe schema markup (structured data)
-        if let schemaContent = try? extractFromSchema(document) {
-            return schemaContent
-        }
-
-        // Strategy 2: Look for common recipe containers
-        if let recipeContent = try? extractFromRecipeContainer(document) {
-            return recipeContent
-        }
-
-        // Strategy 3: Look for article or main content
-        if let mainContent = try? extractFromMainContent(document) {
-            return mainContent
-        }
-
-        // Strategy 4: Fall back to body text (less reliable)
-        return try extractBodyText(document)
-    }
-
-    // MARK: - Extraction Strategies
-
-    private func extractFromSchema(_ document: Document) throws -> String? {
-        // Look for JSON-LD schema markup
-        let scripts = try document.select("script[type='application/ld+json']")
-
-        for script in scripts {
-            let jsonText = try script.html()
-
-            // Check if it's a Recipe schema
-            if jsonText.contains("\"@type\"") && (jsonText.contains("Recipe") || jsonText.contains("recipe")) {
-                // Return the JSON as-is for the LLM to parse
-                return "Schema.org Recipe JSON:\n\(jsonText)"
-            }
-        }
-
-        return nil
-    }
-
-    private func extractFromRecipeContainer(_ document: Document) throws -> String? {
-        // Common recipe container selectors
-        let selectors = [
-            "[class*='recipe']",
-            "[id*='recipe']",
-            "[itemtype*='Recipe']",
-            ".recipe-content",
-            ".recipe-container",
-            "#recipe",
-            "article.recipe"
-        ]
-
-        for selector in selectors {
-            if let element = try? document.select(selector).first() {
-                // Extract text from this container
-                let text = try cleanText(element.text())
-                if !text.isEmpty && text.count > 100 {
-                    return text
+            // Set a timeout
+            self.timeoutTask = Task {
+                try? await Task.sleep(nanoseconds: 15_000_000_000) // 15 seconds
+                if self.continuation != nil {
+                    self.finish(with: .failure(WebScraperError.fetchFailed))
                 }
             }
-        }
 
-        return nil
+            wv.load(URLRequest(url: urlObj))
+        }
     }
 
-    private func extractFromMainContent(_ document: Document) throws -> String? {
-        // Look for main content containers
-        let selectors = [
-            "main",
-            "article",
-            "[role='main']",
-            ".main-content",
-            "#main-content",
-            ".content",
-            "#content"
-        ]
+    // MARK: - Private
 
-        for selector in selectors {
-            if let element = try? document.select(selector).first() {
-                let text = try cleanText(element.text())
-                if !text.isEmpty && text.count > 100 {
-                    return text
+    private func finish(with result: Result<String, Error>) {
+        timeoutTask?.cancel()
+        timeoutTask = nil
+        webView?.stopLoading()
+        webView?.navigationDelegate = nil
+        webView = nil
+
+        if let cont = continuation {
+            continuation = nil
+            cont.resume(with: result)
+        }
+    }
+
+    /// Extract content from the loaded page. Tries schema.org JSON-LD first, then body text.
+    private func extractContent() {
+        guard let wv = webView else {
+            finish(with: .failure(WebScraperError.noContentFound))
+            return
+        }
+
+        // First try to get JSON-LD recipe schema
+        let schemaJS = """
+        (function() {
+            var scripts = document.querySelectorAll('script[type="application/ld+json"]');
+            for (var i = 0; i < scripts.length; i++) {
+                var text = scripts[i].textContent;
+                if (text.indexOf('Recipe') !== -1) {
+                    return 'SCHEMA_JSON:' + text;
                 }
             }
-        }
+            return null;
+        })()
+        """
 
-        return nil
+        wv.evaluateJavaScript(schemaJS) { [weak self] result, _ in
+            guard let self else { return }
+
+            if let schemaText = result as? String, schemaText.hasPrefix("SCHEMA_JSON:") {
+                let json = String(schemaText.dropFirst("SCHEMA_JSON:".count))
+                self.finish(with: .success("Schema.org Recipe JSON:\n\(json)"))
+                return
+            }
+
+            // Fall back to body text
+            let bodyJS = "document.body.innerText"
+            wv.evaluateJavaScript(bodyJS) { [weak self] result, error in
+                guard let self else { return }
+
+                if let error {
+                    self.finish(with: .failure(error))
+                    return
+                }
+
+                guard let text = result as? String, !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+                    self.finish(with: .failure(WebScraperError.noContentFound))
+                    return
+                }
+
+                // Clean up excessive whitespace
+                let cleaned = text
+                    .components(separatedBy: .newlines)
+                    .map { $0.trimmingCharacters(in: .whitespaces) }
+                    .filter { !$0.isEmpty }
+                    .joined(separator: "\n")
+
+                self.finish(with: .success(cleaned))
+            }
+        }
+    }
+}
+
+// MARK: - WKNavigationDelegate
+
+extension WebScraperService: WKNavigationDelegate {
+    nonisolated func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+        Task { @MainActor in
+            // Brief delay to let JS-rendered content settle
+            try? await Task.sleep(nanoseconds: 1_000_000_000)
+            self.extractContent()
+        }
     }
 
-    private func extractBodyText(_ document: Document) throws -> String {
-        // Remove script, style, and nav elements
-        try document.select("script, style, nav, header, footer, aside, iframe").remove()
-
-        // Get body text
-        guard let body = document.body() else {
-            throw WebScraperError.noContentFound
+    nonisolated func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
+        Task { @MainActor in
+            self.finish(with: .failure(WebScraperError.fetchFailed))
         }
-
-        let text = try cleanText(body.text())
-
-        guard !text.isEmpty else {
-            throw WebScraperError.noContentFound
-        }
-
-        return text
     }
 
-    // MARK: - Text Cleaning
-
-    private func cleanText(_ text: String) throws -> String {
-        // Remove excessive whitespace
-        var cleaned = text.replacingOccurrences(of: "\\s+", with: " ", options: .regularExpression)
-
-        // Remove common noise patterns
-        cleaned = cleaned.replacingOccurrences(of: "\\[.*?\\]", with: "", options: .regularExpression)
-
-        // Trim whitespace
-        cleaned = cleaned.trimmingCharacters(in: .whitespacesAndNewlines)
-
-        return cleaned
+    nonisolated func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) {
+        Task { @MainActor in
+            self.finish(with: .failure(WebScraperError.fetchFailed))
+        }
     }
 }
 
@@ -180,7 +153,6 @@ class WebScraperService {
 enum WebScraperError: LocalizedError {
     case invalidURL
     case fetchFailed
-    case decodingFailed
     case noContentFound
 
     var errorDescription: String? {
@@ -189,8 +161,6 @@ enum WebScraperError: LocalizedError {
             return "Invalid URL provided"
         case .fetchFailed:
             return "Failed to fetch webpage. Please check the URL and your internet connection."
-        case .decodingFailed:
-            return "Failed to decode webpage content"
         case .noContentFound:
             return "No recipe content found on the webpage"
         }

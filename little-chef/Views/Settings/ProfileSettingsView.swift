@@ -49,7 +49,25 @@ struct ProfileSettingsView: View {
                     }
                 }
 
-                if llmService.isLoaded {
+                if llmService.isLoadingModel {
+                    VStack(spacing: 8) {
+                        ProgressView(value: llmService.loadProgress, total: 1.0)
+                            .tint(.orange)
+
+                        HStack {
+                            Text(llmService.loadProgress > 0 && llmService.loadProgress < 1.0
+                                 ? "Downloading..."
+                                 : "Loading...")
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                            Spacer()
+                            Text("\(Int(llmService.loadProgress * 100))%")
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                                .monospacedDigit()
+                        }
+                    }
+                } else if llmService.isLoaded {
                     Button("Unload Model") {
                         llmService.unloadModel()
                     }
@@ -64,6 +82,12 @@ struct ProfileSettingsView: View {
                             }
                         }
                     }
+                }
+
+                if let error = llmService.loadError {
+                    Text(error)
+                        .font(.caption)
+                        .foregroundColor(.red)
                 }
             } header: {
                 Text("AI Model")
