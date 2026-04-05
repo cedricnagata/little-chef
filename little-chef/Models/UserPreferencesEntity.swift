@@ -11,13 +11,13 @@ import SwiftData
 /// SwiftData model for persisting user preferences locally
 @Model
 final class UserPreferencesEntity {
-    @Attribute(.unique) var id: UUID
-    var measurementSystem: String
-    var dietaryRestrictions: [String]
-    var speechRate: Float
-    var voiceIdentifier: String
-    var autoSpeakResponses: Bool
-    var updatedAt: Date
+    var id: UUID = UUID()
+    var measurementSystem: String = "imperial"
+    var dietaryRestrictions: [String] = []
+    var speechRate: Float = 0.5
+    var voiceIdentifier: String = "com.apple.ttsbundle.Samantha-compact"
+    var autoSpeakResponses: Bool = true
+    var updatedAt: Date = Date()
 
     init(
         id: UUID = UUID(),

@@ -205,7 +205,7 @@ struct ProfileSettingsView: View {
     private func loadPreferences() {
         Task {
             do {
-                let dataManager = try LocalDataManager()
+                let dataManager = LocalDataManager.shared
                 let prefsEntity = try dataManager.fetchPreferences()
                 let prefs = prefsEntity.toUserPreferences()
 
@@ -226,7 +226,7 @@ struct ProfileSettingsView: View {
         isLoading = true
         Task {
             do {
-                let dataManager = try LocalDataManager()
+                let dataManager = LocalDataManager.shared
                 try dataManager.updatePreferences(
                     measurementSystem: measurementSystem,
                     dietaryRestrictions: dietaryRestrictions,
@@ -249,7 +249,7 @@ struct ProfileSettingsView: View {
         isDeleting = true
         Task {
             do {
-                let dataManager = try LocalDataManager()
+                let dataManager = LocalDataManager.shared
                 try dataManager.deleteAllRecipes()
                 try dataManager.resetPreferences()
                 await MainActor.run {

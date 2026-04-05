@@ -11,20 +11,20 @@ import SwiftData
 /// SwiftData model for persisting recipes locally
 @Model
 final class RecipeEntity {
-    @Attribute(.unique) var id: UUID
-    var title: String
+    var id: UUID = UUID()
+    var title: String = ""
     var recipeDescription: String?
-    var servings: Int
+    var servings: Int = 4
     var prepTime: Int?
     var cookTime: Int?
-    var ingredients: [String]
-    var instructions: [String]
-    var tags: [String]
+    var ingredients: [String] = []
+    var instructions: [String] = []
+    var tags: [String] = []
     var sourceUrl: String?
     var cuisineType: String?
     var difficulty: String?
-    var createdAt: Date
-    var updatedAt: Date
+    var createdAt: Date = Date()
+    var updatedAt: Date = Date()
 
     init(
         id: UUID = UUID(),

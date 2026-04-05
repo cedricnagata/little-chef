@@ -16,7 +16,7 @@ class CookingSessionManager: ObservableObject, TimerManager {
     @Published var lastResponse: String = ""
     @Published var localTimers: [LocalTimer] = []
 
-    private var dataManager: LocalDataManager
+    private let dataManager = LocalDataManager.shared
     private var cookingAgent: LocalCookingAgent?
     private let llmService: LLMService
 
@@ -26,11 +26,6 @@ class CookingSessionManager: ObservableObject, TimerManager {
 
     init(llmService: LLMService) {
         self.llmService = llmService
-        do {
-            dataManager = try LocalDataManager()
-        } catch {
-            fatalError("Failed to initialize LocalDataManager: \(error)")
-        }
     }
 
     // MARK: - Session Management

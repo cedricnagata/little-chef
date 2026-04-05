@@ -17,7 +17,7 @@ class RecipeManager: ObservableObject {
     @Published var errorMessage: String?
     @Published var parseStatus: String = ""
 
-    private var dataManager: LocalDataManager
+    private let dataManager = LocalDataManager.shared
     private let recipeParser: LocalRecipeParser
     private let llmService: LLMService
 
@@ -28,10 +28,12 @@ class RecipeManager: ObservableObject {
     init(llmService: LLMService) {
         self.llmService = llmService
         self.recipeParser = LocalRecipeParser(llmService: llmService)
-        do {
-            dataManager = try LocalDataManager()
-        } catch {
-            fatalError("Failed to initialize LocalDataManager: \(error)")
+
+        // Reload recipes when remote CloudKit changes arrive
+        dataManager.onRemoteChange = { [weak self] in
+            Task { @MainActor in
+                await self?.loadRecipes()
+            }
         }
     }
 

@@ -8,22 +8,39 @@
 import Foundation
 import SwiftData
 
-/// Manages all local data operations for recipes and user preferences
+/// Manages all local data operations for recipes and user preferences.
+/// Recipes sync to iCloud via SwiftData + CloudKit.
+/// Singleton to avoid multiple CloudKit sync handlers.
 @MainActor
 class LocalDataManager: ObservableObject {
+    static let shared: LocalDataManager = {
+        do {
+            return try LocalDataManager()
+        } catch {
+            fatalError("Failed to initialize LocalDataManager: \(error)")
+        }
+    }()
+
     private let modelContainer: ModelContainer
     private let modelContext: ModelContext
 
+    /// Called when remote CloudKit changes arrive (e.g. from another device)
+    var onRemoteChange: (() -> Void)?
+
     // MARK: - Initialization
 
-    init() throws {
-        // Configure the model container with all model types
+    private init() throws {
         let schema = Schema([
             RecipeEntity.self,
             UserPreferencesEntity.self
         ])
 
-        let modelConfiguration = ModelConfiguration(schema: schema, isStoredInMemoryOnly: false)
+        // Enable CloudKit sync for the private iCloud database
+        let modelConfiguration = ModelConfiguration(
+            schema: schema,
+            isStoredInMemoryOnly: false,
+            cloudKitDatabase: .private("iCloud.com.littlechef.app")
+        )
 
         do {
             modelContainer = try ModelContainer(for: schema, configurations: [modelConfiguration])
@@ -31,6 +48,15 @@ class LocalDataManager: ObservableObject {
         } catch {
             print("Failed to create ModelContainer: \(error)")
             throw error
+        }
+
+        // Listen for remote CloudKit changes
+        NotificationCenter.default.addObserver(
+            forName: NSNotification.Name.NSPersistentStoreRemoteChange,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            self?.onRemoteChange?()
         }
     }
 
