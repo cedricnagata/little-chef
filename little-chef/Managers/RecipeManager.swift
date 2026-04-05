@@ -7,6 +7,7 @@
 
 import Foundation
 import SwiftUI
+import UIKit
 
 @MainActor
 class RecipeManager: ObservableObject {
@@ -128,13 +129,30 @@ class RecipeManager: ObservableObject {
     
     // MARK: - Recipe Parsing
 
+    /// Wraps a parsing operation in a UIKit background task so iOS gives extra
+    /// execution time if the app is backgrounded or the screen locks.
+    private func withBackgroundTask<T>(_ work: @escaping () async throws -> T) async rethrows -> T {
+        var bgTaskID: UIBackgroundTaskIdentifier = .invalid
+        bgTaskID = UIApplication.shared.beginBackgroundTask(withName: "RecipeParsing") {
+            UIApplication.shared.endBackgroundTask(bgTaskID)
+            bgTaskID = .invalid
+        }
+        defer {
+            if bgTaskID != .invalid {
+                UIApplication.shared.endBackgroundTask(bgTaskID)
+            }
+        }
+        return try await work()
+    }
+
     func parseRecipeFromUrl(_ url: String) async -> RecipeParseResponse? {
         isLoading = true
         errorMessage = nil
 
         do {
-            // Model is already loaded by AddRecipeView.onAppear
-            let response = try await recipeParser.parseFromURL(url)
+            let response = try await withBackgroundTask {
+                try await self.recipeParser.parseFromURL(url)
+            }
             isLoading = false
             return response
         } catch {
@@ -149,8 +167,9 @@ class RecipeManager: ObservableObject {
         errorMessage = nil
 
         do {
-            // Model is already loaded by AddRecipeView.onAppear
-            let response = try await recipeParser.parseFromText(text)
+            let response = try await withBackgroundTask {
+                try await self.recipeParser.parseFromText(text)
+            }
             isLoading = false
             return response
         } catch {
@@ -165,8 +184,9 @@ class RecipeManager: ObservableObject {
         errorMessage = nil
 
         do {
-            // Model is already loaded by AddRecipeView.onAppear
-            let response = try await recipeParser.parseFromImages(images)
+            let response = try await withBackgroundTask {
+                try await self.recipeParser.parseFromImages(images)
+            }
             isLoading = false
             return response
         } catch {

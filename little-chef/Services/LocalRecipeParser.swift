@@ -34,13 +34,43 @@ class LocalRecipeParser: ObservableObject {
         progress = 0.1
         defer { isProcessing = false; progress = 1.0 }
 
-        let webContent = try await webScraper.scrapeRecipe(from: url)
+        print("📖 [PARSER] Parsing URL: \(url)")
+        let webContent: String
+        do {
+            webContent = try await webScraper.scrapeRecipe(from: url)
+            print("📖 [PARSER] Scraped content length: \(webContent.count) chars")
+        } catch {
+            print("📖 [PARSER] ❌ Scraping failed: \(error.localizedDescription)")
+            throw error
+        }
         progress = 0.3
 
-        let recipeData = try await parseWithLLM(text: webContent, sourceUrl: url)
+        var recipeData: RecipeData
+
+        // Try direct schema.org parsing first, then always do an LLM cleanup pass
+        if webContent.hasPrefix("Schema.org Recipe JSON:"),
+           let parsed = try? parseSchemaOrgRecipe(from: webContent, sourceUrl: url) {
+            print("📖 [PARSER] ✅ Parsed from schema.org, running LLM cleanup pass")
+            if let cleaned = try? await cleanupWithLLM(schema: parsed, sourceUrl: url) {
+                recipeData = cleaned
+            } else {
+                print("📖 [PARSER] LLM cleanup failed, using raw schema.org result")
+                recipeData = parsed
+            }
+        } else {
+            // No schema.org — full LLM parse with higher token limit
+            print("📖 [PARSER] No schema.org data, falling back to LLM")
+            print("📖 [PARSER] Content preview (first 500 chars):\n\(String(webContent.prefix(500)))")
+            recipeData = try await parseWithLLM(text: webContent, sourceUrl: url, maxTokens: 4096)
+        }
+
+        print("📖 [PARSER] ✅ Parsed recipe: \(recipeData.title)")
+        print("📖 [PARSER]   Ingredients: \(recipeData.ingredients.count), Steps: \(recipeData.instructions.count)")
+        print("📖 [PARSER]   Prep: \(recipeData.prepTime?.description ?? "nil"), Cook: \(recipeData.cookTime?.description ?? "nil")")
         progress = 1.0
 
         let (confidence, warnings) = evaluateRecipe(recipeData)
+        print("📖 [PARSER] Confidence: \(confidence), Warnings: \(warnings)")
         return RecipeParseResponse(recipe: recipeData, confidence: confidence, warnings: warnings)
     }
 
@@ -77,7 +107,7 @@ class LocalRecipeParser: ObservableObject {
 
     // MARK: - Private Methods
 
-    private func parseWithLLM(text: String, sourceUrl: String?) async throws -> RecipeData {
+    private func parseWithLLM(text: String, sourceUrl: String?, maxTokens: Int = 1024) async throws -> RecipeData {
         let prompt = """
         Extract the recipe from the text below into JSON. Return ONLY the JSON object.
 
@@ -92,7 +122,7 @@ class LocalRecipeParser: ObservableObject {
         - difficulty must be "easy", "medium", or "hard"
 
         Text:
-        \(text.prefix(3000))
+        \(text.prefix(5000))
         """
 
         let response = try await llmService.generateChatCompletion(
@@ -102,10 +132,19 @@ class LocalRecipeParser: ObservableObject {
                 ChatMessage(role: .user, content: prompt)
             ],
             temperature: 0.2,
-            maxTokens: 1024
+            maxTokens: maxTokens
         )
 
-        var recipeData = try parseRecipeJSON(from: response)
+        print("📖 [PARSER] LLM raw response (\(response.count) chars):\n\(response.prefix(1000))")
+
+        var recipeData: RecipeData
+        do {
+            recipeData = try parseRecipeJSON(from: response)
+        } catch {
+            print("📖 [PARSER] ❌ JSON parse failed: \(error)")
+            print("📖 [PARSER] Full response was:\n\(response)")
+            throw error
+        }
 
         if let sourceUrl {
             recipeData = RecipeData(
@@ -173,6 +212,197 @@ class LocalRecipeParser: ObservableObject {
             print("JSON decoding error: \(error)")
             throw RecipeParserError.invalidJSONResponse
         }
+    }
+
+    // MARK: - LLM Cleanup Pass
+
+    /// Always run an LLM pass on schema.org data to organize, clean up, and fill any gaps.
+    private func cleanupWithLLM(schema: RecipeData, sourceUrl: String?) async throws -> RecipeData {
+        let ingredientsList = schema.ingredients.isEmpty ? "NONE FOUND" : schema.ingredients.joined(separator: "\n- ")
+        let instructionsList = schema.instructions.isEmpty ? "NONE FOUND" : schema.instructions.enumerated().map { "\($0.offset + 1). \($0.element)" }.joined(separator: "\n")
+
+        let prompt = """
+        Clean up and organize this recipe data into JSON. Return ONLY the JSON object.
+
+        Title: \(schema.title)
+        Description: \(schema.description ?? "none")
+        Servings: \(schema.servings)
+        Prep time: \(schema.prepTime.map { "\($0) minutes" } ?? "unknown")
+        Cook time: \(schema.cookTime.map { "\($0) minutes" } ?? "unknown")
+        Cuisine: \(schema.cuisineType ?? "unknown")
+        Tags: \(schema.tags.joined(separator: ", "))
+
+        Ingredients:
+        - \(ingredientsList)
+
+        Instructions:
+        \(instructionsList)
+
+        Example output format:
+        {"title": "Recipe Name", "description": "Short description", "servings": 4, "prep_time": 10, "cook_time": 20, "ingredients": ["ingredient 1", "ingredient 2"], "instructions": ["Do this first.", "Then do this."], "tags": ["tag1"], "cuisine_type": "Italian", "difficulty": "medium"}
+
+        IMPORTANT:
+        - Clean up ingredients: remove HTML entities, fix formatting, keep quantities
+        - Clean up instructions: make each step clear and concise, remove URLs or metadata
+        - Do NOT number or prefix instructions with "Step 1:" etc.
+        - prep_time and cook_time MUST be integers in MINUTES
+        - difficulty must be "easy", "medium", or "hard"
+        - Fill in any missing fields if you can infer them
+        """
+
+        let response = try await llmService.generateChatCompletion(
+            messages: [
+                ChatMessage(role: .system, content: "You are a recipe organizer. Clean up and format the recipe data. Output only valid JSON."),
+                ChatMessage(role: .user, content: prompt)
+            ],
+            temperature: 0.2,
+            maxTokens: 4096
+        )
+
+        print("📖 [PARSER] LLM cleanup response (\(response.count) chars):\n\(response.prefix(500))")
+
+        var cleaned = try parseRecipeJSON(from: response)
+
+        // Preserve source URL
+        if let sourceUrl {
+            cleaned = RecipeData(
+                title: cleaned.title,
+                description: cleaned.description,
+                servings: cleaned.servings,
+                prepTime: cleaned.prepTime,
+                cookTime: cleaned.cookTime,
+                ingredients: cleaned.ingredients,
+                instructions: cleaned.instructions,
+                tags: cleaned.tags,
+                sourceUrl: sourceUrl,
+                cuisineType: cleaned.cuisineType,
+                difficulty: cleaned.difficulty
+            )
+        }
+
+        return cleaned
+    }
+
+    // MARK: - Schema.org Direct Parsing
+
+    /// Parse a schema.org Recipe JSON directly into RecipeData — no LLM needed.
+    private func parseSchemaOrgRecipe(from content: String, sourceUrl: String?) throws -> RecipeData {
+        // Strip the "Schema.org Recipe JSON:\n" prefix
+        let jsonString = content.replacingOccurrences(of: "Schema.org Recipe JSON:\n", with: "")
+
+        guard let data = jsonString.data(using: .utf8),
+              let json = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            throw RecipeParserError.invalidJSONResponse
+        }
+
+        let title = json["name"] as? String ?? ""
+        let description = json["description"] as? String
+
+        // Servings — can be string like "10" or array like ["10"]
+        let servings: Int
+        if let yieldArray = json["recipeYield"] as? [String], let first = yieldArray.first {
+            servings = Int(first.components(separatedBy: CharacterSet.decimalDigits.inverted).joined()) ?? 4
+        } else if let yieldStr = json["recipeYield"] as? String {
+            servings = Int(yieldStr.components(separatedBy: CharacterSet.decimalDigits.inverted).joined()) ?? 4
+        } else {
+            servings = 4
+        }
+
+        // Times — ISO 8601 duration like "PT30M", "PT2H", "PT1H30M"
+        let prepTime = parseISO8601Duration(json["prepTime"] as? String)
+        let cookTime = parseISO8601Duration(json["cookTime"] as? String)
+
+        // Ingredients — simple string array
+        let ingredients = json["recipeIngredient"] as? [String] ?? []
+
+        // Instructions — can be HowToStep, HowToSection (with nested steps), or plain strings
+        let instructions: [String] = extractInstructions(from: json["recipeInstructions"])
+
+        // Tags / category
+        let tags: [String]
+        if let category = json["recipeCategory"] as? [String] {
+            tags = category.map { $0.lowercased() }
+        } else if let category = json["recipeCategory"] as? String {
+            tags = [category.lowercased()]
+        } else {
+            tags = []
+        }
+
+        let cuisineType: String?
+        if let cuisine = json["recipeCuisine"] as? [String] {
+            cuisineType = cuisine.first
+        } else {
+            cuisineType = json["recipeCuisine"] as? String
+        }
+
+        return RecipeData(
+            title: title,
+            description: description,
+            servings: servings,
+            prepTime: prepTime,
+            cookTime: cookTime,
+            ingredients: ingredients,
+            instructions: instructions,
+            tags: tags,
+            sourceUrl: sourceUrl,
+            cuisineType: cuisineType,
+            difficulty: nil
+        )
+    }
+
+    /// Recursively extract instruction text from schema.org recipeInstructions,
+    /// handling HowToStep, HowToSection (with nested itemListElement), and plain strings.
+    private func extractInstructions(from value: Any?) -> [String] {
+        guard let value else { return [] }
+
+        // Array of items
+        if let array = value as? [Any] {
+            return array.flatMap { extractInstructions(from: $0) }
+        }
+
+        // Dictionary — HowToStep or HowToSection
+        if let dict = value as? [String: Any] {
+            let type = dict["@type"] as? String ?? ""
+            if type == "HowToSection", let items = dict["itemListElement"] {
+                return extractInstructions(from: items)
+            }
+            if let text = dict["text"] as? String, !text.isEmpty {
+                return [text]
+            }
+        }
+
+        // Plain string
+        if let str = value as? String, !str.isEmpty {
+            return [str]
+        }
+
+        return []
+    }
+
+    /// Parse ISO 8601 duration (e.g. "PT30M", "PT2H", "PT1H30M") into minutes.
+    private func parseISO8601Duration(_ duration: String?) -> Int? {
+        guard let duration, duration.hasPrefix("PT") else { return nil }
+        let str = String(duration.dropFirst(2)) // drop "PT"
+
+        var totalMinutes = 0
+        var numberBuffer = ""
+
+        for char in str {
+            if char.isNumber {
+                numberBuffer.append(char)
+            } else if char == "H", let hours = Int(numberBuffer) {
+                totalMinutes += hours * 60
+                numberBuffer = ""
+            } else if char == "M", let minutes = Int(numberBuffer) {
+                totalMinutes += minutes
+                numberBuffer = ""
+            } else if char == "S" {
+                // Ignore seconds
+                numberBuffer = ""
+            }
+        }
+
+        return totalMinutes > 0 ? totalMinutes : nil
     }
 
     private func evaluateRecipe(_ recipe: RecipeData) -> (confidence: Double, warnings: [String]) {

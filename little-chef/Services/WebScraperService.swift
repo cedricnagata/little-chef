@@ -26,29 +26,34 @@ class WebScraperService: NSObject {
     /// Scrape recipe content from a URL. Loads the page in WKWebView to execute JavaScript,
     /// then extracts text content from the rendered DOM.
     func scrapeRecipe(from url: String) async throws -> String {
+        print("🌐 [SCRAPER] Starting scrape for URL: \(url)")
         guard let urlObj = URL(string: url) else {
+            print("🌐 [SCRAPER] ❌ Invalid URL")
             throw WebScraperError.invalidURL
         }
 
-        return try await withCheckedThrowingContinuation { continuation in
+        let result = try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<String, Error>) in
             self.continuation = continuation
 
-            // Create a fresh offscreen WKWebView
             let config = WKWebViewConfiguration()
             let wv = WKWebView(frame: .zero, configuration: config)
             wv.navigationDelegate = self
             self.webView = wv
 
-            // Set a timeout
             self.timeoutTask = Task {
-                try? await Task.sleep(nanoseconds: 15_000_000_000) // 15 seconds
+                try? await Task.sleep(nanoseconds: 15_000_000_000)
                 if self.continuation != nil {
+                    print("🌐 [SCRAPER] ❌ Timeout after 15s")
                     self.finish(with: .failure(WebScraperError.fetchFailed))
                 }
             }
 
             wv.load(URLRequest(url: urlObj))
         }
+
+        print("🌐 [SCRAPER] ✅ Got content (\(result.count) chars)")
+        print("🌐 [SCRAPER] Content preview:\n\(String(result.prefix(500)))")
+        return result
     }
 
     // MARK: - Private
@@ -73,15 +78,32 @@ class WebScraperService: NSObject {
             return
         }
 
-        // First try to get JSON-LD recipe schema
+        // First try to get JSON-LD recipe schema — extract just the Recipe object
         let schemaJS = """
         (function() {
+            function findRecipe(obj) {
+                if (!obj || typeof obj !== 'object') return null;
+                if (Array.isArray(obj)) {
+                    for (var i = 0; i < obj.length; i++) {
+                        var found = findRecipe(obj[i]);
+                        if (found) return found;
+                    }
+                    return null;
+                }
+                var t = obj['@type'];
+                if (t === 'Recipe' || (Array.isArray(t) && t.indexOf('Recipe') !== -1)) {
+                    return obj;
+                }
+                if (obj['@graph']) return findRecipe(obj['@graph']);
+                return null;
+            }
             var scripts = document.querySelectorAll('script[type="application/ld+json"]');
             for (var i = 0; i < scripts.length; i++) {
-                var text = scripts[i].textContent;
-                if (text.indexOf('Recipe') !== -1) {
-                    return 'SCHEMA_JSON:' + text;
-                }
+                try {
+                    var data = JSON.parse(scripts[i].textContent);
+                    var recipe = findRecipe(data);
+                    if (recipe) return 'SCHEMA_JSON:' + JSON.stringify(recipe);
+                } catch(e) {}
             }
             return null;
         })()
@@ -92,9 +114,12 @@ class WebScraperService: NSObject {
 
             if let schemaText = result as? String, schemaText.hasPrefix("SCHEMA_JSON:") {
                 let json = String(schemaText.dropFirst("SCHEMA_JSON:".count))
+                print("🌐 [SCRAPER] Found JSON-LD schema (\(json.count) chars)")
                 self.finish(with: .success("Schema.org Recipe JSON:\n\(json)"))
                 return
             }
+
+            print("🌐 [SCRAPER] No JSON-LD schema found, falling back to body text")
 
             // Fall back to body text
             let bodyJS = "document.body.innerText"
@@ -102,22 +127,26 @@ class WebScraperService: NSObject {
                 guard let self else { return }
 
                 if let error {
+                    print("🌐 [SCRAPER] ❌ Body text extraction error: \(error.localizedDescription)")
                     self.finish(with: .failure(error))
                     return
                 }
 
                 guard let text = result as? String, !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+                    print("🌐 [SCRAPER] ❌ Body text is empty")
                     self.finish(with: .failure(WebScraperError.noContentFound))
                     return
                 }
 
-                // Clean up excessive whitespace
+                print("🌐 [SCRAPER] Got body text (\(text.count) raw chars)")
+
                 let cleaned = text
                     .components(separatedBy: .newlines)
                     .map { $0.trimmingCharacters(in: .whitespaces) }
                     .filter { !$0.isEmpty }
                     .joined(separator: "\n")
 
+                print("🌐 [SCRAPER] Cleaned body text (\(cleaned.count) chars)")
                 self.finish(with: .success(cleaned))
             }
         }
