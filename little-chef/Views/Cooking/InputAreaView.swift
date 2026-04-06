@@ -36,37 +36,40 @@ struct InputAreaView: View {
                 .background(Circle().fill(voiceAssistant.isHandsFreeMode ? Color.green.opacity(0.2) : Color(.systemGray6)))
                 .disabled(!voiceAssistant.isAvailable || cookingSessionManager.isLoading)
 
-                // Voice button
-                Button(action: {
-                    isTextFieldFocused = false
-                    if voiceAssistant.isListening {
-                        voiceAssistant.stopListening()
-                        if voiceAssistant.hasRecognizedText() {
-                            sendVoiceQuery()
+                // Stop speaking button (replaces mic when speaking)
+                if voiceAssistant.isSpeaking {
+                    Button(action: {
+                        voiceAssistant.stopSpeaking()
+                    }) {
+                        Image(systemName: "stop.circle.fill")
+                            .font(.title2)
+                            .foregroundColor(.red)
+                    }
+                    .padding(12)
+                    .background(Circle().fill(Color.red.opacity(0.15)))
+                } else {
+                    // Voice button
+                    Button(action: {
+                        isTextFieldFocused = false
+                        voiceAssistant.stopSpeaking()
+                        if voiceAssistant.isListening {
+                            voiceAssistant.stopListening()
+                            if voiceAssistant.hasRecognizedText() {
+                                sendVoiceQuery()
+                            }
+                        } else {
+                            voiceAssistant.startListening()
                         }
-                    } else {
-                        voiceAssistant.startListening()
+                    }) {
+                        Image(systemName: voiceAssistant.isListening ? "mic.fill" : "mic")
+                            .font(.title2)
+                            .foregroundColor(voiceAssistant.isListening ? .red : .orange)
+                            .scaleEffect(voiceAssistant.isListening && isAnimating ? 1.2 : 1.0)
+                            .animation(.easeInOut(duration: 0.6).repeatForever(autoreverses: true), value: isAnimating)
                     }
-                }) {
-                    Image(systemName: voiceAssistant.isListening ? "mic.fill" : "mic")
-                        .font(.title2)
-                        .foregroundColor(voiceAssistant.isListening ? .red : .orange)
-                        .scaleEffect(voiceAssistant.isListening && isAnimating ? 1.2 : 1.0)
-                        .animation(.easeInOut(duration: 0.6).repeatForever(autoreverses: true), value: isAnimating)
-                }
-                .padding(12)
-                .background(Circle().fill(Color(.systemGray6)))
-                .disabled(!voiceAssistant.isAvailable || cookingSessionManager.isLoading || voiceAssistant.isHandsFreeMode)
-                .onAppear {
-                    if voiceAssistant.isListening {
-                        isAnimating = true
-                    }
-                }
-                .onChange(of: voiceAssistant.isListening) { _, newValue in
-                    isAnimating = newValue
-                }
-                .onChange(of: voiceAssistant.isWakeWordListening) { _, newValue in
-                    isAnimating = newValue
+                    .padding(12)
+                    .background(Circle().fill(Color(.systemGray6)))
+                    .disabled(!voiceAssistant.isAvailable || cookingSessionManager.isLoading || voiceAssistant.isHandsFreeMode)
                 }
 
                 // Text input
@@ -77,6 +80,17 @@ struct InputAreaView: View {
                     .disabled(cookingSessionManager.isLoading)
                     .onSubmit {
                         sendTextQuery()
+                    }
+                    .onAppear {
+                        if voiceAssistant.isListening {
+                            isAnimating = true
+                        }
+                    }
+                    .onChange(of: voiceAssistant.isListening) { _, newValue in
+                        isAnimating = newValue
+                    }
+                    .onChange(of: voiceAssistant.isWakeWordListening) { _, newValue in
+                        isAnimating = newValue
                     }
 
                 // Send button
@@ -162,6 +176,7 @@ struct InputAreaView: View {
         let query = textInput.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !query.isEmpty else { return }
 
+        voiceAssistant.stopSpeaking()
         textInput = ""
         isTextFieldFocused = false
 
@@ -183,6 +198,7 @@ struct InputAreaView: View {
         let query = voiceAssistant.recognizedText.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !query.isEmpty else { return }
 
+        voiceAssistant.stopSpeaking()
         voiceAssistant.clearRecognizedText()
 
         Task {
@@ -198,8 +214,8 @@ struct InputAreaView: View {
             voiceAssistant.updateVoiceSettings(session.userPreferences.voiceSettings)
         }
 
-        voiceAssistant.onWakeWordDetected = {
-            print("Wake word detected - transitioning to listening")
+        voiceAssistant.onWakeWordDetected = { [weak voiceAssistant] in
+            voiceAssistant?.stopSpeaking()
         }
 
         voiceAssistant.onVoiceQueryReady = { [weak cookingSessionManager, weak voiceAssistant] query in

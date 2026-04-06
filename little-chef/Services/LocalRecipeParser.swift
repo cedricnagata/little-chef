@@ -154,7 +154,7 @@ class LocalRecipeParser: ObservableObject {
 
         var recipeData: RecipeData
         do {
-            recipeData = try parseRecipeJSON(from: response)
+            recipeData = try Self.parseRecipeJSON(from: response)
         } catch {
             print("📖 [PARSER] ❌ JSON parse failed: \(error)")
             print("📖 [PARSER] Full response was:\n\(response)")
@@ -180,7 +180,7 @@ class LocalRecipeParser: ObservableObject {
         return recipeData
     }
 
-    private func parseRecipeJSON(from response: String) throws -> RecipeData {
+    static func parseRecipeJSON(from response: String) throws -> RecipeData {
         // Find JSON in response
         guard let jsonStart = response.firstIndex(of: "{"),
               let jsonEnd = response.lastIndex(of: "}") else {
@@ -276,7 +276,7 @@ class LocalRecipeParser: ObservableObject {
 
         print("📖 [PARSER] LLM cleanup response (\(response.count) chars):\n\(response.prefix(500))")
 
-        var cleaned = try parseRecipeJSON(from: response)
+        var cleaned = try Self.parseRecipeJSON(from: response)
 
         // Preserve source URL
         if let sourceUrl {
