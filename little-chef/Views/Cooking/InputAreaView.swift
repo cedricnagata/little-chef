@@ -69,7 +69,7 @@ struct InputAreaView: View {
                     }
                     .padding(12)
                     .background(Circle().fill(Color(.systemGray6)))
-                    .disabled(!voiceAssistant.isAvailable || cookingSessionManager.isLoading || voiceAssistant.isHandsFreeMode)
+                    .disabled(!voiceAssistant.isAvailable || cookingSessionManager.isLoading)
                 }
 
                 // Text input

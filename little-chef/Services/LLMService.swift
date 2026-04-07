@@ -36,10 +36,12 @@ class LLMService: ObservableObject {
 
     private func loadModel() async throws -> MLXLMCommon.ModelContainer {
         if let container = modelContainer {
+            print("🤖 [LLM] Model already loaded, returning cached container")
             return container
         }
 
         guard !isLoadingModel else {
+            print("🤖 [LLM] Model already loading, waiting...")
             while isLoadingModel {
                 try await Task.sleep(nanoseconds: 100_000_000)
             }
@@ -47,6 +49,7 @@ class LLMService: ObservableObject {
             throw LLMError.loadFailed("Model failed to load")
         }
 
+        print("🤖 [LLM] Starting model load...")
         isLoadingModel = true
         loadProgress = 0.0
         loadError = nil
@@ -54,20 +57,27 @@ class LLMService: ObservableObject {
         MLX.Memory.cacheLimit = 20 * 1024 * 1024
 
         do {
+            print("🤖 [LLM] Calling LLMModelFactory.loadContainer...")
             let container = try await LLMModelFactory.shared.loadContainer(
                 configuration: modelConfiguration
             ) { progress in
                 Task { @MainActor in
                     self.loadProgress = progress.fractionCompleted
+                    if Int(progress.fractionCompleted * 100) % 25 == 0 {
+                        print("🤖 [LLM] Download progress: \(Int(progress.fractionCompleted * 100))%")
+                    }
                 }
             }
 
+            print("🤖 [LLM] ✅ Model loaded successfully")
             self.modelContainer = container
             isLoaded = true
             loadProgress = 1.0
             isLoadingModel = false
             return container
         } catch {
+            print("🤖 [LLM] ❌ Model load failed: \(error)")
+            print("🤖 [LLM] Error type: \(type(of: error))")
             loadError = error.localizedDescription
             isLoadingModel = false
             throw error
