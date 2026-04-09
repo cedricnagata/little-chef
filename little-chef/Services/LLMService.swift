@@ -23,43 +23,74 @@ class LLMService: ObservableObject {
     @Published var loadError: String?
     @Published var loadProgress: Double = 0.0
     @Published var isLoadingModel = false
+    @Published var downloadedModelIds: Set<String> = []
 
     // MARK: - Private State
-    private var modelContainer: MLXLMCommon.ModelContainer?
+    /// Containers keyed by model ID — allows both 8B and 4B to be loaded
+    private var modelContainers: [String: MLXLMCommon.ModelContainer] = [:]
+    /// Which model ID is currently being loaded (to prevent double-loads)
+    @Published var currentlyLoadingModelId: String?
 
-    private let modelConfiguration = ModelConfiguration(
+    private let defaultModelConfig = ModelConfiguration(
         id: "prism-ml/Bonsai-8B-mlx-1bit",
         defaultPrompt: "You are a helpful assistant."
     )
 
+    private init() {
+        refreshDownloadedModels()
+    }
+
+    /// Refresh which models are cached on disk.
+    func refreshDownloadedModels() {
+        var ids = Set<String>()
+        for choice in CookingModelChoice.allCases {
+            if isModelDownloaded(choice.modelId) {
+                ids.insert(choice.modelId)
+            }
+        }
+        downloadedModelIds = ids
+    }
+
     // MARK: - Model Lifecycle
 
-    private func loadModel() async throws -> MLXLMCommon.ModelContainer {
-        if let container = modelContainer {
-            print("🤖 [LLM] Model already loaded, returning cached container")
+    private func loadModel(modelId: String? = nil) async throws -> MLXLMCommon.ModelContainer {
+        let id = modelId ?? "prism-ml/Bonsai-8B-mlx-1bit"
+
+        if let container = modelContainers[id] {
+            print("🤖 [LLM] Model \(id) already loaded, returning cached container")
             return container
         }
 
-        guard !isLoadingModel else {
-            print("🤖 [LLM] Model already loading, waiting...")
-            while isLoadingModel {
+        guard currentlyLoadingModelId != id else {
+            print("🤖 [LLM] Model \(id) already loading, waiting...")
+            while currentlyLoadingModelId == id {
                 try await Task.sleep(nanoseconds: 100_000_000)
             }
-            if let container = modelContainer { return container }
+            if let container = modelContainers[id] { return container }
             throw LLMError.loadFailed("Model failed to load")
         }
 
-        print("🤖 [LLM] Starting model load...")
+        // Unload any other model first — only one model in memory at a time
+        for existingId in modelContainers.keys where existingId != id {
+            print("🤖 [LLM] Unloading \(existingId) before loading \(id)")
+            modelContainers.removeValue(forKey: existingId)
+        }
+        MLX.Memory.clearCache()
+
+        print("🤖 [LLM] Starting model load for \(id)...")
+        currentlyLoadingModelId = id
         isLoadingModel = true
         loadProgress = 0.0
         loadError = nil
 
         MLX.Memory.cacheLimit = 20 * 1024 * 1024
 
+        let config = ModelConfiguration(id: id, defaultPrompt: "You are a helpful assistant.")
+
         do {
-            print("🤖 [LLM] Calling LLMModelFactory.loadContainer...")
+            print("🤖 [LLM] Calling LLMModelFactory.loadContainer for \(id)...")
             let container = try await LLMModelFactory.shared.loadContainer(
-                configuration: modelConfiguration
+                configuration: config
             ) { progress in
                 Task { @MainActor in
                     self.loadProgress = progress.fractionCompleted
@@ -69,32 +100,62 @@ class LLMService: ObservableObject {
                 }
             }
 
-            print("🤖 [LLM] ✅ Model loaded successfully")
-            self.modelContainer = container
+            print("🤖 [LLM] ✅ Model \(id) loaded successfully")
+            self.modelContainers[id] = container
             isLoaded = true
             loadProgress = 1.0
             isLoadingModel = false
+            currentlyLoadingModelId = nil
+            refreshDownloadedModels()
             return container
         } catch {
-            print("🤖 [LLM] ❌ Model load failed: \(error)")
+            print("🤖 [LLM] ❌ Model \(id) load failed: \(error)")
             print("🤖 [LLM] Error type: \(type(of: error))")
             loadError = error.localizedDescription
             isLoadingModel = false
+            currentlyLoadingModelId = nil
             throw error
         }
     }
 
-    func preloadModel() async throws {
-        _ = try await loadModel()
+    /// Download a model to disk cache without keeping it loaded in memory.
+    func downloadModel(modelId: String) async throws {
+        _ = try await loadModel(modelId: modelId)
+        // Unload from memory — the files stay cached on disk
+        modelContainers.removeValue(forKey: modelId)
+        isLoaded = !modelContainers.isEmpty
+        MLX.Memory.clearCache()
+        print("🤖 [LLM] Downloaded \(modelId) to cache, unloaded from memory")
     }
 
-    func unloadModel() {
-        modelContainer = nil
-        isLoaded = false
+    /// Download and load a model into memory (used internally).
+    func preloadModel(modelId: String? = nil) async throws {
+        _ = try await loadModel(modelId: modelId)
+    }
+
+    func unloadModel(modelId: String? = nil) {
+        if let modelId {
+            modelContainers.removeValue(forKey: modelId)
+        } else {
+            modelContainers.removeAll()
+        }
+        isLoaded = !modelContainers.isEmpty
         isLoadingModel = false
         loadProgress = 0.0
         loadError = nil
         MLX.Memory.clearCache()
+    }
+
+    func isModelLoaded(_ modelId: String) -> Bool {
+        return modelContainers[modelId] != nil
+    }
+
+    /// Check if a model has been downloaded to the HuggingFace hub cache.
+    func isModelDownloaded(_ modelId: String) -> Bool {
+        let cacheDir = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first!
+        // MLX Swift stores models at <CachesDirectory>/models/<org>/<repo>
+        let modelPath = cacheDir.appendingPathComponent("models/\(modelId)")
+        return FileManager.default.fileExists(atPath: modelPath.path)
     }
 
     // MARK: - Chat Completion
@@ -103,12 +164,13 @@ class LLMService: ObservableObject {
         messages: [ChatMessage],
         temperature: Float? = nil,
         maxTokens: Int? = nil,
-        tools: CookingTools? = nil
+        tools: CookingTools? = nil,
+        modelId: String? = nil
     ) async throws -> String {
         isGenerating = true
         defer { isGenerating = false }
 
-        let container = try await loadModel()
+        let container = try await loadModel(modelId: modelId)
 
         // Convert to Chat.Message
         let chatMessages: [Chat.Message] = messages.map { msg in
@@ -197,12 +259,13 @@ class LLMService: ObservableObject {
         temperature: Float? = nil,
         maxTokens: Int? = nil,
         tools: CookingTools? = nil,
+        modelId: String? = nil,
         onChunk: @escaping (String) -> Void
     ) async throws -> String {
         isGenerating = true
         defer { isGenerating = false }
 
-        let container = try await loadModel()
+        let container = try await loadModel(modelId: modelId)
 
         let chatMessages: [Chat.Message] = messages.map { msg in
             switch msg.role {
@@ -273,11 +336,11 @@ class LLMService: ObservableObject {
 
     // MARK: - Model Info
 
-    func getModelInfo() -> ModelInfo? {
-        guard isLoaded else { return nil }
+    func getModelInfo(for choice: CookingModelChoice = .bonsai8B) -> ModelInfo? {
+        guard modelContainers[choice.modelId] != nil else { return nil }
         return ModelInfo(
-            name: "Bonsai 8B",
-            parameters: "prism-ml/Bonsai-8B-mlx-1bit",
+            name: choice.displayName,
+            parameters: choice.modelId,
             quantization: "1-bit",
             contextLength: 8192
         )

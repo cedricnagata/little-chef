@@ -13,6 +13,7 @@ class LocalCookingAgent: ObservableObject {
     // MARK: - Dependencies
     private let llmService: LLMService
     private let timerManager: TimerManager
+    private let modelChoice: CookingModelChoice
 
     // MARK: - State
     @Published var isProcessing = false
@@ -21,13 +22,14 @@ class LocalCookingAgent: ObservableObject {
 
     // MARK: - Initialization
 
-    convenience init(timerManager: TimerManager) {
-        self.init(llmService: .shared, timerManager: timerManager)
+    convenience init(timerManager: TimerManager, modelChoice: CookingModelChoice = .bonsai8B) {
+        self.init(llmService: .shared, timerManager: timerManager, modelChoice: modelChoice)
     }
 
-    init(llmService: LLMService, timerManager: TimerManager) {
+    init(llmService: LLMService, timerManager: TimerManager, modelChoice: CookingModelChoice = .bonsai8B) {
         self.llmService = llmService
         self.timerManager = timerManager
+        self.modelChoice = modelChoice
     }
 
     // MARK: - Public Methods
@@ -49,11 +51,12 @@ class LocalCookingAgent: ObservableObject {
             messages = [systemMessage] + Array(messages.suffix(maxHistoryLength - 1))
         }
 
-        let cookingTools = CookingTools(timerManager: timerManager)
+        let cookingTools: CookingTools? = modelChoice.supportsTools ? CookingTools(timerManager: timerManager) : nil
 
         let response = try await llmService.generateChatCompletion(
             messages: messages,
-            tools: cookingTools
+            tools: cookingTools,
+            modelId: modelChoice.modelId
         )
 
         conversationHistory.append(ChatMessage(role: .user, content: userMessage))
@@ -85,11 +88,12 @@ class LocalCookingAgent: ObservableObject {
             messages = [systemMessage] + Array(messages.suffix(maxHistoryLength - 1))
         }
 
-        let cookingTools = CookingTools(timerManager: timerManager)
+        let cookingTools: CookingTools? = modelChoice.supportsTools ? CookingTools(timerManager: timerManager) : nil
 
         let response = try await llmService.generateChatCompletionStreaming(
             messages: messages,
             tools: cookingTools,
+            modelId: modelChoice.modelId,
             onChunk: onChunk
         )
 

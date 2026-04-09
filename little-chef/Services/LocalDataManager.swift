@@ -219,7 +219,8 @@ class LocalDataManager: ObservableObject {
         dietaryRestrictions: [String]? = nil,
         speechRate: Float? = nil,
         voiceIdentifier: String? = nil,
-        autoSpeakResponses: Bool? = nil
+        autoSpeakResponses: Bool? = nil,
+        cookingModel: CookingModelChoice? = nil
     ) throws {
         let preferences = try fetchPreferences()
 
@@ -228,7 +229,8 @@ class LocalDataManager: ObservableObject {
             dietaryRestrictions: dietaryRestrictions,
             speechRate: speechRate,
             voiceIdentifier: voiceIdentifier,
-            autoSpeakResponses: autoSpeakResponses
+            autoSpeakResponses: autoSpeakResponses,
+            cookingModel: cookingModel
         )
 
         try modelContext.save()
@@ -243,6 +245,7 @@ class LocalDataManager: ObservableObject {
         preferences.speechRate = 0.5
         preferences.voiceIdentifier = "com.apple.ttsbundle.Samantha-compact"
         preferences.autoSpeakResponses = true
+        preferences.cookingModel = CookingModelChoice.bonsai8B.rawValue
         preferences.updatedAt = Date()
 
         try modelContext.save()

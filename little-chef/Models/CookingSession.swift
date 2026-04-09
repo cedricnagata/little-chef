@@ -113,12 +113,14 @@ struct UserPreferencesDetailed: Codable {
     let measurementSystem: String
     let dietaryRestrictions: [String]
     let voiceSettings: LocalVoiceSettings
+    let cookingModel: CookingModelChoice
 
     enum CodingKeys: String, CodingKey {
         case llmModel = "llm_model"
         case measurementSystem = "measurement_system"
         case dietaryRestrictions = "dietary_restrictions"
         case voiceSettings = "voice_settings"
+        case cookingModel = "cooking_model"
     }
 
     init() {
@@ -126,12 +128,14 @@ struct UserPreferencesDetailed: Codable {
         self.measurementSystem = "imperial"
         self.dietaryRestrictions = []
         self.voiceSettings = LocalVoiceSettings.defaultSettings
+        self.cookingModel = .bonsai8B
     }
 
     init(from userPreferences: LocalUserPreferences) {
-        self.llmModel = "bonsai-8b-1bit"
+        self.llmModel = userPreferences.cookingModel.modelId
         self.measurementSystem = userPreferences.measurementSystem
         self.dietaryRestrictions = userPreferences.dietaryRestrictions
         self.voiceSettings = userPreferences.voiceSettings
+        self.cookingModel = userPreferences.cookingModel
     }
 }

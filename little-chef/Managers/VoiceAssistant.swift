@@ -180,6 +180,25 @@ class VoiceAssistant: NSObject, ObservableObject {
         isWakeWordListening = false
     }
 
+    /// Called after TTS finishes in hands-free mode — unduck audio and restart wake word listening.
+    private func resumeWakeWordAfterSpeech() {
+        // Stop any leftover audio engine state
+        if audioEngine.isRunning {
+            audioEngine.stop()
+        }
+        audioEngine.inputNode.removeTap(onBus: 0)
+
+        // Unduck other audio
+        unduckAudioSession()
+
+        // Restart wake word listening
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+            if self.isHandsFreeMode && !self.isWakeWordListening && !self.isListening {
+                self.startWakeWordListening()
+            }
+        }
+    }
+
     /// Unduck other audio by deactivating then re-activating with passive config.
     /// Called after speech finishes when hands-free mode is still active.
     private func unduckAudioSession() {
@@ -621,8 +640,10 @@ class VoiceAssistant: NSObject, ObservableObject {
         onVoiceQueryReady?(query)
         stopListening()
 
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
-            if self.isHandsFreeMode {
+        // Wake word listening will be restarted by the TTS delegate when speech finishes.
+        // Only restart here if no speech response is expected (safety fallback).
+        DispatchQueue.main.asyncAfter(deadline: .now() + 5.0) {
+            if self.isHandsFreeMode && !self.isWakeWordListening && !self.isListening && !self.isSpeaking {
                 self.startWakeWordListening()
             }
         }
@@ -638,8 +659,7 @@ extension VoiceAssistant: @preconcurrency AVSpeechSynthesizerDelegate {
             if self.sentenceQueue.isEmpty {
                 self.isSpeaking = false
                 if self.isHandsFreeMode {
-                    // Switch back to passive listening (no duck) so music resumes full volume
-                    self.unduckAudioSession()
+                    self.resumeWakeWordAfterSpeech()
                 } else {
                     self.deactivateAudioSession()
                 }
@@ -655,7 +675,7 @@ extension VoiceAssistant: @preconcurrency AVSpeechSynthesizerDelegate {
             self.sentenceQueue.removeAll()
             self.isSpeaking = false
             if self.isHandsFreeMode {
-                self.unduckAudioSession()
+                self.resumeWakeWordAfterSpeech()
             } else {
                 self.deactivateAudioSession()
             }

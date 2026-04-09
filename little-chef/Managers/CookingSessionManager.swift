@@ -43,7 +43,8 @@ class CookingSessionManager: ObservableObject, TimerManager {
     }
 
     func initAgentForSession() {
-        cookingAgent = LocalCookingAgent(timerManager: self)
+        let modelChoice = currentSession?.userPreferences.cookingModel ?? .bonsai8B
+        cookingAgent = LocalCookingAgent(timerManager: self, modelChoice: modelChoice)
         error = nil
     }
 

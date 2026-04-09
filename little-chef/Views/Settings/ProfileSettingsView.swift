@@ -14,10 +14,10 @@ struct ProfileSettingsView: View {
     @State private var speechRate: Float = 0.5
     @State private var voiceIdentifier = "com.apple.ttsbundle.Samantha-compact"
     @State private var autoSpeakResponses = true
-    @State private var isLoading = false
-    @State private var showingSuccess = false
+    @State private var cookingModel: CookingModelChoice = .bonsai8B
     @State private var showingDeleteAlert = false
     @State private var isDeleting = false
+    @State private var hasLoaded = false
 
     private let iosVoices = [
         ("com.apple.ttsbundle.Samantha-compact", "Samantha (English US)"),
@@ -28,60 +28,23 @@ struct ProfileSettingsView: View {
 
     var body: some View {
         Form {
-            // MARK: - AI Model
+            // MARK: - AI Models
             Section {
-                HStack {
-                    Text("Model")
-                    Spacer()
-                    Text("Bonsai 8B (1-bit)")
-                        .foregroundColor(.secondary)
-                }
-
-                HStack {
-                    Text("Status")
-                    Spacer()
-                    if llmService.isLoaded {
-                        Label("Loaded", systemImage: "checkmark.circle.fill")
-                            .foregroundColor(.green)
-                    } else {
-                        Label("Not Loaded", systemImage: "xmark.circle.fill")
-                            .foregroundColor(.red)
+                Picker("Cooking Assistant", selection: $cookingModel) {
+                    ForEach(CookingModelChoice.allCases, id: \.self) { choice in
+                        Text(choice.displayName).tag(choice)
                     }
                 }
 
-                if llmService.isLoadingModel {
-                    VStack(spacing: 8) {
-                        ProgressView(value: llmService.loadProgress, total: 1.0)
-                            .tint(.orange)
+                if !cookingModel.supportsTools {
+                    Label("Timer tools are not available with this model", systemImage: "info.circle")
+                        .font(.caption)
+                        .foregroundColor(.orange)
+                }
 
-                        HStack {
-                            Text(llmService.loadProgress > 0 && llmService.loadProgress < 1.0
-                                 ? "Downloading..."
-                                 : "Loading...")
-                                .font(.caption)
-                                .foregroundColor(.secondary)
-                            Spacer()
-                            Text("\(Int(llmService.loadProgress * 100))%")
-                                .font(.caption)
-                                .foregroundColor(.secondary)
-                                .monospacedDigit()
-                        }
-                    }
-                } else if llmService.isLoaded {
-                    Button("Unload Model") {
-                        llmService.unloadModel()
-                    }
-                    .foregroundColor(.orange)
-                } else {
-                    Button("Download & Load Model") {
-                        Task {
-                            do {
-                                try await llmService.preloadModel()
-                            } catch {
-                                print("Failed to load model: \(error)")
-                            }
-                        }
-                    }
+                // Per-model status rows
+                ForEach(CookingModelChoice.allCases, id: \.self) { choice in
+                    modelRow(for: choice)
                 }
 
                 if let error = llmService.loadError {
@@ -90,9 +53,9 @@ struct ProfileSettingsView: View {
                         .foregroundColor(.red)
                 }
             } header: {
-                Text("AI Model")
+                Text("AI Models")
             } footer: {
-                Text("On-device model for recipe parsing and cooking assistance. Downloads and loads automatically on first use. Pre-load here to avoid wait times.")
+                Text("Bonsai 8B is always used for recipe parsing. The cooking assistant uses your selected model. Models are downloaded to disk and loaded into memory on demand — download here to avoid wait times.")
             }
 
             // MARK: - Cooking Preferences
@@ -153,22 +116,6 @@ struct ProfileSettingsView: View {
                 Text("Voice")
             }
 
-            // MARK: - Save
-            Section {
-                Button {
-                    savePreferences()
-                } label: {
-                    if isLoading {
-                        ProgressView()
-                            .frame(maxWidth: .infinity)
-                    } else {
-                        Text("Save Preferences")
-                            .frame(maxWidth: .infinity)
-                    }
-                }
-                .disabled(isLoading)
-            }
-
             // MARK: - Data Management
             Section {
                 Button(role: .destructive) {
@@ -187,11 +134,12 @@ struct ProfileSettingsView: View {
         .navigationTitle("Settings")
         .navigationBarTitleDisplayMode(.large)
         .onAppear { loadPreferences() }
-        .alert("Saved", isPresented: $showingSuccess) {
-            Button("OK", role: .cancel) { }
-        } message: {
-            Text("Your preferences have been saved.")
-        }
+        .onChange(of: measurementSystem) { _, _ in saveIfLoaded() }
+        .onChange(of: dietaryRestrictions) { _, _ in saveIfLoaded() }
+        .onChange(of: speechRate) { _, _ in saveIfLoaded() }
+        .onChange(of: voiceIdentifier) { _, _ in saveIfLoaded() }
+        .onChange(of: autoSpeakResponses) { _, _ in saveIfLoaded() }
+        .onChange(of: cookingModel) { _, _ in saveIfLoaded() }
         .alert("Delete All Data", isPresented: $showingDeleteAlert) {
             Button("Cancel", role: .cancel) { }
             Button("Delete", role: .destructive) { deleteAllData() }
@@ -200,7 +148,68 @@ struct ProfileSettingsView: View {
         }
     }
 
+    // MARK: - Model Row
+
+    @ViewBuilder
+    private func modelRow(for choice: CookingModelChoice) -> some View {
+        let isDownloading = llmService.currentlyLoadingModelId == choice.modelId
+        let isDownloaded = llmService.downloadedModelIds.contains(choice.modelId)
+
+        HStack {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(choice.displayName)
+                    .font(.subheadline)
+
+                if choice == .bonsai8B {
+                    Text("Recipe parsing + cooking")
+                        .font(.caption2)
+                        .foregroundColor(.secondary)
+                } else {
+                    Text("Cooking only (no tools)")
+                        .font(.caption2)
+                        .foregroundColor(.secondary)
+                }
+            }
+
+            Spacer()
+
+            if isDownloading {
+                HStack(spacing: 6) {
+                    ProgressView(value: llmService.loadProgress, total: 1.0)
+                        .frame(width: 60)
+                        .tint(.orange)
+                    Text("\(Int(llmService.loadProgress * 100))%")
+                        .font(.caption2)
+                        .foregroundColor(.secondary)
+                        .monospacedDigit()
+                }
+            } else if isDownloaded {
+                Label("Downloaded", systemImage: "checkmark.circle.fill")
+                    .font(.caption)
+                    .foregroundColor(.green)
+            } else {
+                Button {
+                    Task {
+                        try? await llmService.downloadModel(modelId: choice.modelId)
+                    }
+                } label: {
+                    Text("Download")
+                        .font(.caption)
+                        .fontWeight(.medium)
+                }
+                .buttonStyle(.bordered)
+                .tint(.orange)
+                .disabled(llmService.isLoadingModel)
+            }
+        }
+    }
+
     // MARK: - Data Operations
+
+    private func saveIfLoaded() {
+        guard hasLoaded else { return }
+        savePreferences()
+    }
 
     private func loadPreferences() {
         Task {
@@ -215,6 +224,8 @@ struct ProfileSettingsView: View {
                     speechRate = prefs.voiceSettings.speechRate
                     voiceIdentifier = prefs.voiceSettings.voiceIdentifier
                     autoSpeakResponses = prefs.voiceSettings.autoSpeakResponses
+                    cookingModel = prefs.cookingModel
+                    hasLoaded = true
                 }
             } catch {
                 print("Failed to load preferences: \(error)")
@@ -223,7 +234,6 @@ struct ProfileSettingsView: View {
     }
 
     private func savePreferences() {
-        isLoading = true
         Task {
             do {
                 let dataManager = LocalDataManager.shared
@@ -232,15 +242,11 @@ struct ProfileSettingsView: View {
                     dietaryRestrictions: dietaryRestrictions,
                     speechRate: speechRate,
                     voiceIdentifier: voiceIdentifier,
-                    autoSpeakResponses: autoSpeakResponses
+                    autoSpeakResponses: autoSpeakResponses,
+                    cookingModel: cookingModel
                 )
-                await MainActor.run {
-                    isLoading = false
-                    showingSuccess = true
-                }
             } catch {
                 print("Failed to save preferences: \(error)")
-                await MainActor.run { isLoading = false }
             }
         }
     }
@@ -254,6 +260,7 @@ struct ProfileSettingsView: View {
                 try dataManager.resetPreferences()
                 await MainActor.run {
                     isDeleting = false
+                    hasLoaded = false
                     loadPreferences()
                 }
             } catch {

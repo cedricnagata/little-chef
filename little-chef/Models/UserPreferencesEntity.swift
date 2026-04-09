@@ -8,6 +8,33 @@
 import Foundation
 import SwiftData
 
+/// Which on-device model to use for cooking assistance
+enum CookingModelChoice: String, Codable, CaseIterable {
+    case bonsai8B = "bonsai8b"
+    case bonsai4B = "bonsai4b"
+
+    var displayName: String {
+        switch self {
+        case .bonsai8B: return "Bonsai 8B (1-bit)"
+        case .bonsai4B: return "Bonsai 4B (1-bit)"
+        }
+    }
+
+    var modelId: String {
+        switch self {
+        case .bonsai8B: return "prism-ml/Bonsai-8B-mlx-1bit"
+        case .bonsai4B: return "prism-ml/Bonsai-4B-mlx-1bit"
+        }
+    }
+
+    var supportsTools: Bool {
+        switch self {
+        case .bonsai8B: return true
+        case .bonsai4B: return false
+        }
+    }
+}
+
 /// SwiftData model for persisting user preferences locally
 @Model
 final class UserPreferencesEntity {
@@ -17,6 +44,7 @@ final class UserPreferencesEntity {
     var speechRate: Float = 0.5
     var voiceIdentifier: String = "com.apple.ttsbundle.Samantha-compact"
     var autoSpeakResponses: Bool = true
+    var cookingModel: String = "bonsai8b"
     var updatedAt: Date = Date()
 
     init(
@@ -26,6 +54,7 @@ final class UserPreferencesEntity {
         speechRate: Float = 0.5,
         voiceIdentifier: String = "com.apple.ttsbundle.Samantha-compact",
         autoSpeakResponses: Bool = true,
+        cookingModel: String = "bonsai8b",
         updatedAt: Date = Date()
     ) {
         self.id = id
@@ -34,6 +63,7 @@ final class UserPreferencesEntity {
         self.speechRate = speechRate
         self.voiceIdentifier = voiceIdentifier
         self.autoSpeakResponses = autoSpeakResponses
+        self.cookingModel = cookingModel
         self.updatedAt = updatedAt
     }
 
@@ -48,7 +78,8 @@ final class UserPreferencesEntity {
                 speechRate: speechRate,
                 voiceIdentifier: voiceIdentifier,
                 autoSpeakResponses: autoSpeakResponses
-            )
+            ),
+            cookingModel: CookingModelChoice(rawValue: cookingModel) ?? .bonsai8B
         )
     }
 
@@ -63,7 +94,8 @@ final class UserPreferencesEntity {
         dietaryRestrictions: [String]? = nil,
         speechRate: Float? = nil,
         voiceIdentifier: String? = nil,
-        autoSpeakResponses: Bool? = nil
+        autoSpeakResponses: Bool? = nil,
+        cookingModel: CookingModelChoice? = nil
     ) {
         if let measurementSystem = measurementSystem {
             self.measurementSystem = measurementSystem
@@ -79,6 +111,9 @@ final class UserPreferencesEntity {
         }
         if let autoSpeakResponses = autoSpeakResponses {
             self.autoSpeakResponses = autoSpeakResponses
+        }
+        if let cookingModel = cookingModel {
+            self.cookingModel = cookingModel.rawValue
         }
         self.updatedAt = Date()
     }
@@ -99,15 +134,17 @@ struct LocalVoiceSettings: Codable, Equatable {
     )
 }
 
-/// Local user preferences (no LLM model selection - fixed to Bonsai 8B)
+/// Local user preferences
 struct LocalUserPreferences: Codable {
     let measurementSystem: String
     let dietaryRestrictions: [String]
     let voiceSettings: LocalVoiceSettings
+    let cookingModel: CookingModelChoice
 
     static let defaultPreferences = LocalUserPreferences(
         measurementSystem: "imperial",
         dietaryRestrictions: [],
-        voiceSettings: LocalVoiceSettings.defaultSettings
+        voiceSettings: LocalVoiceSettings.defaultSettings,
+        cookingModel: .bonsai8B
     )
 }
