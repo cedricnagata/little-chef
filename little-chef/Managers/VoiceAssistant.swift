@@ -161,71 +161,50 @@ class VoiceAssistant: NSObject, ObservableObject {
         }
     }
 
-    /// Stop audio engine and clean up all taps/tasks without changing state flags.
-    private func stopAllAudioEngine() {
+    // MARK: - Audio Engine Cleanup
+
+    /// Nuclear cleanup — stops engine, removes tap, cancels all recognition tasks.
+    /// Call this before starting any new audio activity to guarantee a clean state.
+    private func tearDownAudioEngine() {
         if audioEngine.isRunning {
             audioEngine.stop()
         }
-        // Always remove tap to prevent 'nullptr == Tap()' crash on next installTap
         audioEngine.inputNode.removeTap(onBus: 0)
 
         recognitionRequest?.endAudio()
         recognitionTask?.cancel()
         recognitionRequest = nil
         recognitionTask = nil
+
         wakeWordRequest?.endAudio()
         wakeWordTask?.cancel()
         wakeWordRequest = nil
         wakeWordTask = nil
+
         isWakeWordListening = false
-    }
-
-    /// Called after TTS finishes in hands-free mode — unduck audio and restart wake word listening.
-    private func resumeWakeWordAfterSpeech() {
-        // Stop any leftover audio engine state
-        if audioEngine.isRunning {
-            audioEngine.stop()
-        }
-        audioEngine.inputNode.removeTap(onBus: 0)
-
-        // Unduck other audio
-        unduckAudioSession()
-
-        // Restart wake word listening
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
-            if self.isHandsFreeMode && !self.isWakeWordListening && !self.isListening {
-                self.startWakeWordListening()
-            }
-        }
-    }
-
-    /// Unduck other audio by deactivating then re-activating with passive config.
-    /// Called after speech finishes when hands-free mode is still active.
-    private func unduckAudioSession() {
-        guard isAudioSessionActive else { return }
-        do {
-            // Deactivate first — this is what actually unducks other audio
-            try AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
-            isAudioSessionActive = false
-        } catch {
-            print("Unduck deactivation note: \(error.localizedDescription)")
-        }
-        // Re-activate for passive listening (no duck)
-        activateForPassiveListening()
+        isListening = false
     }
 
     /// Deactivate the audio session so other audio can resume at full volume.
     private func deactivateAudioSession() {
         guard isAudioSessionActive else { return }
-        // Only deactivate if we're not listening, speaking, or in hands-free mode
         guard !isListening && !isSpeaking && !isWakeWordListening else { return }
 
         do {
             try AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
             isAudioSessionActive = false
         } catch {
-            // It's ok if deactivation fails — other apps may still hold the session
             print("Audio session deactivation note: \(error.localizedDescription)")
+        }
+    }
+
+    /// Force-deactivate the session regardless of state (used between mode transitions).
+    private func forceDeactivateAudioSession() {
+        do {
+            try AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
+            isAudioSessionActive = false
+        } catch {
+            print("Force deactivation note: \(error.localizedDescription)")
         }
     }
 
@@ -234,8 +213,8 @@ class VoiceAssistant: NSObject, ObservableObject {
     func startListening() {
         guard isAvailable, !isListening else { return }
 
-        // Stop any existing audio engine activity (wake word, etc.)
-        stopAllAudioEngine()
+        playStartListeningSound()
+        tearDownAudioEngine()
 
         guard let speechRecognizer = speechRecognizer, speechRecognizer.isAvailable else {
             error = "Speech recognizer not available"
@@ -292,16 +271,9 @@ class VoiceAssistant: NSObject, ObservableObject {
     func stopListening() {
         guard isListening else { return }
 
+        playStopListeningSound()
         cancelSpeechTimeout()
-        audioEngine.stop()
-        audioEngine.inputNode.removeTap(onBus: 0)
-        recognitionRequest?.endAudio()
-        recognitionTask?.cancel()
-
-        recognitionRequest = nil
-        recognitionTask = nil
-        isListening = false
-
+        tearDownAudioEngine()
         deactivateAudioSession()
     }
 
@@ -407,42 +379,58 @@ class VoiceAssistant: NSObject, ObservableObject {
     }
 
     // MARK: - Hands-Free Mode
+    //
+    // Flow: startWakeWordListening → (wake word detected) → transitionToVoiceQuery
+    //       → (user speaks, timeout) → processSpeechResult → onVoiceQueryReady
+    //       → (TTS plays) → didFinish → resumeHandsFreeListening
+    //
+    // Every transition goes through tearDownAudioEngine() first to guarantee clean state.
 
     func startHandsFreeMode() {
         guard isAvailable, !isHandsFreeMode else { return }
-
         isHandsFreeMode = true
         startWakeWordListening()
     }
 
     func stopHandsFreeMode() {
         isHandsFreeMode = false
-        stopWakeWordListening()
-        stopListening()
+        synthesizer.stopSpeaking(at: .immediate)
+        sentenceQueue.removeAll()
+        isSpeakingFromQueue = false
+        isSpeaking = false
         cancelSpeechTimeout()
-        deactivateAudioSession()
+        tearDownAudioEngine()
+        forceDeactivateAudioSession()
+    }
+
+    /// Restart wake word listening from any state. Safe to call at any time.
+    func resumeHandsFreeListening() {
+        guard isHandsFreeMode else { return }
+        print("🎤 [HF] resumeHandsFreeListening")
+        tearDownAudioEngine()
+        forceDeactivateAudioSession()
+
+        // Brief delay to let audio system settle after TTS / recording
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
+            guard let self, self.isHandsFreeMode, !self.isSpeaking else { return }
+            self.startWakeWordListening()
+        }
     }
 
     private func startWakeWordListening() {
-        guard isAvailable, !isWakeWordListening else { return }
-
-        stopWakeWordListening()
-
+        guard isAvailable, isHandsFreeMode, !isWakeWordListening else { return }
         guard let speechRecognizer = speechRecognizer, speechRecognizer.isAvailable else {
             error = "Speech recognizer not available for wake word detection"
             return
         }
 
-        // Passive listening — no ducking, music stays at full volume
+        // Always start from clean state
+        tearDownAudioEngine()
         activateForPassiveListening()
 
         do {
             wakeWordRequest = SFSpeechAudioBufferRecognitionRequest()
-            guard let wakeWordRequest = wakeWordRequest else {
-                error = "Unable to create wake word recognition request"
-                return
-            }
-
+            guard let wakeWordRequest = wakeWordRequest else { return }
             wakeWordRequest.shouldReportPartialResults = true
 
             let inputNode = audioEngine.inputNode
@@ -452,16 +440,17 @@ class VoiceAssistant: NSObject, ObservableObject {
                 wakeWordRequest.append(buffer)
             }
 
-            wakeWordTask = speechRecognizer.recognitionTask(with: wakeWordRequest) { [weak self] result, error in
+            wakeWordTask = speechRecognizer.recognitionTask(with: wakeWordRequest) { [weak self] result, taskError in
                 DispatchQueue.main.async {
-                    guard let self = self else { return }
+                    guard let self else { return }
+                    // Ignore callbacks if we already left wake word mode
+                    guard self.isWakeWordListening else { return }
 
                     if let result = result {
                         let transcript = result.bestTranscription.formattedString.lowercased()
-
                         for wakeWord in self.wakeWords {
                             if transcript.contains(wakeWord) {
-                                print("🎤 Wake word detected: \(wakeWord)")
+                                print("🎤 [HF] Wake word detected!")
                                 self.onWakeWordDetected?()
                                 self.transitionToVoiceQuery()
                                 return
@@ -469,70 +458,45 @@ class VoiceAssistant: NSObject, ObservableObject {
                         }
                     }
 
-                    if let error = error {
-                        print("Wake word recognition error: \(error.localizedDescription)")
+                    if let taskError = taskError {
+                        print("🎤 [HF] Wake word task error: \(taskError.localizedDescription)")
+                        // Recognition timed out — restart if still in hands-free
+                        self.isWakeWordListening = false
+                        if self.isHandsFreeMode && !self.isSpeaking {
+                            self.resumeHandsFreeListening()
+                        }
                     }
                 }
             }
 
-            if !audioEngine.isRunning {
-                audioEngine.prepare()
-                try audioEngine.start()
-            }
-
+            audioEngine.prepare()
+            try audioEngine.start()
             isWakeWordListening = true
+            print("🎤 [HF] Wake word listening active")
 
         } catch {
+            print("🎤 [HF] Failed to start wake word: \(error)")
             self.error = "Failed to start wake word listening: \(error.localizedDescription)"
         }
     }
 
-    private func stopWakeWordListening() {
-        guard isWakeWordListening else { return }
-
-        wakeWordRequest?.endAudio()
-        wakeWordTask?.cancel()
-        wakeWordRequest = nil
-        wakeWordTask = nil
-        isWakeWordListening = false
-
-        // Always stop engine and remove tap to prevent 'nullptr == Tap()' crash
-        if audioEngine.isRunning {
-            audioEngine.stop()
-        }
-        audioEngine.inputNode.removeTap(onBus: 0)
-
-        deactivateAudioSession()
-    }
-
     private func transitionToVoiceQuery() {
-        stopWakeWordListening()
-
+        print("🎤 [HF] Transitioning to voice query")
+        // Fully tear down wake word before starting voice recording
+        tearDownAudioEngine()
         playStartListeningSound()
 
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
-            self.startHandsFreeVoiceListening()
-        }
-    }
-
-    private func startHandsFreeVoiceListening() {
-        guard isAvailable, !isListening else { return }
-
-        guard let speechRecognizer = speechRecognizer, speechRecognizer.isAvailable else {
+        guard isAvailable, let speechRecognizer = speechRecognizer, speechRecognizer.isAvailable else {
             error = "Speech recognizer not available"
+            resumeHandsFreeListening()
             return
         }
 
-        // Activate for recording
         activateForRecording()
 
         do {
             recognitionRequest = SFSpeechAudioBufferRecognitionRequest()
-            guard let recognitionRequest = recognitionRequest else {
-                error = "Unable to create recognition request"
-                return
-            }
-
+            guard let recognitionRequest = recognitionRequest else { return }
             recognitionRequest.shouldReportPartialResults = true
 
             let inputNode = audioEngine.inputNode
@@ -542,42 +506,33 @@ class VoiceAssistant: NSObject, ObservableObject {
                 recognitionRequest.append(buffer)
             }
 
-            recognitionTask = speechRecognizer.recognitionTask(with: recognitionRequest) { [weak self] result, error in
+            recognitionTask = speechRecognizer.recognitionTask(with: recognitionRequest) { [weak self] result, taskError in
                 DispatchQueue.main.async {
-                    guard let self = self else { return }
+                    guard let self, self.isListening else { return }
 
                     if let result = result {
                         let newText = result.bestTranscription.formattedString
-
                         if newText != self.recognizedText {
                             self.recognizedText = newText
                             self.lastSpeechTime = Date()
                             self.scheduleSpeechTimeout()
                         }
-
                         if result.isFinal && !self.recognizedText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                            self.processSpeechResult()
+                            self.finishVoiceQuery()
                         }
                     }
 
-                    if let error = error {
-                        print("Hands-free recognition error: \(error.localizedDescription)")
-                        self.stopListening()
-
-                        if self.isHandsFreeMode {
-                            DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
-                                self.startWakeWordListening()
-                            }
-                        }
+                    if let taskError = taskError {
+                        print("🎤 [HF] Voice query error: \(taskError.localizedDescription)")
+                        self.tearDownAudioEngine()
+                        self.cancelSpeechTimeout()
+                        self.resumeHandsFreeListening()
                     }
                 }
             }
 
-            if !audioEngine.isRunning {
-                audioEngine.prepare()
-                try audioEngine.start()
-            }
-
+            audioEngine.prepare()
+            try audioEngine.start()
             isListening = true
             recognizedText = ""
             error = nil
@@ -585,7 +540,34 @@ class VoiceAssistant: NSObject, ObservableObject {
             scheduleSpeechTimeout()
 
         } catch {
-            self.error = "Failed to start hands-free listening: \(error.localizedDescription)"
+            self.error = "Failed to start voice query: \(error.localizedDescription)"
+            resumeHandsFreeListening()
+        }
+    }
+
+    /// User finished speaking — send the query, then TTS delegate will call resumeHandsFreeListening.
+    private func finishVoiceQuery() {
+        guard isListening else { return }
+        let query = recognizedText.trimmingCharacters(in: .whitespacesAndNewlines)
+        cancelSpeechTimeout()
+        playStopListeningSound()
+        tearDownAudioEngine()
+
+        guard !query.isEmpty else {
+            resumeHandsFreeListening()
+            return
+        }
+
+        print("🎤 [HF] Query: \(query)")
+        onVoiceQueryReady?(query)
+
+        // Safety fallback: if TTS never plays (error, empty response), restart after timeout
+        DispatchQueue.main.asyncAfter(deadline: .now() + 10.0) { [weak self] in
+            guard let self else { return }
+            if self.isHandsFreeMode && !self.isWakeWordListening && !self.isListening && !self.isSpeaking {
+                print("🎤 [HF] Safety fallback: restarting wake word")
+                self.resumeHandsFreeListening()
+            }
         }
     }
 
@@ -593,13 +575,11 @@ class VoiceAssistant: NSObject, ObservableObject {
 
     private func scheduleSpeechTimeout() {
         cancelSpeechTimeout()
-
         let workItem = DispatchWorkItem { [weak self] in
             DispatchQueue.main.async {
                 self?.handleSpeechTimeout()
             }
         }
-
         speechTimeoutWorkItem = workItem
         DispatchQueue.main.asyncAfter(deadline: .now() + speechTimeoutInterval, execute: workItem)
     }
@@ -610,42 +590,13 @@ class VoiceAssistant: NSObject, ObservableObject {
     }
 
     private func handleSpeechTimeout() {
-        if isListening && !recognizedText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            processSpeechResult()
+        guard isListening else { return }
+        if !recognizedText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            finishVoiceQuery()
         } else {
-            stopListening()
-            if isHandsFreeMode {
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
-                    self.startWakeWordListening()
-                }
-            }
-        }
-    }
-
-    private func processSpeechResult() {
-        let query = recognizedText.trimmingCharacters(in: .whitespacesAndNewlines)
-
-        guard !query.isEmpty else {
-            stopListening()
-            if isHandsFreeMode {
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
-                    self.startWakeWordListening()
-                }
-            }
-            return
-        }
-
-        playStopListeningSound()
-
-        onVoiceQueryReady?(query)
-        stopListening()
-
-        // Wake word listening will be restarted by the TTS delegate when speech finishes.
-        // Only restart here if no speech response is expected (safety fallback).
-        DispatchQueue.main.asyncAfter(deadline: .now() + 5.0) {
-            if self.isHandsFreeMode && !self.isWakeWordListening && !self.isListening && !self.isSpeaking {
-                self.startWakeWordListening()
-            }
+            // No speech detected — go back to wake word
+            tearDownAudioEngine()
+            resumeHandsFreeListening()
         }
     }
 }
@@ -659,7 +610,8 @@ extension VoiceAssistant: @preconcurrency AVSpeechSynthesizerDelegate {
             if self.sentenceQueue.isEmpty {
                 self.isSpeaking = false
                 if self.isHandsFreeMode {
-                    self.resumeWakeWordAfterSpeech()
+                    print("🎤 [HF] TTS finished, resuming wake word")
+                    self.resumeHandsFreeListening()
                 } else {
                     self.deactivateAudioSession()
                 }
@@ -675,7 +627,8 @@ extension VoiceAssistant: @preconcurrency AVSpeechSynthesizerDelegate {
             self.sentenceQueue.removeAll()
             self.isSpeaking = false
             if self.isHandsFreeMode {
-                self.resumeWakeWordAfterSpeech()
+                print("🎤 [HF] TTS cancelled, resuming wake word")
+                self.resumeHandsFreeListening()
             } else {
                 self.deactivateAudioSession()
             }
