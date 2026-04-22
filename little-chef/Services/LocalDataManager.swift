@@ -220,7 +220,8 @@ class LocalDataManager: ObservableObject {
         speechRate: Float? = nil,
         voiceIdentifier: String? = nil,
         autoSpeakResponses: Bool? = nil,
-        cookingModel: CookingModelChoice? = nil
+        cookingModel: CookingModelChoice? = nil,
+        llmProvider: LLMProvider? = nil
     ) throws {
         let preferences = try fetchPreferences()
 
@@ -230,7 +231,8 @@ class LocalDataManager: ObservableObject {
             speechRate: speechRate,
             voiceIdentifier: voiceIdentifier,
             autoSpeakResponses: autoSpeakResponses,
-            cookingModel: cookingModel
+            cookingModel: cookingModel,
+            llmProvider: llmProvider
         )
 
         try modelContext.save()

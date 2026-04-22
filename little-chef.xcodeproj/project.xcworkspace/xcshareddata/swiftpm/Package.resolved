@@ -1,6 +1,15 @@
 {
-  "originHash" : "f9ff763a16dbf25047beb5fba85f3c74c41ed79020a7aa923b29d5d0485a786c",
+  "originHash" : "9fb7df53d77b95d409da088991f75eae00f0cb2dabe792ca57549f2a2a3ddb82",
   "pins" : [
+    {
+      "identity" : "bigbro-kit",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/cedricnagata/bigbro-kit",
+      "state" : {
+        "branch" : "main",
+        "revision" : "1706dd295a41f63efdaac739e73a665c698c2a5d"
+      }
+    },
     {
       "identity" : "swift-asn1",
       "kind" : "remoteSourceControl",

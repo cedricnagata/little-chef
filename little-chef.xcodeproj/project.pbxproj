@@ -7,6 +7,7 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		8B28BF352F981150001DD2B5 /* BigBroKit in Frameworks */ = {isa = PBXBuildFile; productRef = 8B28BF342F981150001DD2B5 /* BigBroKit */; };
 		8BD0A0012EBF000000BB0001 /* MLX in Frameworks */ = {isa = PBXBuildFile; productRef = 8BD0A0002EBF000000BB0001 /* MLX */; };
 		8BD0A0032EBF000000BB0001 /* MLXLLM in Frameworks */ = {isa = PBXBuildFile; productRef = 8BD0A0022EBF000000BB0001 /* MLXLLM */; };
 		8BD0A0052EBF000000BB0001 /* MLXLMCommon in Frameworks */ = {isa = PBXBuildFile; productRef = 8BD0A0042EBF000000BB0001 /* MLXLMCommon */; };
@@ -73,6 +74,7 @@
 			files = (
 				8BD0A0012EBF000000BB0001 /* MLX in Frameworks */,
 				8BD0A0032EBF000000BB0001 /* MLXLLM in Frameworks */,
+				8B28BF352F981150001DD2B5 /* BigBroKit in Frameworks */,
 				8BD0A0052EBF000000BB0001 /* MLXLMCommon in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -137,6 +139,7 @@
 				8BD0A0002EBF000000BB0001 /* MLX */,
 				8BD0A0022EBF000000BB0001 /* MLXLLM */,
 				8BD0A0042EBF000000BB0001 /* MLXLMCommon */,
+				8B28BF342F981150001DD2B5 /* BigBroKit */,
 			);
 			productName = "little-chef";
 			productReference = 8B8928182E6B467600A3BADD /* little-chef.app */;
@@ -223,6 +226,7 @@
 			packageReferences = (
 				8BD0A0062EBF000000BB0001 /* XCLocalSwiftPackageReference "mlx-swift" */,
 				8BD0A0072EBF000000BB0001 /* XCLocalSwiftPackageReference "mlx-swift-lm" */,
+				8B28BF332F981150001DD2B5 /* XCRemoteSwiftPackageReference "bigbro-kit" */,
 			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = 8B8928192E6B467600A3BADD /* Products */;
@@ -434,6 +438,7 @@
 				INFOPLIST_FILE = "little-chef/Info.plist";
 				INFOPLIST_KEY_CFBundleDisplayName = LittleChef;
 				INFOPLIST_KEY_LSApplicationCategoryType = "";
+				INFOPLIST_KEY_NSLocalNetworkUsageDescription = "LittleChef uses the local network to accept connections from macOS devices.";
 				INFOPLIST_KEY_NSMicrophoneUsageDescription = "LittleChef needs microphone access to listen to your voice commands and questions while cooking. This enables hands-free interaction with your AI cooking assistant.";
 				INFOPLIST_KEY_NSSpeechRecognitionUsageDescription = "LittleChef uses speech recognition to provide hands-free cooking assistance. You can ask questions about recipes using your voice while your hands are busy cooking.";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
@@ -470,6 +475,7 @@
 				INFOPLIST_FILE = "little-chef/Info.plist";
 				INFOPLIST_KEY_CFBundleDisplayName = LittleChef;
 				INFOPLIST_KEY_LSApplicationCategoryType = "";
+				INFOPLIST_KEY_NSLocalNetworkUsageDescription = "LittleChef uses the local network to accept connections from macOS devices.";
 				INFOPLIST_KEY_NSMicrophoneUsageDescription = "LittleChef needs microphone access to listen to your voice commands and questions while cooking. This enables hands-free interaction with your AI cooking assistant.";
 				INFOPLIST_KEY_NSSpeechRecognitionUsageDescription = "LittleChef uses speech recognition to provide hands-free cooking assistance. You can ask questions about recipes using your voice while your hands are busy cooking.";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
@@ -615,7 +621,23 @@
 		};
 /* End XCLocalSwiftPackageReference section */
 
+/* Begin XCRemoteSwiftPackageReference section */
+		8B28BF332F981150001DD2B5 /* XCRemoteSwiftPackageReference "bigbro-kit" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/cedricnagata/bigbro-kit";
+			requirement = {
+				branch = main;
+				kind = branch;
+			};
+		};
+/* End XCRemoteSwiftPackageReference section */
+
 /* Begin XCSwiftPackageProductDependency section */
+		8B28BF342F981150001DD2B5 /* BigBroKit */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 8B28BF332F981150001DD2B5 /* XCRemoteSwiftPackageReference "bigbro-kit" */;
+			productName = BigBroKit;
+		};
 		8BD0A0002EBF000000BB0001 /* MLX */ = {
 			isa = XCSwiftPackageProductDependency;
 			package = 8BD0A0062EBF000000BB0001 /* XCLocalSwiftPackageReference "mlx-swift" */;

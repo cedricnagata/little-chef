@@ -12,6 +12,7 @@ import MLX
 import MLXLLM
 import MLXLMCommon
 import Tokenizers
+import BigBroKit
 
 @MainActor
 class LLMService: ObservableObject {
@@ -24,6 +25,9 @@ class LLMService: ObservableObject {
     @Published var loadProgress: Double = 0.0
     @Published var isLoadingModel = false
     @Published var downloadedModelIds: Set<String> = []
+    @Published var currentProvider: LLMProvider = .local {
+        didSet { UserDefaults.standard.set(currentProvider.rawValue, forKey: "little-chef.llm-provider") }
+    }
 
     // MARK: - Private State
     /// Containers keyed by model ID — allows both 8B and 4B to be loaded
@@ -31,12 +35,19 @@ class LLMService: ObservableObject {
     /// Which model ID is currently being loaded (to prevent double-loads)
     @Published var currentlyLoadingModelId: String?
 
+    let bigBroClient = BigBroClient()
+
     private let defaultModelConfig = ModelConfiguration(
         id: "prism-ml/Bonsai-8B-mlx-1bit",
         defaultPrompt: "You are a helpful assistant."
     )
 
     private init() {
+        // Restore provider from UserDefaults for instant sync at startup
+        if let stored = UserDefaults.standard.string(forKey: "little-chef.llm-provider"),
+           let restored = LLMProvider(rawValue: stored) {
+            currentProvider = restored
+        }
         refreshDownloadedModels()
     }
 
@@ -167,6 +178,10 @@ class LLMService: ObservableObject {
         tools: CookingTools? = nil,
         modelId: String? = nil
     ) async throws -> String {
+        if currentProvider == .bigBro {
+            return try await generateBigBroChatCompletion(messages: messages, tools: tools)
+        }
+
         isGenerating = true
         defer { isGenerating = false }
 
@@ -262,6 +277,10 @@ class LLMService: ObservableObject {
         modelId: String? = nil,
         onChunk: @escaping (String) -> Void
     ) async throws -> String {
+        if currentProvider == .bigBro {
+            return try await generateBigBroChatCompletionStreaming(messages: messages, tools: tools, onChunk: onChunk)
+        }
+
         isGenerating = true
         defer { isGenerating = false }
 
@@ -331,6 +350,55 @@ class LLMService: ObservableObject {
             inferTimerAction(from: afterTextTools, tools: tools)
         }
 
+        return afterTextTools
+    }
+
+    // MARK: - BigBro Chat
+
+    private func bigBroMessages(from messages: [ChatMessage]) -> [BigBroKit.Message] {
+        messages.map { msg in
+            switch msg.role {
+            case .system: return BigBroKit.Message(role: .system, content: msg.content)
+            case .user: return BigBroKit.Message(role: .user, content: msg.content)
+            case .assistant: return BigBroKit.Message(role: .assistant, content: msg.content)
+            }
+        }
+    }
+
+    private func generateBigBroChatCompletion(
+        messages: [ChatMessage],
+        tools: CookingTools? = nil
+    ) async throws -> String {
+        isGenerating = true
+        defer { isGenerating = false }
+
+        // BigBro server only supports SSE streaming — collect all chunks into a full string
+        var output = ""
+        for try await chunk in bigBroClient.chatStream(bigBroMessages(from: messages)) {
+            output += chunk
+        }
+
+        let afterTextTools = processTextToolCalls(output: output, tools: tools)
+        if let tools { inferTimerAction(from: afterTextTools, tools: tools) }
+        return afterTextTools
+    }
+
+    private func generateBigBroChatCompletionStreaming(
+        messages: [ChatMessage],
+        tools: CookingTools? = nil,
+        onChunk: @escaping (String) -> Void
+    ) async throws -> String {
+        isGenerating = true
+        defer { isGenerating = false }
+
+        var output = ""
+        for try await chunk in bigBroClient.chatStream(bigBroMessages(from: messages)) {
+            output += chunk
+            if !chunk.isEmpty { onChunk(chunk) }
+        }
+
+        let afterTextTools = processTextToolCalls(output: output, tools: tools)
+        if let tools { inferTimerAction(from: afterTextTools, tools: tools) }
         return afterTextTools
     }
 

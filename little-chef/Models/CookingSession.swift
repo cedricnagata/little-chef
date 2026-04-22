@@ -114,6 +114,7 @@ struct UserPreferencesDetailed: Codable {
     let dietaryRestrictions: [String]
     let voiceSettings: LocalVoiceSettings
     let cookingModel: CookingModelChoice
+    let llmProvider: LLMProvider
 
     enum CodingKeys: String, CodingKey {
         case llmModel = "llm_model"
@@ -121,6 +122,7 @@ struct UserPreferencesDetailed: Codable {
         case dietaryRestrictions = "dietary_restrictions"
         case voiceSettings = "voice_settings"
         case cookingModel = "cooking_model"
+        case llmProvider = "llm_provider"
     }
 
     init() {
@@ -129,6 +131,7 @@ struct UserPreferencesDetailed: Codable {
         self.dietaryRestrictions = []
         self.voiceSettings = LocalVoiceSettings.defaultSettings
         self.cookingModel = .bonsai8B
+        self.llmProvider = .local
     }
 
     init(from userPreferences: LocalUserPreferences) {
@@ -137,5 +140,6 @@ struct UserPreferencesDetailed: Codable {
         self.dietaryRestrictions = userPreferences.dietaryRestrictions
         self.voiceSettings = userPreferences.voiceSettings
         self.cookingModel = userPreferences.cookingModel
+        self.llmProvider = userPreferences.llmProvider
     }
 }

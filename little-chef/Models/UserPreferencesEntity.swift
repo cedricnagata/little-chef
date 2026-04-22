@@ -8,6 +8,19 @@
 import Foundation
 import SwiftData
 
+/// Which LLM provider to use for all inference
+enum LLMProvider: String, Codable, CaseIterable {
+    case local = "local"
+    case bigBro = "bigbro"
+
+    var displayName: String {
+        switch self {
+        case .local: return "On-Device"
+        case .bigBro: return "BigBro"
+        }
+    }
+}
+
 /// Which on-device model to use for cooking assistance
 enum CookingModelChoice: String, Codable, CaseIterable {
     case bonsai8B = "bonsai8b"
@@ -45,6 +58,7 @@ final class UserPreferencesEntity {
     var voiceIdentifier: String = "com.apple.ttsbundle.Samantha-compact"
     var autoSpeakResponses: Bool = true
     var cookingModel: String = "bonsai8b"
+    var llmProvider: String = "local"
     var updatedAt: Date = Date()
 
     init(
@@ -55,6 +69,7 @@ final class UserPreferencesEntity {
         voiceIdentifier: String = "com.apple.ttsbundle.Samantha-compact",
         autoSpeakResponses: Bool = true,
         cookingModel: String = "bonsai8b",
+        llmProvider: String = "local",
         updatedAt: Date = Date()
     ) {
         self.id = id
@@ -64,6 +79,7 @@ final class UserPreferencesEntity {
         self.voiceIdentifier = voiceIdentifier
         self.autoSpeakResponses = autoSpeakResponses
         self.cookingModel = cookingModel
+        self.llmProvider = llmProvider
         self.updatedAt = updatedAt
     }
 
@@ -79,7 +95,8 @@ final class UserPreferencesEntity {
                 voiceIdentifier: voiceIdentifier,
                 autoSpeakResponses: autoSpeakResponses
             ),
-            cookingModel: CookingModelChoice(rawValue: cookingModel) ?? .bonsai8B
+            cookingModel: CookingModelChoice(rawValue: cookingModel) ?? .bonsai8B,
+            llmProvider: LLMProvider(rawValue: llmProvider) ?? .local
         )
     }
 
@@ -95,7 +112,8 @@ final class UserPreferencesEntity {
         speechRate: Float? = nil,
         voiceIdentifier: String? = nil,
         autoSpeakResponses: Bool? = nil,
-        cookingModel: CookingModelChoice? = nil
+        cookingModel: CookingModelChoice? = nil,
+        llmProvider: LLMProvider? = nil
     ) {
         if let measurementSystem = measurementSystem {
             self.measurementSystem = measurementSystem
@@ -114,6 +132,9 @@ final class UserPreferencesEntity {
         }
         if let cookingModel = cookingModel {
             self.cookingModel = cookingModel.rawValue
+        }
+        if let llmProvider = llmProvider {
+            self.llmProvider = llmProvider.rawValue
         }
         self.updatedAt = Date()
     }
@@ -140,11 +161,13 @@ struct LocalUserPreferences: Codable {
     let dietaryRestrictions: [String]
     let voiceSettings: LocalVoiceSettings
     let cookingModel: CookingModelChoice
+    let llmProvider: LLMProvider
 
     static let defaultPreferences = LocalUserPreferences(
         measurementSystem: "imperial",
         dietaryRestrictions: [],
         voiceSettings: LocalVoiceSettings.defaultSettings,
-        cookingModel: .bonsai8B
+        cookingModel: .bonsai8B,
+        llmProvider: .local
     )
 }

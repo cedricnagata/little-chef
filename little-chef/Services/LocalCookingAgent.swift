@@ -13,7 +13,6 @@ class LocalCookingAgent: ObservableObject {
     // MARK: - Dependencies
     private let llmService: LLMService
     private let timerManager: TimerManager
-    private let modelChoice: CookingModelChoice
 
     // MARK: - State
     @Published var isProcessing = false
@@ -22,14 +21,13 @@ class LocalCookingAgent: ObservableObject {
 
     // MARK: - Initialization
 
-    convenience init(timerManager: TimerManager, modelChoice: CookingModelChoice = .bonsai8B) {
-        self.init(llmService: .shared, timerManager: timerManager, modelChoice: modelChoice)
+    convenience init(timerManager: TimerManager) {
+        self.init(llmService: .shared, timerManager: timerManager)
     }
 
-    init(llmService: LLMService, timerManager: TimerManager, modelChoice: CookingModelChoice = .bonsai8B) {
+    init(llmService: LLMService, timerManager: TimerManager) {
         self.llmService = llmService
         self.timerManager = timerManager
-        self.modelChoice = modelChoice
     }
 
     // MARK: - Public Methods
@@ -51,12 +49,14 @@ class LocalCookingAgent: ObservableObject {
             messages = [systemMessage] + Array(messages.suffix(maxHistoryLength - 1))
         }
 
-        let cookingTools: CookingTools? = modelChoice.supportsTools ? CookingTools(timerManager: timerManager) : nil
+        let cookingTools: CookingTools? = llmService.currentProvider == .bigBro
+            ? CookingTools(timerManager: timerManager)
+            : nil
 
         let response = try await llmService.generateChatCompletion(
             messages: messages,
             tools: cookingTools,
-            modelId: modelChoice.modelId
+            modelId: llmService.currentProvider == .local ? CookingModelChoice.bonsai4B.modelId : nil
         )
 
         conversationHistory.append(ChatMessage(role: .user, content: userMessage))
@@ -88,12 +88,14 @@ class LocalCookingAgent: ObservableObject {
             messages = [systemMessage] + Array(messages.suffix(maxHistoryLength - 1))
         }
 
-        let cookingTools: CookingTools? = modelChoice.supportsTools ? CookingTools(timerManager: timerManager) : nil
+        let cookingTools: CookingTools? = llmService.currentProvider == .bigBro
+            ? CookingTools(timerManager: timerManager)
+            : nil
 
         let response = try await llmService.generateChatCompletionStreaming(
             messages: messages,
             tools: cookingTools,
-            modelId: modelChoice.modelId,
+            modelId: llmService.currentProvider == .local ? CookingModelChoice.bonsai4B.modelId : nil,
             onChunk: onChunk
         )
 
@@ -142,6 +144,10 @@ class LocalCookingAgent: ObservableObject {
             for timer in activeTimers {
                 prompt += "\n- \(timer.name): \(timer.status.rawValue), \(timer.remainingMinutes)min left"
             }
+        }
+
+        if llmService.currentProvider == .bigBro {
+            prompt += "\n\nTo control timers output a JSON block in this exact format (no other text around it):\n<tool_call>{\"name\": \"set_timer\", \"arguments\": {\"name\": \"pasta\", \"minutes\": 10}}</tool_call>\nAvailable tools: set_timer(name, minutes), start_timer(name), pause_timer(name), delete_timer(name). Only use a tool_call block when you want to control a timer."
         }
 
         return ChatMessage(role: .system, content: prompt)
