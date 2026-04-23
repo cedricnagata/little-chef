@@ -372,9 +372,8 @@ class LLMService: ObservableObject {
         isGenerating = true
         defer { isGenerating = false }
 
-        // BigBro server only supports SSE streaming — collect all chunks into a full string
         var output = ""
-        for try await chunk in bigBroClient.chatStream(bigBroMessages(from: messages)) {
+        for try await chunk in bigBroClient.send(bigBroMessages(from: messages), streaming: false) {
             output += chunk
         }
 
@@ -392,7 +391,7 @@ class LLMService: ObservableObject {
         defer { isGenerating = false }
 
         var output = ""
-        for try await chunk in bigBroClient.chatStream(bigBroMessages(from: messages)) {
+        for try await chunk in bigBroClient.send(bigBroMessages(from: messages), streaming: true) {
             output += chunk
             if !chunk.isEmpty { onChunk(chunk) }
         }

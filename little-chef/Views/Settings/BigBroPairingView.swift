@@ -7,38 +7,54 @@ import SwiftUI
 import BigBroKit
 
 struct BigBroPairingView: View {
-    let client: BigBroClient
+    @ObservedObject var client: BigBroClient
 
-    @State private var isPaired = false
-    @State private var pairedDeviceName: String? = nil
     @State private var discovered: [BigBroDevice] = []
     @State private var isDiscovering = false
     @State private var isPairing = false
-    @State private var pairingDeviceId: String? = nil
     @State private var error: String? = nil
 
     var body: some View {
         Group {
-            // Connection status
-            HStack {
-                if isPaired {
-                    Label("Connected to \(pairedDeviceName ?? "BigBro")", systemImage: "checkmark.shield.fill")
-                        .foregroundColor(.green)
-                        .font(.subheadline)
-                } else {
-                    Label("Not connected", systemImage: "shield.slash")
-                        .foregroundColor(.secondary)
-                        .font(.subheadline)
-                }
-                Spacer()
-                if !isDiscovering && !isPairing {
-                    Button(isPaired ? "Change" : "Find Devices") {
-                        Task { await startDiscovery() }
+            // Connection status row
+            HStack(spacing: 10) {
+                Circle()
+                    .fill(client.isConnected ? Color.green : Color.secondary.opacity(0.4))
+                    .frame(width: 8, height: 8)
+
+                if client.isConnected, let device = client.connectedDevice {
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text(device.name)
+                            .font(.subheadline)
+                            .fontWeight(.medium)
+                        Text("Connected")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                    }
+                    Spacer()
+                    Button("Disconnect") {
+                        client.disconnect()
+                        discovered = []
+                        error = nil
                     }
                     .font(.caption)
                     .fontWeight(.medium)
                     .buttonStyle(.bordered)
-                    .tint(.orange)
+                    .foregroundStyle(.red)
+                } else {
+                    Text("Not connected")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                    Spacer()
+                    if !isDiscovering && !isPairing {
+                        Button("Find Devices") {
+                            Task { await startDiscovery() }
+                        }
+                        .font(.caption)
+                        .fontWeight(.medium)
+                        .buttonStyle(.bordered)
+                        .tint(.orange)
+                    }
                 }
             }
 
@@ -47,18 +63,18 @@ struct BigBroPairingView: View {
                     ProgressView().scaleEffect(0.8)
                     Text("Scanning for BigBro hosts…")
                         .font(.caption)
-                        .foregroundColor(.secondary)
+                        .foregroundStyle(.secondary)
                 }
             }
 
-            if !discovered.isEmpty && !isPairing {
+            if !discovered.isEmpty && !client.isConnected {
                 ForEach(discovered) { device in
                     HStack {
                         VStack(alignment: .leading, spacing: 2) {
                             Text(device.name).font(.subheadline)
                             Text("\(device.host):\(device.port)")
                                 .font(.caption2)
-                                .foregroundColor(.secondary)
+                                .foregroundStyle(.secondary)
                         }
                         Spacer()
                         Button("Pair") {
@@ -67,6 +83,7 @@ struct BigBroPairingView: View {
                         .buttonStyle(.borderedProminent)
                         .tint(.orange)
                         .font(.caption)
+                        .disabled(isPairing)
                     }
                 }
             }
@@ -74,17 +91,18 @@ struct BigBroPairingView: View {
             if isPairing {
                 HStack(spacing: 8) {
                     ProgressView().scaleEffect(0.8)
-                    Text("Waiting for approval on Mac…")
+                    Text("Waiting for Mac approval…")
                         .font(.caption)
-                        .foregroundColor(.secondary)
+                        .foregroundStyle(.secondary)
                 }
             }
 
             if let error {
-                Text(error).font(.caption).foregroundColor(.red)
+                Text(error)
+                    .font(.caption)
+                    .foregroundColor(.red)
             }
         }
-        .onAppear { checkPairingStatus() }
     }
 
     // MARK: - Actions
@@ -99,13 +117,10 @@ struct BigBroPairingView: View {
 
     private func pair(with device: BigBroDevice) async {
         isPairing = true
-        pairingDeviceId = device.id
         error = nil
         do {
             let approved = try await client.pair(with: device)
             if approved {
-                isPaired = true
-                pairedDeviceName = device.name
                 discovered = []
             } else {
                 error = "Pairing was denied on the Mac."
@@ -114,14 +129,5 @@ struct BigBroPairingView: View {
             self.error = error.localizedDescription
         }
         isPairing = false
-        pairingDeviceId = nil
-    }
-
-    // MARK: - Status Check
-
-    private func checkPairingStatus() {
-        let stored = UserDefaults.standard.string(forKey: "bigbro.device.id")
-        isPaired = stored != nil
-        pairedDeviceName = UserDefaults.standard.string(forKey: "bigbro.device.name")
     }
 }
