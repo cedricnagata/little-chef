@@ -28,12 +28,13 @@ struct ProfileSettingsView: View {
         Form {
             // MARK: - AI Provider
             Section {
-                Picker("Provider", selection: $llmProvider) {
-                    ForEach(LLMProvider.allCases, id: \.self) { provider in
-                        Text(provider.displayName).tag(provider)
+                if LLMService.deviceSupportsLocalModels {
+                    Picker("Provider", selection: $llmProvider) {
+                        Text(LLMProvider.local.displayName).tag(LLMProvider.local)
+                        Text(LLMProvider.bigBro.displayName).tag(LLMProvider.bigBro)
                     }
+                    .pickerStyle(.segmented)
                 }
-                .pickerStyle(.segmented)
 
                 if llmProvider == .local {
                     localModelSection
@@ -43,7 +44,9 @@ struct ProfileSettingsView: View {
             } header: {
                 Text("AI Provider")
             } footer: {
-                if llmProvider == .local {
+                if !LLMService.deviceSupportsLocalModels {
+                    Text("On-Device requires 6 GB of memory. This device supports BigBro only.")
+                } else if llmProvider == .local {
                     Text("On-device inference. Bonsai 8B is used for recipe parsing; your selected model handles cooking assistance.")
                 } else {
                     Text("Routes all inference through your paired BigBro Mac. Tools are always available. No downloads required.")
@@ -181,11 +184,12 @@ struct ProfileSettingsView: View {
             do {
                 let prefs = try LocalDataManager.shared.fetchPreferences().toUserPreferences()
                 await MainActor.run {
-                    llmProvider = prefs.llmProvider
+                    let provider: LLMProvider = (!LLMService.deviceSupportsLocalModels && prefs.llmProvider == .local) ? .bigBro : prefs.llmProvider
+                    llmProvider = provider
                     speechRate = prefs.voiceSettings.speechRate
                     voiceIdentifier = prefs.voiceSettings.voiceIdentifier
                     autoSpeakResponses = prefs.voiceSettings.autoSpeakResponses
-                    LLMService.shared.currentProvider = prefs.llmProvider
+                    LLMService.shared.currentProvider = provider
                     hasLoaded = true
                 }
             } catch {

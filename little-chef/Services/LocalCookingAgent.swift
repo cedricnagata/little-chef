@@ -146,10 +146,6 @@ class LocalCookingAgent: ObservableObject {
             }
         }
 
-        if llmService.currentProvider == .bigBro {
-            prompt += "\n\nTo control timers output a JSON block in this exact format (no other text around it):\n<tool_call>{\"name\": \"set_timer\", \"arguments\": {\"name\": \"pasta\", \"minutes\": 10}}</tool_call>\nAvailable tools: set_timer(name, minutes), start_timer(name), pause_timer(name), delete_timer(name). Only use a tool_call block when you want to control a timer."
-        }
-
         return ChatMessage(role: .system, content: prompt)
     }
 }

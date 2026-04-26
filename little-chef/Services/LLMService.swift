@@ -18,6 +18,9 @@ import BigBroKit
 class LLMService: ObservableObject {
     static let shared = LLMService()
 
+    static let deviceSupportsLocalModels: Bool =
+        ProcessInfo.processInfo.physicalMemory >= 6 * 1_024 * 1_024 * 1_024
+
     // MARK: - Published State
     @Published var isLoaded = false
     @Published var isGenerating = false
@@ -47,6 +50,10 @@ class LLMService: ObservableObject {
         if let stored = UserDefaults.standard.string(forKey: "little-chef.llm-provider"),
            let restored = LLMProvider(rawValue: stored) {
             currentProvider = restored
+        }
+        // Enforce memory gate — low-RAM devices can only use BigBro
+        if !LLMService.deviceSupportsLocalModels && currentProvider == .local {
+            currentProvider = .bigBro
         }
         refreshDownloadedModels()
     }
@@ -365,6 +372,61 @@ class LLMService: ObservableObject {
         }
     }
 
+    private struct SendableCookingBox: @unchecked Sendable { let tools: CookingTools }
+
+    private func bigBroTools(from cookingTools: CookingTools) -> [BigBroTool] {
+        let box = SendableCookingBox(tools: cookingTools)
+        return [
+            BigBroTool(
+                definition: BigBroTool.Definition(
+                    name: "set_timer",
+                    description: "Set a new cooking timer with a name and duration in minutes",
+                    parameters: BigBroTool.Definition.Parameters(
+                        properties: [
+                            "name": .init(type: "string", description: "Timer label e.g. pasta, chicken"),
+                            "minutes": .init(type: "integer", description: "Duration in minutes")
+                        ],
+                        required: ["name", "minutes"]
+                    )
+                ),
+                handler: { args in await MainActor.run { box.tools.execute(toolName: "set_timer", arguments: args) } }
+            ),
+            BigBroTool(
+                definition: BigBroTool.Definition(
+                    name: "start_timer",
+                    description: "Start or resume an existing timer by name",
+                    parameters: BigBroTool.Definition.Parameters(
+                        properties: ["name": .init(type: "string", description: "Timer name to start")],
+                        required: ["name"]
+                    )
+                ),
+                handler: { args in await MainActor.run { box.tools.execute(toolName: "start_timer", arguments: args) } }
+            ),
+            BigBroTool(
+                definition: BigBroTool.Definition(
+                    name: "pause_timer",
+                    description: "Pause a running timer by name",
+                    parameters: BigBroTool.Definition.Parameters(
+                        properties: ["name": .init(type: "string", description: "Timer name to pause")],
+                        required: ["name"]
+                    )
+                ),
+                handler: { args in await MainActor.run { box.tools.execute(toolName: "pause_timer", arguments: args) } }
+            ),
+            BigBroTool(
+                definition: BigBroTool.Definition(
+                    name: "delete_timer",
+                    description: "Delete a timer by name",
+                    parameters: BigBroTool.Definition.Parameters(
+                        properties: ["name": .init(type: "string", description: "Timer name to delete")],
+                        required: ["name"]
+                    )
+                ),
+                handler: { args in await MainActor.run { box.tools.execute(toolName: "delete_timer", arguments: args) } }
+            ),
+        ]
+    }
+
     private func generateBigBroChatCompletion(
         messages: [ChatMessage],
         tools: CookingTools? = nil
@@ -372,14 +434,12 @@ class LLMService: ObservableObject {
         isGenerating = true
         defer { isGenerating = false }
 
+        let toolList = tools.map { bigBroTools(from: $0) } ?? []
         var output = ""
-        for try await chunk in bigBroClient.send(bigBroMessages(from: messages), streaming: false) {
+        for try await chunk in bigBroClient.chat(bigBroMessages(from: messages), streaming: false, tools: toolList) {
             output += chunk
         }
-
-        let afterTextTools = processTextToolCalls(output: output, tools: tools)
-        if let tools { inferTimerAction(from: afterTextTools, tools: tools) }
-        return afterTextTools
+        return output
     }
 
     private func generateBigBroChatCompletionStreaming(
@@ -390,15 +450,13 @@ class LLMService: ObservableObject {
         isGenerating = true
         defer { isGenerating = false }
 
+        let toolList = tools.map { bigBroTools(from: $0) } ?? []
         var output = ""
-        for try await chunk in bigBroClient.send(bigBroMessages(from: messages), streaming: true) {
+        for try await chunk in bigBroClient.chat(bigBroMessages(from: messages), streaming: true, tools: toolList) {
             output += chunk
             if !chunk.isEmpty { onChunk(chunk) }
         }
-
-        let afterTextTools = processTextToolCalls(output: output, tools: tools)
-        if let tools { inferTimerAction(from: afterTextTools, tools: tools) }
-        return afterTextTools
+        return output
     }
 
     // MARK: - Model Info
