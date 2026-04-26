@@ -28,29 +28,11 @@ struct ProfileSettingsView: View {
         Form {
             // MARK: - AI Provider
             Section {
-                if LLMService.deviceSupportsLocalModels {
-                    Picker("Provider", selection: $llmProvider) {
-                        Text(LLMProvider.local.displayName).tag(LLMProvider.local)
-                        Text(LLMProvider.bigBro.displayName).tag(LLMProvider.bigBro)
-                    }
-                    .pickerStyle(.segmented)
-                }
-
-                if llmProvider == .local {
-                    localModelSection
-                } else {
-                    BigBroPairingView(client: llmService.bigBroClient)
-                }
+                providerPickerSection
             } header: {
                 Text("AI Provider")
             } footer: {
-                if !LLMService.deviceSupportsLocalModels {
-                    Text("On-Device requires 6 GB of memory. This device supports BigBro only.")
-                } else if llmProvider == .local {
-                    Text("On-device inference. Bonsai 8B is used for recipe parsing; your selected model handles cooking assistance.")
-                } else {
-                    Text("Routes all inference through your paired BigBro Mac. Tools are always available. No downloads required.")
-                }
+                providerFooter
             }
 
             // MARK: - Voice
@@ -108,6 +90,35 @@ struct ProfileSettingsView: View {
             Button("Delete", role: .destructive) { deleteAllData() }
         } message: {
             Text("This will permanently delete all your recipes and reset preferences. This cannot be undone.")
+        }
+    }
+
+    // MARK: - Provider Picker Section
+
+    @ViewBuilder
+    private var providerPickerSection: some View {
+        if LLMService.deviceSupportsLocalModels {
+            Picker("Provider", selection: $llmProvider) {
+                Text(LLMProvider.local.displayName).tag(LLMProvider.local)
+                Text(LLMProvider.bigBro.displayName).tag(LLMProvider.bigBro)
+            }
+            .pickerStyle(.segmented)
+        }
+        if llmProvider == .local {
+            localModelSection
+        } else {
+            BigBroPairingView(client: llmService.bigBroClient)
+        }
+    }
+
+    @ViewBuilder
+    private var providerFooter: some View {
+        if !LLMService.deviceSupportsLocalModels {
+            Text("On-Device requires 6 GB of memory. This device supports BigBro only.")
+        } else if llmProvider == .local {
+            Text("On-device inference. Bonsai 8B is used for recipe parsing; your selected model handles cooking assistance.")
+        } else {
+            Text("Routes all inference through your paired BigBro Mac. Tools are always available. No downloads required.")
         }
     }
 

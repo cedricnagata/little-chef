@@ -38,7 +38,7 @@ class LLMService: ObservableObject {
     /// Which model ID is currently being loaded (to prevent double-loads)
     @Published var currentlyLoadingModelId: String?
 
-    let bigBroClient = BigBroClient()
+    let bigBroClient = BigBroClient(appName: "LittleChef")
 
     private let defaultModelConfig = ModelConfiguration(
         id: "prism-ml/Bonsai-8B-mlx-1bit",

@@ -101,7 +101,7 @@ class VoiceAssistant: NSObject, ObservableObject {
                 .playAndRecord,
                 mode: .default,
                 options: [
-                    .allowBluetooth,
+                    .allowBluetoothHFP,
                     .allowBluetoothA2DP,
                     .mixWithOthers
                 ]
@@ -122,7 +122,7 @@ class VoiceAssistant: NSObject, ObservableObject {
                 .playAndRecord,
                 mode: .default,
                 options: [
-                    .allowBluetooth,
+                    .allowBluetoothHFP,
                     .allowBluetoothA2DP,
                     .mixWithOthers,
                     .duckOthers
@@ -147,7 +147,7 @@ class VoiceAssistant: NSObject, ObservableObject {
                 .playAndRecord,
                 mode: .default,
                 options: [
-                    .allowBluetooth,
+                    .allowBluetoothHFP,
                     .allowBluetoothA2DP,
                     .mixWithOthers,
                     .duckOthers,

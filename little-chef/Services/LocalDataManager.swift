@@ -56,7 +56,9 @@ class LocalDataManager: ObservableObject {
             object: nil,
             queue: .main
         ) { [weak self] _ in
-            self?.onRemoteChange?()
+            Task { @MainActor [weak self] in
+                self?.onRemoteChange?()
+            }
         }
     }
 
