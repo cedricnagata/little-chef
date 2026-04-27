@@ -56,6 +56,8 @@ class LLMService: ObservableObject {
             currentProvider = .bigBro
         }
         refreshDownloadedModels()
+        // Restore BigBro auto-reconnect from previous launches.
+        bigBroClient.resumeAutoReconnectIfEnabled()
     }
 
     /// Refresh which models are cached on disk.
@@ -429,6 +431,36 @@ class LLMService: ObservableObject {
 
     private static let bigBroModel = "gpt-oss:20b"
 
+    /// Block until the Mac finishes pulling `model`. Calls `onProgress` with a
+    /// short human-readable status string each time progress changes (suitable for
+    /// streaming back through `onChunk`).
+    private func waitForModelDownload(_ model: String, onProgress: ((String) -> Void)? = nil) async throws {
+        var lastStatus: String? = nil
+        var lastPercentBucket = -1
+        while true {
+            try Task.checkCancellation()
+            guard let progress = bigBroClient.modelDownloads[model] else {
+                // Either not yet started or already removed after completion — give the Mac
+                // a brief grace period before assuming we can retry.
+                try await Task.sleep(nanoseconds: 250_000_000)
+                if bigBroClient.modelDownloads[model] == nil { return }
+                continue
+            }
+            if progress.done {
+                if progress.success { return }
+                throw LLMError.generationFailed("Model download failed: \(progress.error ?? "unknown error")")
+            }
+            let bucket = Int(progress.percent * 100) / 5  // emit at 5% increments
+            if progress.status != lastStatus || bucket != lastPercentBucket {
+                lastStatus = progress.status
+                lastPercentBucket = bucket
+                let pctText = progress.bytesTotal > 0 ? " \(Int(progress.percent * 100))%" : ""
+                onProgress?("⏳ Downloading \(model): \(progress.status)\(pctText)")
+            }
+            try await Task.sleep(nanoseconds: 500_000_000)
+        }
+    }
+
     private func generateBigBroChatCompletion(
         messages: [ChatMessage],
         tools: CookingTools? = nil,
@@ -453,22 +485,35 @@ class LLMService: ObservableObject {
 
         var output = ""
         var chunkCount = 0
-        do {
-            for try await chunk in bigBroClient.chat(
-                bigBroMessages(from: messages),
-                model: Self.bigBroModel,
-                streaming: false,
-                tools: toolList,
-                format: format,
-                options: options,
-                think: false
-            ) {
-                output += chunk
-                chunkCount += 1
+        var attemptedDownloadWait = false
+        chatLoop: while true {
+            do {
+                for try await chunk in bigBroClient.chat(
+                    bigBroMessages(from: messages),
+                    model: Self.bigBroModel,
+                    streaming: false,
+                    tools: toolList,
+                    format: format,
+                    options: options,
+                    think: false
+                ) {
+                    output += chunk
+                    chunkCount += 1
+                }
+                break chatLoop
+            } catch let BigBroError.modelDownloading(model, alreadyInProgress) {
+                guard !attemptedDownloadWait else {
+                    print("🌐 [BigBro] ❌ Model still downloading after one wait — bailing out")
+                    throw LLMError.generationFailed("Model '\(model)' is still downloading. Please try again shortly.")
+                }
+                attemptedDownloadWait = true
+                print("🌐 [BigBro] ⏳ Model '\(model)' downloading on Mac (alreadyInProgress=\(alreadyInProgress)). Waiting…")
+                try await waitForModelDownload(model)
+                print("🌐 [BigBro] ✅ Model '\(model)' downloaded — retrying chat")
+            } catch {
+                print("🌐 [BigBro] ❌ chat failed after \(String(format: "%.2f", Date().timeIntervalSince(started)))s: \(error)")
+                throw error
             }
-        } catch {
-            print("🌐 [BigBro] ❌ chat failed after \(String(format: "%.2f", Date().timeIntervalSince(started)))s: \(error)")
-            throw error
         }
         let elapsed = Date().timeIntervalSince(started)
         print("🌐 [BigBro] ✅ chat done in \(String(format: "%.2f", elapsed))s, chunks=\(chunkCount), \(output.count) chars")
@@ -498,17 +543,43 @@ class LLMService: ObservableObject {
         let format: OllamaFormat? = toolList.isEmpty ? .json : nil
 
         var output = ""
-        for try await chunk in bigBroClient.chat(
-            bigBroMessages(from: messages),
-            model: Self.bigBroModel,
-            streaming: true,
-            tools: toolList,
-            format: format,
-            options: options,
-            think: false
-        ) {
-            output += chunk
-            if !chunk.isEmpty { onChunk(chunk) }
+        var attemptedDownloadWait = false
+        chatLoop: while true {
+            do {
+                for try await chunk in bigBroClient.chat(
+                    bigBroMessages(from: messages),
+                    model: Self.bigBroModel,
+                    streaming: true,
+                    tools: toolList,
+                    format: format,
+                    options: options,
+                    think: false
+                ) {
+                    output += chunk
+                    if !chunk.isEmpty { onChunk(chunk) }
+                }
+                break chatLoop
+            } catch let BigBroError.modelDownloading(model, alreadyInProgress) {
+                guard !attemptedDownloadWait else {
+                    throw LLMError.generationFailed("Model '\(model)' is still downloading. Please try again shortly.")
+                }
+                attemptedDownloadWait = true
+                print("🌐 [BigBro] ⏳ Model '\(model)' downloading (alreadyInProgress=\(alreadyInProgress))")
+                onChunk("⏳ Downloading \(model) on your Mac…\n")
+                var lastBucket = -1
+                try await waitForModelDownload(model) { status in
+                    // Replace previous status line — caller streams will append, so just emit
+                    // a new line with the latest status.
+                    let bucket = (status as NSString).hash
+                    if bucket != lastBucket {
+                        lastBucket = bucket
+                        onChunk("\(status)\n")
+                    }
+                }
+                onChunk("✅ Model ready, generating response…\n")
+            } catch {
+                throw error
+            }
         }
         return output
     }

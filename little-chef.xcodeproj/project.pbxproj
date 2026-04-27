@@ -437,6 +437,7 @@
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = "little-chef/Info.plist";
 				INFOPLIST_KEY_CFBundleDisplayName = LittleChef;
+				INFOPLIST_KEY_ITSAppUsesNonExemptEncryption = NO;
 				INFOPLIST_KEY_LSApplicationCategoryType = "";
 				INFOPLIST_KEY_NSLocalNetworkUsageDescription = "LittleChef uses the local network to accept connections from macOS devices.";
 				INFOPLIST_KEY_NSMicrophoneUsageDescription = "LittleChef needs microphone access to listen to your voice commands and questions while cooking. This enables hands-free interaction with your AI cooking assistant.";
@@ -474,6 +475,7 @@
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = "little-chef/Info.plist";
 				INFOPLIST_KEY_CFBundleDisplayName = LittleChef;
+				INFOPLIST_KEY_ITSAppUsesNonExemptEncryption = NO;
 				INFOPLIST_KEY_LSApplicationCategoryType = "";
 				INFOPLIST_KEY_NSLocalNetworkUsageDescription = "LittleChef uses the local network to accept connections from macOS devices.";
 				INFOPLIST_KEY_NSMicrophoneUsageDescription = "LittleChef needs microphone access to listen to your voice commands and questions while cooking. This enables hands-free interaction with your AI cooking assistant.";
