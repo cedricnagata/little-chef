@@ -96,7 +96,7 @@ struct ActiveCookingView: View {
     @EnvironmentObject var voiceAssistant: VoiceAssistant
     @State private var textInput = ""
     @State private var showingEndSessionAlert = false
-    @State private var isRecipeExpanded = false
+    @State private var isRecipeExpanded = true
     @FocusState private var isTextFieldFocused: Bool
 
     var body: some View {
@@ -223,67 +223,23 @@ struct RecipeDetailsView: View {
         if let session = cookingSessionManager.currentSession {
             ScrollView {
                 VStack(alignment: .leading, spacing: 16) {
-                    // Title and info
-                    VStack(alignment: .leading, spacing: 12) {
-                        Text(session.recipe.title)
-                            .font(.title2)
-                            .fontWeight(.bold)
-                            .multilineTextAlignment(.leading)
-
-                        if let description = session.recipe.description {
-                            Text(description)
-                                .font(.caption)
-                                .foregroundColor(.secondary)
+                    // Centered metadata row at the top
+                    InlineRecipeMetadata(
+                        prepTime: session.recipe.prepTime,
+                        cookTime: session.recipe.cookTime,
+                        originalServings: session.recipe.servings,
+                        currentServings: cookingSessionManager.getCurrentServings(),
+                        difficulty: session.recipe.difficulty,
+                        onServingsChange: { newServings in
+                            cookingSessionManager.updateServings(newServings: newServings)
                         }
+                    )
+                    .frame(maxWidth: .infinity)
 
-                        LazyVGrid(columns: Array(repeating: GridItem(.flexible()), count: 2), spacing: 8) {
-                            if let prepTime = session.recipe.prepTime {
-                                CompactInfoCard(title: "Prep", value: "\(prepTime)m", icon: "clock")
-                            }
-                            if let cookTime = session.recipe.cookTime {
-                                CompactInfoCard(title: "Cook", value: "\(cookTime)m", icon: "flame")
-                            }
-                            EditableServingsCard(
-                                originalServings: session.recipe.servings,
-                                currentServings: cookingSessionManager.getCurrentServings(),
-                                onServingsChange: { newServings in
-                                    cookingSessionManager.updateServings(newServings: newServings)
-                                }
-                            )
-                            if let difficulty = session.recipe.difficulty {
-                                CompactInfoCard(title: "Level", value: difficulty.capitalized, icon: "star")
-                            }
-                        }
-                    }
-
-                    Divider()
-
-                    // Ingredients
-                    VStack(alignment: .leading, spacing: 8) {
-                        HStack {
-                            Text("Ingredients")
-                                .font(.headline)
-                                .fontWeight(.semibold)
-                            Spacer()
-                            Text("\(session.recipe.ingredients.count)")
-                                .font(.caption)
-                                .foregroundColor(.secondary)
-                        }
-
-                        LazyVStack(alignment: .leading, spacing: 6) {
-                            ForEach(Array(session.recipe.ingredients.enumerated()), id: \.offset) { _, ingredient in
-                                HStack(alignment: .top, spacing: 8) {
-                                    Circle()
-                                        .fill(Color.orange.opacity(0.3))
-                                        .frame(width: 6, height: 6)
-                                        .padding(.top, 6)
-                                    Text(ingredient)
-                                        .font(.caption)
-                                        .fixedSize(horizontal: false, vertical: true)
-                                    Spacer()
-                                }
-                            }
-                        }
+                    if let description = session.recipe.description {
+                        Text(description)
+                            .font(.caption)
+                            .foregroundColor(.secondary)
                     }
 
                     Divider()
@@ -316,6 +272,36 @@ struct RecipeDetailsView: View {
                                             cookingSessionManager.deleteManualTimer(id: timer.id)
                                         }
                                     )
+                                }
+                            }
+                        }
+                    }
+
+                    Divider()
+
+                    // Ingredients
+                    VStack(alignment: .leading, spacing: 8) {
+                        HStack {
+                            Text("Ingredients")
+                                .font(.headline)
+                                .fontWeight(.semibold)
+                            Spacer()
+                            Text("\(session.recipe.ingredients.count)")
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                        }
+
+                        LazyVStack(alignment: .leading, spacing: 6) {
+                            ForEach(Array(session.recipe.ingredients.enumerated()), id: \.offset) { _, ingredient in
+                                HStack(alignment: .top, spacing: 8) {
+                                    Circle()
+                                        .fill(Color.orange.opacity(0.3))
+                                        .frame(width: 6, height: 6)
+                                        .padding(.top, 6)
+                                    Text(ingredient)
+                                        .font(.caption)
+                                        .fixedSize(horizontal: false, vertical: true)
+                                    Spacer()
                                 }
                             }
                         }
@@ -365,6 +351,91 @@ struct RecipeDetailsView: View {
                     cookingSessionManager.addManualTimer(label: label, durationMinutes: minutes)
                 }
             }
+        }
+    }
+}
+
+// MARK: - Inline Recipe Metadata
+
+struct InlineRecipeMetadata: View {
+    let prepTime: Int?
+    let cookTime: Int?
+    let originalServings: Int
+    let currentServings: Int
+    let difficulty: String?
+    let onServingsChange: (Int) -> Void
+
+    var body: some View {
+        HStack(spacing: 14) {
+            if let prepTime {
+                MetaChip(icon: "clock", text: "Prep \(prepTime)m")
+            }
+            if let cookTime {
+                MetaChip(icon: "flame", text: "Cook \(cookTime)m")
+            }
+            InlineServingsControl(
+                originalServings: originalServings,
+                currentServings: currentServings,
+                onServingsChange: onServingsChange
+            )
+            if let difficulty {
+                MetaChip(icon: "star", text: difficulty.capitalized)
+            }
+        }
+        .font(.caption)
+        .foregroundColor(.secondary)
+    }
+}
+
+private struct MetaChip: View {
+    let icon: String
+    let text: String
+
+    var body: some View {
+        HStack(spacing: 4) {
+            Image(systemName: icon)
+                .font(.caption2)
+                .foregroundColor(.orange)
+            Text(text)
+        }
+    }
+}
+
+private struct InlineServingsControl: View {
+    let originalServings: Int
+    let currentServings: Int
+    let onServingsChange: (Int) -> Void
+
+    var body: some View {
+        HStack(spacing: 4) {
+            Image(systemName: "person.2")
+                .font(.caption2)
+                .foregroundColor(.orange)
+            Button(action: {
+                if currentServings > 1 { onServingsChange(currentServings - 1) }
+            }) {
+                Image(systemName: "minus.circle.fill")
+                    .font(.caption)
+                    .foregroundColor(currentServings > 1 ? .orange : .gray)
+            }
+            .disabled(currentServings <= 1)
+            .buttonStyle(.plain)
+
+            Text("\(currentServings)")
+                .fontWeight(.semibold)
+                .foregroundColor(currentServings != originalServings ? .orange : .primary)
+                .monospacedDigit()
+                .frame(minWidth: 18)
+
+            Button(action: {
+                if currentServings < 50 { onServingsChange(currentServings + 1) }
+            }) {
+                Image(systemName: "plus.circle.fill")
+                    .font(.caption)
+                    .foregroundColor(currentServings < 50 ? .orange : .gray)
+            }
+            .disabled(currentServings >= 50)
+            .buttonStyle(.plain)
         }
     }
 }

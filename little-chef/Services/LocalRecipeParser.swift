@@ -124,17 +124,27 @@ class LocalRecipeParser: ObservableObject {
 
     private func parseWithLLM(text: String, sourceUrl: String?, maxTokens: Int = 1024) async throws -> RecipeData {
         let prompt = """
-        Extract the recipe from the text below into JSON. Return ONLY the JSON object.
+        Build a complete recipe in JSON for the dish in the text below. Return ONLY the JSON object.
+
+        Extraction policy (very important):
+        - If a field is present in the text, use the text verbatim — never override or paraphrase what the source says.
+        - If a field is missing or unclear in the text, fill it in using your own culinary knowledge of this dish so the recipe is complete and usable.
+        - Never output null or empty arrays for ingredients, instructions, or tags. A complete recipe is required.
+
+        Schema:
+        - "title": string — the dish name
+        - "description": string — one short sentence about the dish
+        - "servings": integer — default 4 if not stated and not obvious
+        - "prep_time": integer minutes (1 hour = 60). Estimate if not given.
+        - "cook_time": integer minutes. Estimate if not given.
+        - "ingredients": array of strings, each with a quantity (e.g. "400g spaghetti", "2 cloves garlic, minced")
+        - "instructions": array of strings, each a single cooking step in order, plain text only — NO "Step 1:", NO numbering
+        - "tags": array of lowercase strings (cuisine, dish type, dietary, etc.)
+        - "cuisine_type": string (e.g. "Italian", "Indian"), or null if truly ambiguous
+        - "difficulty": "easy" | "medium" | "hard"
 
         Example output:
         {"title": "Pasta Carbonara", "description": "Classic Roman pasta dish", "servings": 4, "prep_time": 10, "cook_time": 20, "ingredients": ["400g spaghetti", "200g guanciale", "4 egg yolks", "100g pecorino"], "instructions": ["Boil pasta in salted water until al dente.", "Cut guanciale into strips and fry until crispy.", "Mix egg yolks with grated pecorino.", "Toss drained pasta with guanciale, then stir in egg mixture off heat."], "tags": ["italian", "pasta"], "cuisine_type": "Italian", "difficulty": "medium"}
-
-        IMPORTANT:
-        - Each instruction must be the actual step text only, NOT prefixed with numbers like "Step 1:" or "1."
-        - Do NOT duplicate or number steps. Just the plain instruction text.
-        - prep_time and cook_time MUST be integers representing MINUTES. For example: 1 hour = 60, 1.5 hours = 90, 30 minutes = 30. Do NOT use hours or seconds.
-        - Use null for unknown fields.
-        - difficulty must be "easy", "medium", or "hard"
 
         Text:
         \(text.prefix(5000))
@@ -181,20 +191,34 @@ class LocalRecipeParser: ObservableObject {
     }
 
     static func parseRecipeJSON(from response: String) throws -> RecipeData {
+        let trimmed = response.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.isEmpty {
+            print("📖 [PARSER] ❌ JSON parse: empty response")
+            throw RecipeParserError.invalidJSONResponse
+        }
+
         // Find JSON in response
         guard let jsonStart = response.firstIndex(of: "{"),
               let jsonEnd = response.lastIndex(of: "}") else {
+            print("📖 [PARSER] ❌ JSON parse: no '{' or '}' found in response (\(response.count) chars)")
+            print("📖 [PARSER]   first 200 chars: \(response.prefix(200))")
             throw RecipeParserError.invalidJSONResponse
         }
 
         var jsonString = String(response[jsonStart...jsonEnd])
+        let preStripLen = jsonString.count
 
         // Fix common LLM JSON issues
         jsonString = jsonString
             .replacingOccurrences(of: ",\\s*}", with: "}", options: .regularExpression)  // trailing commas
             .replacingOccurrences(of: ",\\s*]", with: "]", options: .regularExpression)  // trailing commas in arrays
 
+        if jsonString.count != preStripLen {
+            print("📖 [PARSER] Fixed trailing-comma issues (\(preStripLen) → \(jsonString.count) chars)")
+        }
+
         guard let jsonData = jsonString.data(using: .utf8) else {
+            print("📖 [PARSER] ❌ JSON parse: failed to encode JSON string as UTF-8")
             throw RecipeParserError.invalidJSONResponse
         }
 
@@ -202,6 +226,7 @@ class LocalRecipeParser: ObservableObject {
 
         do {
             var recipe = try decoder.decode(RecipeData.self, from: jsonData)
+            print("📖 [PARSER] ✅ Decoded RecipeData: title='\(recipe.title)', ingr=\(recipe.ingredients.count), steps=\(recipe.instructions.count)")
             // Strip numbered prefixes like "1. ", "Step 1: ", "1: " from instructions
             recipe = RecipeData(
                 title: recipe.title,
@@ -223,8 +248,25 @@ class LocalRecipeParser: ObservableObject {
                 difficulty: recipe.difficulty
             )
             return recipe
+        } catch let DecodingError.keyNotFound(key, ctx) {
+            print("📖 [PARSER] ❌ JSON missing required key '\(key.stringValue)' at \(ctx.codingPath.map { $0.stringValue }.joined(separator: "."))")
+            print("📖 [PARSER]   JSON was: \(jsonString.prefix(500))")
+            throw RecipeParserError.invalidJSONResponse
+        } catch let DecodingError.typeMismatch(type, ctx) {
+            print("📖 [PARSER] ❌ JSON type mismatch: expected \(type) at \(ctx.codingPath.map { $0.stringValue }.joined(separator: "."))")
+            print("📖 [PARSER]   JSON was: \(jsonString.prefix(500))")
+            throw RecipeParserError.invalidJSONResponse
+        } catch let DecodingError.valueNotFound(type, ctx) {
+            print("📖 [PARSER] ❌ JSON value missing for \(type) at \(ctx.codingPath.map { $0.stringValue }.joined(separator: "."))")
+            print("📖 [PARSER]   JSON was: \(jsonString.prefix(500))")
+            throw RecipeParserError.invalidJSONResponse
+        } catch let DecodingError.dataCorrupted(ctx) {
+            print("📖 [PARSER] ❌ JSON data corrupted at \(ctx.codingPath.map { $0.stringValue }.joined(separator: ".")): \(ctx.debugDescription)")
+            print("📖 [PARSER]   JSON was: \(jsonString.prefix(500))")
+            throw RecipeParserError.invalidJSONResponse
         } catch {
-            print("JSON decoding error: \(error)")
+            print("📖 [PARSER] ❌ JSON decoding failed: \(error)")
+            print("📖 [PARSER]   JSON was: \(jsonString.prefix(500))")
             throw RecipeParserError.invalidJSONResponse
         }
     }
@@ -237,15 +279,16 @@ class LocalRecipeParser: ObservableObject {
         let instructionsList = schema.instructions.isEmpty ? "NONE FOUND" : schema.instructions.enumerated().map { "\($0.offset + 1). \($0.element)" }.joined(separator: "\n")
 
         let prompt = """
-        Clean up and organize this recipe data into JSON. Return ONLY the JSON object.
+        Produce a complete, polished recipe in JSON. Return ONLY the JSON object.
 
+        Source data (already extracted from the page):
         Title: \(schema.title)
-        Description: \(schema.description ?? "none")
+        Description: \(schema.description ?? "MISSING")
         Servings: \(schema.servings)
-        Prep time: \(schema.prepTime.map { "\($0) minutes" } ?? "unknown")
-        Cook time: \(schema.cookTime.map { "\($0) minutes" } ?? "unknown")
-        Cuisine: \(schema.cuisineType ?? "unknown")
-        Tags: \(schema.tags.joined(separator: ", "))
+        Prep time: \(schema.prepTime.map { "\($0) minutes" } ?? "MISSING")
+        Cook time: \(schema.cookTime.map { "\($0) minutes" } ?? "MISSING")
+        Cuisine: \(schema.cuisineType ?? "MISSING")
+        Tags: \(schema.tags.isEmpty ? "MISSING" : schema.tags.joined(separator: ", "))
 
         Ingredients:
         - \(ingredientsList)
@@ -253,16 +296,25 @@ class LocalRecipeParser: ObservableObject {
         Instructions:
         \(instructionsList)
 
-        Example output format:
-        {"title": "Recipe Name", "description": "Short description", "servings": 4, "prep_time": 10, "cook_time": 20, "ingredients": ["ingredient 1", "ingredient 2"], "instructions": ["Do this first.", "Then do this."], "tags": ["tag1"], "cuisine_type": "Italian", "difficulty": "medium"}
+        Policy (very important):
+        - For any field that is present above (not "MISSING" / not "NONE FOUND"), use the source values — clean up formatting only. Do NOT replace or paraphrase the source's choices.
+        - For any field marked MISSING or NONE FOUND, fill it in from your own culinary knowledge of this dish so the recipe is complete and usable.
+        - Never output null or empty arrays for ingredients, instructions, or tags.
 
-        IMPORTANT:
-        - Clean up ingredients: remove HTML entities, fix formatting, keep quantities
-        - Clean up instructions: make each step clear and concise, remove URLs or metadata
-        - Do NOT number or prefix instructions with "Step 1:" etc.
-        - prep_time and cook_time MUST be integers in MINUTES
-        - difficulty must be "easy", "medium", or "hard"
-        - Fill in any missing fields if you can infer them
+        Schema:
+        - "title", "description" (1 sentence), "servings" (int), "prep_time" (int minutes), "cook_time" (int minutes)
+        - "ingredients": array of strings with quantities
+        - "instructions": array of strings, each a plain cooking step — NO "Step 1:", NO numbering
+        - "tags": lowercase string array
+        - "cuisine_type": string (or null if truly ambiguous)
+        - "difficulty": "easy" | "medium" | "hard"
+
+        Example output:
+        {"title": "Recipe Name", "description": "Short description", "servings": 4, "prep_time": 10, "cook_time": 20, "ingredients": ["ingredient 1"], "instructions": ["Do this first."], "tags": ["tag1"], "cuisine_type": "Italian", "difficulty": "medium"}
+
+        Cleanup rules:
+        - Strip HTML entities and stray URLs from ingredients/instructions
+        - Keep ingredient quantities verbatim from the source
         """
 
         let response = try await llmService.generateChatCompletion(
