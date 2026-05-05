@@ -100,40 +100,7 @@ class OCRService {
         }
     }
 
-    /// Preprocess image for better OCR results
-    private func preprocessImage(_ image: UIImage) -> UIImage? {
-        guard let ciImage = CIImage(image: image) else { return nil }
 
-        // Apply filters to improve OCR accuracy
-        let filters = [
-            // Adjust exposure
-            CIFilter(name: "CIExposureAdjust", parameters: [
-                kCIInputImageKey: ciImage,
-                "inputEV": 0.5
-            ]),
-            // Enhance contrast
-            CIFilter(name: "CIColorControls", parameters: [
-                kCIInputImageKey: ciImage,
-                "inputContrast": 1.2,
-                "inputBrightness": 0.1
-            ])
-        ]
-
-        var processedImage = ciImage
-        for filter in filters.compactMap({ $0 }) {
-            if let outputImage = filter.outputImage {
-                processedImage = outputImage
-            }
-        }
-
-        // Convert back to UIImage
-        let context = CIContext()
-        guard let outputCGImage = context.createCGImage(processedImage, from: processedImage.extent) else {
-            return nil
-        }
-
-        return UIImage(cgImage: outputCGImage)
-    }
 }
 
 // MARK: - Error Types

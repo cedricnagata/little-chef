@@ -10,7 +10,7 @@ import Foundation
 // MARK: - Cooking Session
 
 struct CookingSession: Codable, Identifiable {
-    var id: UUID { UUID() }
+    var id = UUID()
 
     let recipe: RecipeBase
     var conversationHistory: [Message]

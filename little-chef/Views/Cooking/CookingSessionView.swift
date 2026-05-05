@@ -292,7 +292,8 @@ struct RecipeDetailsView: View {
                         }
 
                         LazyVStack(alignment: .leading, spacing: 6) {
-                            ForEach(Array(session.recipe.ingredients.enumerated()), id: \.offset) { _, ingredient in
+                            ForEach(session.recipe.ingredients.indices, id: \.self) { idx in
+                                let ingredient = session.recipe.ingredients[idx]
                                 HStack(alignment: .top, spacing: 8) {
                                     Circle()
                                         .fill(Color.orange.opacity(0.3))

@@ -54,7 +54,6 @@ class LocalRecipeParser: ObservableObject {
 
         var recipeData: RecipeData
 
-        // Try direct schema.org parsing first
         if webContent.hasPrefix("Schema.org Recipe JSON:"),
            let parsed = try? parseSchemaOrgRecipe(from: webContent, sourceUrl: url) {
             print("📖 [PARSER] ✅ Parsed from schema.org")

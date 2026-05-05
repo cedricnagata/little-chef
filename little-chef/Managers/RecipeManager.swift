@@ -39,99 +39,65 @@ class RecipeManager: ObservableObject {
 
     // MARK: - Recipe Management
     func loadRecipes() async {
-        isLoading = true
-        errorMessage = nil
-
-        do {
-            let recipeEntities = try dataManager.fetchAllRecipes()
-            recipes = recipeEntities.map { $0.toRecipe() }
-        } catch {
-            errorMessage = "Failed to load recipes: \(error.localizedDescription)"
+        await withLoading {
+            let recipeEntities = try self.dataManager.fetchAllRecipes()
+            self.recipes = recipeEntities.map { $0.toRecipe() }
         }
-
-        isLoading = false
     }
-    
-    func createRecipe(_ recipeData: RecipeData) async -> Bool {
-        isLoading = true
-        errorMessage = nil
 
-        do {
-            let recipeEntity = try dataManager.createRecipe(recipeData)
-            recipes.append(recipeEntity.toRecipe())
-            isLoading = false
-            return true
-        } catch {
-            errorMessage = "Failed to create recipe: \(error.localizedDescription)"
-            isLoading = false
-            return false
+    func createRecipe(_ recipeData: RecipeData) async -> Bool {
+        let result = await withLoading {
+            let recipeEntity = try self.dataManager.createRecipe(recipeData)
+            self.recipes.append(recipeEntity.toRecipe())
         }
+        return result != nil
     }
 
     func updateRecipe(id: UUID, with recipeData: RecipeData) async -> Bool {
-        isLoading = true
-        errorMessage = nil
-
-        do {
-            try dataManager.updateRecipe(id: id, with: recipeData)
-            // Reload recipes to get updated version
-            await loadRecipes()
-            isLoading = false
-            return true
-        } catch {
-            errorMessage = "Failed to update recipe: \(error.localizedDescription)"
-            isLoading = false
-            return false
+        let result = await withLoading {
+            try self.dataManager.updateRecipe(id: id, with: recipeData)
+            await self.loadRecipes()
         }
+        return result != nil
     }
 
     func deleteRecipe(_ recipe: Recipe) async -> Bool {
-        isLoading = true
-        errorMessage = nil
-
-        do {
-            try dataManager.deleteRecipe(id: recipe.id)
-            recipes.removeAll { $0.id == recipe.id }
-            isLoading = false
-            return true
-        } catch {
-            errorMessage = "Failed to delete recipe: \(error.localizedDescription)"
-            isLoading = false
-            return false
+        let result = await withLoading {
+            try self.dataManager.deleteRecipe(id: recipe.id)
+            self.recipes.removeAll { $0.id == recipe.id }
         }
+        return result != nil
     }
 
     // MARK: - Search & Filter
 
     func searchRecipes(query: String) async {
-        isLoading = true
-        errorMessage = nil
-
-        do {
-            let recipeEntities = try dataManager.searchRecipes(query: query)
-            recipes = recipeEntities.map { $0.toRecipe() }
-        } catch {
-            errorMessage = "Failed to search recipes: \(error.localizedDescription)"
+        await withLoading {
+            let recipeEntities = try self.dataManager.searchRecipes(query: query)
+            self.recipes = recipeEntities.map { $0.toRecipe() }
         }
-
-        isLoading = false
     }
 
     func fetchRecipes(byTag tag: String) async {
-        isLoading = true
-        errorMessage = nil
-
-        do {
-            let recipeEntities = try dataManager.fetchRecipes(byTag: tag)
-            recipes = recipeEntities.map { $0.toRecipe() }
-        } catch {
-            errorMessage = "Failed to fetch recipes by tag: \(error.localizedDescription)"
+        await withLoading {
+            let recipeEntities = try self.dataManager.fetchRecipes(byTag: tag)
+            self.recipes = recipeEntities.map { $0.toRecipe() }
         }
-
-        isLoading = false
     }
     
     // MARK: - Recipe Parsing
+
+    private func withLoading<T>(_ work: () async throws -> T) async -> T? {
+        isLoading = true
+        errorMessage = nil
+        defer { isLoading = false }
+        do {
+            return try await work()
+        } catch {
+            errorMessage = error.localizedDescription
+            return nil
+        }
+    }
 
     /// Keeps the screen awake during GPU-based parsing and forwards status updates.
     private func withParsingContext<T>(_ work: @escaping () async throws -> T) async rethrows -> T {

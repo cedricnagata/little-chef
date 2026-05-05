@@ -46,7 +46,6 @@ class LLMService: ObservableObject {
     )
 
     private init() {
-        // Restore provider from UserDefaults for instant sync at startup
         if let stored = UserDefaults.standard.string(forKey: "little-chef.llm-provider"),
            let restored = LLMProvider(rawValue: stored) {
             currentProvider = restored
@@ -74,7 +73,7 @@ class LLMService: ObservableObject {
     // MARK: - Model Lifecycle
 
     private func loadModel(modelId: String? = nil) async throws -> MLXLMCommon.ModelContainer {
-        let id = modelId ?? "prism-ml/Bonsai-8B-mlx-1bit"
+        let id = modelId ?? CookingModelChoice.bonsai8B.modelId
 
         if let container = modelContainers[id] {
             print("🤖 [LLM] Model \(id) already loaded, returning cached container")
@@ -598,12 +597,21 @@ class LLMService: ObservableObject {
 
     // MARK: - Text-based Tool Call Fallback
 
+    private static let textToolCallRegex = try? NSRegularExpression(
+        pattern: "<tool_call>\\s*(.+?)\\s*</tool_call>",
+        options: .dotMatchesLineSeparators
+    )
+    private static let timerNameRegex = try? NSRegularExpression(pattern: "['\"]([^'\"]+)['\"]")
+    private static let thinkTagRegex = try? NSRegularExpression(
+        pattern: "<think>.*?</think>",
+        options: .dotMatchesLineSeparators
+    )
+
     /// Fallback parser for models that output <tool_call> tags as text instead of native tool calls
     private func processTextToolCalls(output: String, tools: CookingTools?) -> String {
         guard let tools else { return output }
 
-        let pattern = "<tool_call>\\s*(.+?)\\s*</tool_call>"
-        guard let regex = try? NSRegularExpression(pattern: pattern, options: .dotMatchesLineSeparators) else {
+        guard let regex = Self.textToolCallRegex else {
             return output
         }
 
@@ -640,11 +648,8 @@ class LLMService: ObservableObject {
     private func inferTimerAction(from text: String, tools: CookingTools) {
         let lower = text.lowercased()
 
-        // Extract a quoted timer name if present, e.g. 'pasta' or "pasta"
-        let namePattern = "['\"]([^'\"]+)['\"]"
-        let nameRegex = try? NSRegularExpression(pattern: namePattern)
         let nameRange = NSRange(text.startIndex..., in: text)
-        let timerName = nameRegex?.firstMatch(in: text, range: nameRange)
+        let timerName = Self.timerNameRegex?.firstMatch(in: text, range: nameRange)
             .flatMap { Range($0.range(at: 1), in: text) }
             .map { String(text[$0]) }
 
@@ -663,8 +668,7 @@ class LLMService: ObservableObject {
 
     private func stripThinkingTags(from text: String) -> String {
         var result = text
-        let pattern = "<think>.*?</think>"
-        if let regex = try? NSRegularExpression(pattern: pattern, options: .dotMatchesLineSeparators) {
+        if let regex = Self.thinkTagRegex {
             let range = NSRange(result.startIndex..., in: result)
             result = regex.stringByReplacingMatches(in: result, options: [], range: range, withTemplate: "")
         }

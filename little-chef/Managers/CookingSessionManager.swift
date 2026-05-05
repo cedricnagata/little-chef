@@ -31,11 +31,9 @@ class CookingSessionManager: ObservableObject, TimerManager {
     // MARK: - Session Management
 
     func startCookingSession(with recipe: Recipe) async {
-        // Load user preferences from local storage
         let preferences = await loadLocalPreferences()
         let recipeBase = RecipeBase(from: recipe)
 
-        // Create session immediately (navigation will happen)
         currentSession = CookingSession(recipe: recipeBase, userPreferences: preferences)
 
         error = nil
@@ -52,8 +50,7 @@ class CookingSessionManager: ObservableObject, TimerManager {
             let prefsEntity = try dataManager.fetchPreferences()
             let localPrefs = prefsEntity.toUserPreferences()
 
-            // Convert to UserPreferencesDetailed
-            return UserPreferencesDetailed(from: localPrefs)
+                return UserPreferencesDetailed(from: localPrefs)
         } catch {
             print("⚠️ Failed to load preferences, using defaults: \(error)")
             return UserPreferencesDetailed()
@@ -61,13 +58,10 @@ class CookingSessionManager: ObservableObject, TimerManager {
     }
 
     func endCookingSession() {
-        // Clear session data
         currentSession = nil
         lastResponse = ""
         error = nil
         cookingAgent = nil
-
-        // Clear all timers
         clearAllTimers()
 
         print("🔴 Ended cooking session and reset state")
@@ -91,10 +85,7 @@ class CookingSessionManager: ObservableObject, TimerManager {
             return
         }
 
-        // Clear any previous errors
         error = nil
-
-        // Add user message immediately so it shows in the chat
         currentSession?.conversationHistory.append(
             Message(id: UUID(), role: "user", content: query, timestamp: Date())
         )
@@ -140,18 +131,15 @@ class CookingSessionManager: ObservableObject, TimerManager {
         error = nil
         isLoading = true
 
-        // Add user message immediately
         currentSession?.conversationHistory.append(
             Message(id: UUID(), role: "user", content: query, timestamp: Date())
         )
 
-        // Add a placeholder assistant message that we'll update progressively
         let assistantMessageId = UUID()
         currentSession?.conversationHistory.append(
             Message(id: assistantMessageId, role: "assistant", content: "", timestamp: Date())
         )
 
-        // Sentence buffer for TTS
         var sentenceBuffer = ""
 
         do {
@@ -165,7 +153,6 @@ class CookingSessionManager: ObservableObject, TimerManager {
             ) { [weak self] chunk in
                 guard let self else { return }
 
-                // Update the assistant message in-place
                 if let index = self.currentSession?.conversationHistory.firstIndex(where: { $0.id == assistantMessageId }) {
                     let current = self.currentSession?.conversationHistory[index].content ?? ""
                     self.currentSession?.conversationHistory[index] = Message(
@@ -176,10 +163,10 @@ class CookingSessionManager: ObservableObject, TimerManager {
                     )
                 }
 
-                // Buffer sentences for TTS
                 if let onSentence {
                     sentenceBuffer += chunk
                     // Extract complete sentences (ending with . ! or ?)
+                    // Split on sentence boundaries for streaming TTS
                     while let range = sentenceBuffer.range(of: "[.!?]\\s+|[.!?]$", options: .regularExpression) {
                         let sentence = String(sentenceBuffer[sentenceBuffer.startIndex...range.lowerBound])
                         onSentence(sentence)
@@ -315,20 +302,18 @@ class CookingSessionManager: ObservableObject, TimerManager {
         )
     }
 
+    private static let ingredientRegexes: [NSRegularExpression] = [
+        (try? NSRegularExpression(pattern: "([0-9]+\\.?[0-9]*\\/[0-9]+)\\s+(\\w+)", options: []))!,
+        (try? NSRegularExpression(pattern: "([0-9]+\\.?[0-9]*)\\s+(\\w+)", options: []))!
+    ]
+
     private func scaleIngredient(_ ingredient: String, multiplier: Float) -> String {
         if multiplier == 1.0 {
             return ingredient
         }
 
-        // Common patterns for numbers in ingredients
-        let patterns = [
-            "([0-9]+\\.?[0-9]*\\/[0-9]+)\\s+(\\w+)",  // "1/2 teaspoon"
-            "([0-9]+\\.?[0-9]*)\\s+(\\w+)"           // "2 cups", "1.5 pounds"
-        ]
-
-        for pattern in patterns {
-            if let regex = try? NSRegularExpression(pattern: pattern, options: []),
-               let match = regex.firstMatch(in: ingredient, options: [], range: NSRange(location: 0, length: ingredient.count)) {
+        for regex in Self.ingredientRegexes {
+            if let match = regex.firstMatch(in: ingredient, options: [], range: NSRange(location: 0, length: ingredient.count)) {
 
                 let amountRange = Range(match.range(at: 1), in: ingredient)!
                 let amountStr = String(ingredient[amountRange])
@@ -396,10 +381,7 @@ class CookingSessionManager: ObservableObject, TimerManager {
         )
         localTimers.append(timer)
         print("Set timer: \(name) (\(durationMinutes)min)")
-
-        DispatchQueue.main.async {
-            timer.start()
-        }
+        timer.start()
     }
 
     func startTimer(name: String) {
@@ -459,19 +441,8 @@ class CookingSessionManager: ObservableObject, TimerManager {
     }
 
     private func findTimerIndex(named name: String) -> Int? {
-        let query = name.lowercased()
-        if let index = localTimers.firstIndex(where: { $0.label.lowercased() == query }) {
-            return index
-        }
-        if let index = localTimers.firstIndex(where: {
-            $0.label.lowercased().contains(query) || query.contains($0.label.lowercased())
-        }) {
-            return index
-        }
-        if localTimers.count == 1 {
-            return 0
-        }
-        return nil
+        guard let timer = findTimer(named: name) else { return nil }
+        return localTimers.firstIndex(where: { $0.id == timer.id })
     }
 
     func getAllTimers() -> [LocalTimer] {

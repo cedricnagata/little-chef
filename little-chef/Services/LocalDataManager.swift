@@ -180,11 +180,11 @@ class LocalDataManager: ObservableObject {
 
     /// Delete multiple recipes
     func deleteRecipes(ids: [UUID]) throws {
-        for id in ids {
-            if let recipe = try fetchRecipe(id: id) {
-                modelContext.delete(recipe)
-            }
-        }
+        let descriptor = FetchDescriptor<RecipeEntity>(
+            predicate: #Predicate { ids.contains($0.id) }
+        )
+        let recipes = try modelContext.fetch(descriptor)
+        recipes.forEach { modelContext.delete($0) }
         try modelContext.save()
     }
 
@@ -259,33 +259,24 @@ class LocalDataManager: ObservableObject {
 
     /// Get total recipe count
     func getRecipeCount() throws -> Int {
-        return try fetchAllRecipes().count
+        return try modelContext.fetchCount(FetchDescriptor<RecipeEntity>())
     }
 
     /// Get recipes grouped by cuisine type
     func getRecipesByCuisine() throws -> [String: Int] {
-        let allRecipes = try fetchAllRecipes()
-        var cuisineCounts: [String: Int] = [:]
-
-        for recipe in allRecipes {
-            let cuisine = recipe.cuisineType ?? "Unknown"
-            cuisineCounts[cuisine, default: 0] += 1
-        }
-
-        return cuisineCounts
+        try groupRecipes(by: \.cuisineType)
     }
 
     /// Get recipes grouped by difficulty
     func getRecipesByDifficulty() throws -> [String: Int] {
+        try groupRecipes(by: \.difficulty)
+    }
+
+    private func groupRecipes(by keyPath: KeyPath<RecipeEntity, String?>) throws -> [String: Int] {
         let allRecipes = try fetchAllRecipes()
-        var difficultyCounts: [String: Int] = [:]
-
-        for recipe in allRecipes {
-            let difficulty = recipe.difficulty ?? "Unknown"
-            difficultyCounts[difficulty, default: 0] += 1
+        return allRecipes.reduce(into: [:]) { counts, recipe in
+            counts[recipe[keyPath: keyPath] ?? "Unknown", default: 0] += 1
         }
-
-        return difficultyCounts
     }
 }
 

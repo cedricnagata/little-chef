@@ -283,26 +283,26 @@ class VoiceAssistant: NSObject, ObservableObject {
         self.voiceSettings = settings
     }
 
-    func speak(_ text: String) {
-        guard !text.isEmpty else { return }
-
-        synthesizer.stopSpeaking(at: .immediate)
-
-        // Activate for speaking — routes through BT and ducks music
-        activateForSpeaking()
-
+    private func configuredUtterance(for text: String) -> AVSpeechUtterance {
         let utterance = AVSpeechUtterance(string: text)
-
-        if let voiceSettings = voiceSettings {
+        if let voiceSettings {
             utterance.rate = voiceSettings.speechRate
             utterance.voice = AVSpeechSynthesisVoice(identifier: voiceSettings.voiceIdentifier)
         } else {
             utterance.rate = 0.5
             utterance.voice = AVSpeechSynthesisVoice(language: "en-US")
         }
+        return utterance
+    }
+
+    func speak(_ text: String) {
+        guard !text.isEmpty else { return }
+
+        synthesizer.stopSpeaking(at: .immediate)
+        activateForSpeaking()
 
         isSpeaking = true
-        synthesizer.speak(utterance)
+        synthesizer.speak(configuredUtterance(for: text))
     }
 
     func stopSpeaking() {
@@ -333,21 +333,10 @@ class VoiceAssistant: NSObject, ObservableObject {
         isSpeakingFromQueue = true
 
         let sentence = sentenceQueue.removeFirst()
-
-        // Activate for speaking if not already
         activateForSpeaking()
 
-        let utterance = AVSpeechUtterance(string: sentence)
-        if let voiceSettings = voiceSettings {
-            utterance.rate = voiceSettings.speechRate
-            utterance.voice = AVSpeechSynthesisVoice(identifier: voiceSettings.voiceIdentifier)
-        } else {
-            utterance.rate = 0.5
-            utterance.voice = AVSpeechSynthesisVoice(language: "en-US")
-        }
-
         isSpeaking = true
-        synthesizer.speak(utterance)
+        synthesizer.speak(configuredUtterance(for: sentence))
     }
 
     // MARK: - Convenience Methods
@@ -576,9 +565,7 @@ class VoiceAssistant: NSObject, ObservableObject {
     private func scheduleSpeechTimeout() {
         cancelSpeechTimeout()
         let workItem = DispatchWorkItem { [weak self] in
-            DispatchQueue.main.async {
-                self?.handleSpeechTimeout()
-            }
+            self?.handleSpeechTimeout()
         }
         speechTimeoutWorkItem = workItem
         DispatchQueue.main.asyncAfter(deadline: .now() + speechTimeoutInterval, execute: workItem)
