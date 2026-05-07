@@ -194,7 +194,7 @@ struct ProfileSettingsView: View {
             do {
                 let prefs = try LocalDataManager.shared.fetchPreferences().toUserPreferences()
                 await MainActor.run {
-                    let provider: LLMProvider = (!LLMService.deviceSupportsLocalModels && prefs.llmProvider == .local) ? .bigBro : prefs.llmProvider
+                    let provider: LLMProvider = LLMService.deviceSupportsLocalModels ? .local : .bigBro
                     llmProvider = provider
                     speechRate = prefs.voiceSettings.speechRate
                     voiceIdentifier = prefs.voiceSettings.voiceIdentifier

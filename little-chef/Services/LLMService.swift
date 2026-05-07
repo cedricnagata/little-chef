@@ -51,12 +51,9 @@ class LLMService: ObservableObject {
     )
 
     private init() {
-        if let stored = UserDefaults.standard.string(forKey: "little-chef.llm-provider"),
-           let restored = LLMProvider(rawValue: stored) {
-            currentProvider = restored
-        }
-        // Enforce memory gate — low-RAM devices can only use BigBro
-        if !LLMService.deviceSupportsLocalModels && currentProvider == .local {
+        if LLMService.deviceSupportsLocalModels {
+            currentProvider = .local
+        } else {
             currentProvider = .bigBro
         }
         refreshDownloadedModels()
