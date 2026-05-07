@@ -2,7 +2,7 @@
 
 A hands-free iOS cooking assistant powered by on-device LLM inference and voice interaction. Transform any recipe into an interactive cooking companion that provides intelligent assistance while your hands are busy.
 
-Available on TestFlight: https://testflight.apple.com/join/PFrfk3WY
+Available on [TestFlight](https://testflight.apple.com/join/Rz11FzNk)
 
 ## Features
 
