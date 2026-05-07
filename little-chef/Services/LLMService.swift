@@ -18,8 +18,13 @@ import BigBroKit
 class LLMService: ObservableObject {
     static let shared = LLMService()
 
-    static let deviceSupportsLocalModels: Bool =
-        ProcessInfo.processInfo.physicalMemory >= 6 * 1_024 * 1_024 * 1_024
+    static let deviceSupportsLocalModels: Bool = {
+        #if DEBUG
+        return true
+        #else
+        return ProcessInfo.processInfo.physicalMemory >= 6 * 1_024 * 1_024 * 1_024
+        #endif
+    }()
 
     // MARK: - Published State
     @Published var isLoaded = false

@@ -16,6 +16,10 @@ struct BigBroPairingView: View {
 
     var body: some View {
         Group {
+            if client.pairedDeviceNames.isEmpty && !client.isConnected {
+                bigBroSetupInstructions
+            }
+
             // Connection status row
             HStack(spacing: 10) {
                 Circle()
@@ -141,6 +145,43 @@ struct BigBroPairingView: View {
         }
     }
 
+    // MARK: - Setup Instructions
+
+    private var bigBroSetupInstructions: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Label("What is BigBro?", systemImage: "desktopcomputer")
+                .font(.subheadline)
+                .fontWeight(.semibold)
+
+            Text("BigBro is a free Mac app that runs an AI model locally on your Mac and shares it with LittleChef over Wi-Fi. This lets any iPhone use the cooking assistant without downloading a model on-device.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
+            VStack(alignment: .leading, spacing: 8) {
+                SetupStep(number: 1, text: "Download and install BigBro on your Mac")
+                SetupStep(number: 2, text: "Open BigBro — it will download the model automatically")
+                SetupStep(number: 3, text: "Make sure your iPhone and Mac are on the same Wi-Fi network")
+                SetupStep(number: 4, text: "Tap \"Find Devices\" below and select your Mac")
+                SetupStep(number: 5, text: "Approve the connection request on your Mac")
+            }
+
+            Link(destination: URL(string: "https://www.cedricnagata.com/projects#bigbro")!) {
+                HStack(spacing: 6) {
+                    Image(systemName: "arrow.down.circle.fill")
+                    Text("Download BigBro for Mac")
+                        .fontWeight(.medium)
+                }
+                .font(.caption)
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 8)
+                .background(Color.orange.opacity(0.15))
+                .foregroundStyle(.orange)
+                .clipShape(RoundedRectangle(cornerRadius: 8))
+            }
+        }
+        .padding(.vertical, 4)
+    }
+
     // MARK: - Actions
 
     private func startDiscovery() async {
@@ -168,6 +209,29 @@ struct BigBroPairingView: View {
             self.error = error.localizedDescription
         }
         isPairing = false
+    }
+}
+
+// MARK: - Setup Step
+
+private struct SetupStep: View {
+    let number: Int
+    let text: String
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 10) {
+            Text("\(number)")
+                .font(.caption2)
+                .fontWeight(.bold)
+                .foregroundStyle(.white)
+                .frame(width: 18, height: 18)
+                .background(Color.orange)
+                .clipShape(Circle())
+            Text(text)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
     }
 }
 
