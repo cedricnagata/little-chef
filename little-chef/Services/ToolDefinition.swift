@@ -12,7 +12,7 @@ import Tokenizers
 
 @MainActor
 protocol TimerManager {
-    func setTimer(name: String, durationMinutes: Int)
+    func setTimer(name: String, durationSeconds: Int)
     func startTimer(name: String)
     func pauseTimer(name: String)
     func deleteTimer(name: String)
@@ -32,14 +32,15 @@ struct CookingTools {
                 "type": "function",
                 "function": [
                     "name": "set_timer",
-                    "description": "Set a new cooking timer with a name and duration in minutes",
+                    "description": "Set a new cooking timer with a name and duration. Provide minutes, seconds, or both (e.g. 30s → seconds:30, 1m30s → minutes:1 seconds:30).",
                     "parameters": [
                         "type": "object",
                         "properties": [
                             "name": ["type": "string", "description": "Timer label e.g. pasta, chicken"] as [String: any Sendable],
-                            "minutes": ["type": "integer", "description": "Duration in minutes"] as [String: any Sendable]
+                            "minutes": ["type": "integer", "description": "Whole minutes (omit or 0 if under a minute)"] as [String: any Sendable],
+                            "seconds": ["type": "integer", "description": "Additional seconds 0-59"] as [String: any Sendable]
                         ] as [String: any Sendable],
-                        "required": ["name", "minutes"]
+                        "required": ["name"]
                     ] as [String: any Sendable]
                 ] as [String: any Sendable]
             ] as ToolSpec,
@@ -96,16 +97,21 @@ struct CookingTools {
             guard let name = arguments["name"] as? String else {
                 return "Error: missing 'name'"
             }
-            let minutes: Int
-            if let m = arguments["minutes"] as? Int {
-                minutes = m
-            } else if let m = arguments["minutes"] as? Double {
-                minutes = Int(m)
-            } else {
-                return "Error: missing 'minutes'"
+            func toInt(_ v: Any?) -> Int {
+                if let i = v as? Int { return i }
+                if let d = v as? Double { return Int(d) }
+                return 0
             }
-            timerManager.setTimer(name: name, durationMinutes: minutes)
-            return "Timer '\(name)' set for \(minutes) minutes."
+            let minutes = toInt(arguments["minutes"])
+            let seconds = toInt(arguments["seconds"])
+            let totalSeconds = minutes * 60 + seconds
+            guard totalSeconds > 0 else {
+                return "Error: duration must be greater than 0"
+            }
+            timerManager.setTimer(name: name, durationSeconds: totalSeconds)
+            let label = minutes > 0 && seconds > 0 ? "\(minutes)m \(seconds)s"
+                      : minutes > 0 ? "\(minutes)m" : "\(seconds)s"
+            return "Timer '\(name)' set for \(label)."
 
         case "start_timer":
             guard let name = arguments["name"] as? String else {

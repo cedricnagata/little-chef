@@ -68,6 +68,8 @@ class CookingSessionManager: ObservableObject, TimerManager {
     }
 
     private func clearAllTimers() {
+        TimerNotificationManager.shared.cancelAllNotifications()
+        localTimers.forEach { $0.stopLiveActivity() }
         localTimers.removeAll()
         print("🗑️ Cleared all timers")
     }
@@ -361,16 +363,12 @@ class CookingSessionManager: ObservableObject, TimerManager {
 
     // MARK: - TimerManager Protocol Implementation
 
-    func setTimer(name: String, durationMinutes: Int) {
-        // Check if timer with this name already exists
+    func setTimer(name: String, durationSeconds: Int) {
         if findTimer(named: name) != nil {
             print("Timer '\(name)' already exists, not creating duplicate")
             return
         }
-
         let timerId = UUID().uuidString
-        let durationSeconds = durationMinutes * 60
-
         let timer = LocalTimer(
             id: timerId,
             label: name,
@@ -380,7 +378,7 @@ class CookingSessionManager: ObservableObject, TimerManager {
             createdAt: Date()
         )
         localTimers.append(timer)
-        print("Set timer: \(name) (\(durationMinutes)min)")
+        print("Set timer: \(name) (\(durationSeconds)s)")
         timer.start()
     }
 
@@ -404,12 +402,12 @@ class CookingSessionManager: ObservableObject, TimerManager {
 
     func deleteTimer(name: String) {
         if let index = findTimerIndex(named: name) {
-            localTimers[index].pause()
+            localTimers[index].stopLiveActivity()
             localTimers.remove(at: index)
         } else {
             // Fallback: if only one timer exists, delete it
             if localTimers.count == 1 {
-                localTimers[0].pause()
+                localTimers[0].stopLiveActivity()
                 localTimers.removeAll()
             }
         }
@@ -451,13 +449,23 @@ class CookingSessionManager: ObservableObject, TimerManager {
 
     // MARK: - Manual Timer Management (for UI)
 
-    func addManualTimer(label: String, durationMinutes: Int) {
-        setTimer(name: label, durationMinutes: durationMinutes)
+    func addManualTimer(label: String, durationSeconds: Int) {
+        if findTimer(named: label) != nil {
+            print("Timer '\(label)' already exists, not creating duplicate")
+            return
+        }
+        let timerId = UUID().uuidString
+        let timer = LocalTimer(
+            id: timerId, label: label, durationSeconds: durationSeconds,
+            remainingSeconds: durationSeconds, status: .new, createdAt: Date())
+        localTimers.append(timer)
+        timer.start()
     }
 
     func deleteManualTimer(id: String) {
         if let timerIndex = localTimers.firstIndex(where: { $0.id == id }) {
             let timer = localTimers[timerIndex]
+            timer.stopLiveActivity()
             localTimers.remove(at: timerIndex)
             print("🗑️ Manually deleted timer: \(timer.label)")
         }

@@ -123,6 +123,9 @@ struct ActiveCookingView: View {
         }
         .ignoresSafeArea(.container, edges: .bottom)
         .animation(.easeInOut(duration: 0.3), value: isRecipeExpanded)
+        .onReceive(NotificationCenter.default.publisher(for: .timerNotificationTapped)) { _ in
+            isRecipeExpanded = true
+        }
         .alert("End Cooking Session", isPresented: $showingEndSessionAlert) {
             Button("Cancel", role: .cancel) { }
             Button("End", role: .destructive) {
@@ -348,8 +351,8 @@ struct RecipeDetailsView: View {
                 .padding()
             }
             .sheet(isPresented: $showingAddTimer) {
-                AddTimerView { label, minutes in
-                    cookingSessionManager.addManualTimer(label: label, durationMinutes: minutes)
+                AddTimerView { label, seconds in
+                    cookingSessionManager.addManualTimer(label: label, durationSeconds: seconds)
                 }
             }
         }

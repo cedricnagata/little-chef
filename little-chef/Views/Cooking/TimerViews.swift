@@ -208,9 +208,8 @@ struct AddTimerView: View {
         (selectedMinutes > 0 || selectedSeconds > 0)
     }
 
-    private var totalMinutes: Int {
-        let totalSeconds = selectedMinutes * 60 + selectedSeconds
-        return max(1, (totalSeconds + 59) / 60)
+    private var totalSeconds: Int {
+        selectedMinutes * 60 + selectedSeconds
     }
 
     private var formattedDuration: String {
@@ -229,7 +228,7 @@ struct AddTimerView: View {
 
     private func addTimer() {
         let label = timerLabel.trimmingCharacters(in: .whitespacesAndNewlines)
-        onAdd(label, totalMinutes)
+        onAdd(label, totalSeconds)
         dismiss()
     }
 }
