@@ -116,7 +116,7 @@ struct ProfileSettingsView: View {
         if !LLMService.deviceSupportsLocalModels {
             Text("On-Device requires 6 GB of memory. This device supports BigBro only.")
         } else if llmProvider == .local {
-            Text("On-device inference. Bonsai 8B is used for recipe parsing; your selected model handles cooking assistance.")
+            Text("On-device inference. Bonsai 8B handles both recipe parsing and cooking assistance.")
         } else {
             Text("Routes all inference through your paired BigBro Mac. Tools are always available. No downloads required.")
         }
@@ -126,8 +126,7 @@ struct ProfileSettingsView: View {
 
     @ViewBuilder
     private var localModelSection: some View {
-        modelRow(for: .bonsai8B, usage: "Recipe parsing")
-        modelRow(for: .bonsai4B, usage: "Cooking assistant")
+        modelRow(for: .bonsai8B, usage: "Recipe parsing & cooking assistant")
 
         if let error = llmService.loadError {
             Text(error)

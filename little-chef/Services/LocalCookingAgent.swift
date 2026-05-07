@@ -56,7 +56,7 @@ class LocalCookingAgent: ObservableObject {
         let response = try await llmService.generateChatCompletion(
             messages: messages,
             tools: cookingTools,
-            modelId: llmService.currentProvider == .local ? CookingModelChoice.bonsai4B.modelId : nil
+            modelId: llmService.currentProvider == .local ? CookingModelChoice.bonsai8B.modelId : nil
         )
 
         conversationHistory.append(ChatMessage(role: .user, content: userMessage))
@@ -95,7 +95,7 @@ class LocalCookingAgent: ObservableObject {
         let response = try await llmService.generateChatCompletionStreaming(
             messages: messages,
             tools: cookingTools,
-            modelId: llmService.currentProvider == .local ? CookingModelChoice.bonsai4B.modelId : nil,
+            modelId: llmService.currentProvider == .local ? CookingModelChoice.bonsai8B.modelId : nil,
             onChunk: onChunk
         )
 
