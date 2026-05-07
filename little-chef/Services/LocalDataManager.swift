@@ -8,9 +8,8 @@
 import Foundation
 import SwiftData
 
-/// Manages all local data operations for recipes and user preferences.
-/// Recipes sync to iCloud via SwiftData + CloudKit.
-/// Singleton to avoid multiple CloudKit sync handlers.
+/// Manages local data persistence for recipes and user preferences.
+/// Both sync to the user's private iCloud database via SwiftData + CloudKit.
 @MainActor
 class LocalDataManager: ObservableObject {
     static let shared: LocalDataManager = {
@@ -35,7 +34,6 @@ class LocalDataManager: ObservableObject {
             UserPreferencesEntity.self
         ])
 
-        // Enable CloudKit sync for the private iCloud database
         let modelConfiguration = ModelConfiguration(
             schema: schema,
             isStoredInMemoryOnly: false,
@@ -50,7 +48,7 @@ class LocalDataManager: ObservableObject {
             throw error
         }
 
-        // Listen for remote CloudKit changes
+        // Reload when a remote CloudKit change arrives from another device
         NotificationCenter.default.addObserver(
             forName: NSNotification.Name.NSPersistentStoreRemoteChange,
             object: nil,
