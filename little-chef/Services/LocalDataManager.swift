@@ -44,7 +44,7 @@ class LocalDataManager: ObservableObject {
             modelContainer = try ModelContainer(for: schema, configurations: [modelConfiguration])
             modelContext = ModelContext(modelContainer)
         } catch {
-            print("Failed to create ModelContainer: \(error)")
+            dprint("Failed to create ModelContainer: \(error)")
             throw error
         }
 

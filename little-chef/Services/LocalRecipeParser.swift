@@ -40,13 +40,13 @@ class LocalRecipeParser: ObservableObject {
             statusMessage = ""
         }
 
-        print("📖 [PARSER] Parsing URL: \(url)")
+        dprint("📖 [PARSER] Parsing URL: \(url)")
         let webContent: String
         do {
             webContent = try await webScraper.scrapeRecipe(from: url)
-            print("📖 [PARSER] Scraped content length: \(webContent.count) chars")
+            dprint("📖 [PARSER] Scraped content length: \(webContent.count) chars")
         } catch {
-            print("📖 [PARSER] ❌ Scraping failed: \(error.localizedDescription)")
+            dprint("📖 [PARSER] ❌ Scraping failed: \(error.localizedDescription)")
             throw error
         }
         progress = 0.3
@@ -56,13 +56,13 @@ class LocalRecipeParser: ObservableObject {
 
         if webContent.hasPrefix("Schema.org Recipe JSON:"),
            let parsed = try? parseSchemaOrgRecipe(from: webContent, sourceUrl: url) {
-            print("📖 [PARSER] ✅ Parsed from schema.org")
+            dprint("📖 [PARSER] ✅ Parsed from schema.org")
             recipeData = parsed
 
             // Only run LLM if something is missing
             let (confidence, _) = evaluateRecipe(recipeData)
             if confidence < 1.0 {
-                print("📖 [PARSER] Schema.org incomplete (confidence \(confidence)), running LLM cleanup")
+                dprint("📖 [PARSER] Schema.org incomplete (confidence \(confidence)), running LLM cleanup")
                 statusMessage = "Filling in missing details..."
                 if let cleaned = try? await cleanupWithLLM(schema: recipeData, sourceUrl: url) {
                     recipeData = cleaned
@@ -70,18 +70,18 @@ class LocalRecipeParser: ObservableObject {
             }
         } else {
             // No schema.org — full LLM parse with higher token limit
-            print("📖 [PARSER] No schema.org data, falling back to LLM")
+            dprint("📖 [PARSER] No schema.org data, falling back to LLM")
             statusMessage = "Analyzing recipe with AI..."
             recipeData = try await parseWithLLM(text: webContent, sourceUrl: url, maxTokens: 4096)
         }
 
-        print("📖 [PARSER] ✅ Parsed recipe: \(recipeData.title)")
-        print("📖 [PARSER]   Ingredients: \(recipeData.ingredients.count), Steps: \(recipeData.instructions.count)")
-        print("📖 [PARSER]   Prep: \(recipeData.prepTime?.description ?? "nil"), Cook: \(recipeData.cookTime?.description ?? "nil")")
+        dprint("📖 [PARSER] ✅ Parsed recipe: \(recipeData.title)")
+        dprint("📖 [PARSER]   Ingredients: \(recipeData.ingredients.count), Steps: \(recipeData.instructions.count)")
+        dprint("📖 [PARSER]   Prep: \(recipeData.prepTime?.description ?? "nil"), Cook: \(recipeData.cookTime?.description ?? "nil")")
         progress = 1.0
 
         let (confidence, warnings) = evaluateRecipe(recipeData)
-        print("📖 [PARSER] Confidence: \(confidence), Warnings: \(warnings)")
+        dprint("📖 [PARSER] Confidence: \(confidence), Warnings: \(warnings)")
         return RecipeParseResponse(recipe: recipeData, confidence: confidence, warnings: warnings)
     }
 
@@ -159,14 +159,14 @@ class LocalRecipeParser: ObservableObject {
             maxTokens: maxTokens
         )
 
-        print("📖 [PARSER] LLM raw response (\(response.count) chars):\n\(response.prefix(1000))")
+        dprint("📖 [PARSER] LLM raw response (\(response.count) chars):\n\(response.prefix(1000))")
 
         var recipeData: RecipeData
         do {
             recipeData = try Self.parseRecipeJSON(from: response)
         } catch {
-            print("📖 [PARSER] ❌ JSON parse failed: \(error)")
-            print("📖 [PARSER] Full response was:\n\(response)")
+            dprint("📖 [PARSER] ❌ JSON parse failed: \(error)")
+            dprint("📖 [PARSER] Full response was:\n\(response)")
             throw error
         }
 
@@ -192,15 +192,15 @@ class LocalRecipeParser: ObservableObject {
     static func parseRecipeJSON(from response: String) throws -> RecipeData {
         let trimmed = response.trimmingCharacters(in: .whitespacesAndNewlines)
         if trimmed.isEmpty {
-            print("📖 [PARSER] ❌ JSON parse: empty response")
+            dprint("📖 [PARSER] ❌ JSON parse: empty response")
             throw RecipeParserError.invalidJSONResponse
         }
 
         // Find JSON in response
         guard let jsonStart = response.firstIndex(of: "{"),
               let jsonEnd = response.lastIndex(of: "}") else {
-            print("📖 [PARSER] ❌ JSON parse: no '{' or '}' found in response (\(response.count) chars)")
-            print("📖 [PARSER]   first 200 chars: \(response.prefix(200))")
+            dprint("📖 [PARSER] ❌ JSON parse: no '{' or '}' found in response (\(response.count) chars)")
+            dprint("📖 [PARSER]   first 200 chars: \(response.prefix(200))")
             throw RecipeParserError.invalidJSONResponse
         }
 
@@ -213,11 +213,11 @@ class LocalRecipeParser: ObservableObject {
             .replacingOccurrences(of: ",\\s*]", with: "]", options: .regularExpression)  // trailing commas in arrays
 
         if jsonString.count != preStripLen {
-            print("📖 [PARSER] Fixed trailing-comma issues (\(preStripLen) → \(jsonString.count) chars)")
+            dprint("📖 [PARSER] Fixed trailing-comma issues (\(preStripLen) → \(jsonString.count) chars)")
         }
 
         guard let jsonData = jsonString.data(using: .utf8) else {
-            print("📖 [PARSER] ❌ JSON parse: failed to encode JSON string as UTF-8")
+            dprint("📖 [PARSER] ❌ JSON parse: failed to encode JSON string as UTF-8")
             throw RecipeParserError.invalidJSONResponse
         }
 
@@ -225,7 +225,7 @@ class LocalRecipeParser: ObservableObject {
 
         do {
             var recipe = try decoder.decode(RecipeData.self, from: jsonData)
-            print("📖 [PARSER] ✅ Decoded RecipeData: title='\(recipe.title)', ingr=\(recipe.ingredients.count), steps=\(recipe.instructions.count)")
+            dprint("📖 [PARSER] ✅ Decoded RecipeData: title='\(recipe.title)', ingr=\(recipe.ingredients.count), steps=\(recipe.instructions.count)")
             // Strip numbered prefixes like "1. ", "Step 1: ", "1: " from instructions
             recipe = RecipeData(
                 title: recipe.title,
@@ -248,24 +248,24 @@ class LocalRecipeParser: ObservableObject {
             )
             return recipe
         } catch let DecodingError.keyNotFound(key, ctx) {
-            print("📖 [PARSER] ❌ JSON missing required key '\(key.stringValue)' at \(ctx.codingPath.map { $0.stringValue }.joined(separator: "."))")
-            print("📖 [PARSER]   JSON was: \(jsonString.prefix(500))")
+            dprint("📖 [PARSER] ❌ JSON missing required key '\(key.stringValue)' at \(ctx.codingPath.map { $0.stringValue }.joined(separator: "."))")
+            dprint("📖 [PARSER]   JSON was: \(jsonString.prefix(500))")
             throw RecipeParserError.invalidJSONResponse
         } catch let DecodingError.typeMismatch(type, ctx) {
-            print("📖 [PARSER] ❌ JSON type mismatch: expected \(type) at \(ctx.codingPath.map { $0.stringValue }.joined(separator: "."))")
-            print("📖 [PARSER]   JSON was: \(jsonString.prefix(500))")
+            dprint("📖 [PARSER] ❌ JSON type mismatch: expected \(type) at \(ctx.codingPath.map { $0.stringValue }.joined(separator: "."))")
+            dprint("📖 [PARSER]   JSON was: \(jsonString.prefix(500))")
             throw RecipeParserError.invalidJSONResponse
         } catch let DecodingError.valueNotFound(type, ctx) {
-            print("📖 [PARSER] ❌ JSON value missing for \(type) at \(ctx.codingPath.map { $0.stringValue }.joined(separator: "."))")
-            print("📖 [PARSER]   JSON was: \(jsonString.prefix(500))")
+            dprint("📖 [PARSER] ❌ JSON value missing for \(type) at \(ctx.codingPath.map { $0.stringValue }.joined(separator: "."))")
+            dprint("📖 [PARSER]   JSON was: \(jsonString.prefix(500))")
             throw RecipeParserError.invalidJSONResponse
         } catch let DecodingError.dataCorrupted(ctx) {
-            print("📖 [PARSER] ❌ JSON data corrupted at \(ctx.codingPath.map { $0.stringValue }.joined(separator: ".")): \(ctx.debugDescription)")
-            print("📖 [PARSER]   JSON was: \(jsonString.prefix(500))")
+            dprint("📖 [PARSER] ❌ JSON data corrupted at \(ctx.codingPath.map { $0.stringValue }.joined(separator: ".")): \(ctx.debugDescription)")
+            dprint("📖 [PARSER]   JSON was: \(jsonString.prefix(500))")
             throw RecipeParserError.invalidJSONResponse
         } catch {
-            print("📖 [PARSER] ❌ JSON decoding failed: \(error)")
-            print("📖 [PARSER]   JSON was: \(jsonString.prefix(500))")
+            dprint("📖 [PARSER] ❌ JSON decoding failed: \(error)")
+            dprint("📖 [PARSER]   JSON was: \(jsonString.prefix(500))")
             throw RecipeParserError.invalidJSONResponse
         }
     }
@@ -325,7 +325,7 @@ class LocalRecipeParser: ObservableObject {
             maxTokens: 4096
         )
 
-        print("📖 [PARSER] LLM cleanup response (\(response.count) chars):\n\(response.prefix(500))")
+        dprint("📖 [PARSER] LLM cleanup response (\(response.count) chars):\n\(response.prefix(500))")
 
         var cleaned = try Self.parseRecipeJSON(from: response)
 

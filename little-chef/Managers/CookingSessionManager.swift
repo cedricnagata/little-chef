@@ -37,7 +37,7 @@ class CookingSessionManager: ObservableObject, TimerManager {
         currentSession = CookingSession(recipe: recipeBase, userPreferences: preferences)
 
         error = nil
-        print("🔵 Started new cooking session locally (model will load on page)")
+        dprint("🔵 Started new cooking session locally (model will load on page)")
     }
 
     func initAgentForSession() {
@@ -52,7 +52,7 @@ class CookingSessionManager: ObservableObject, TimerManager {
 
                 return UserPreferencesDetailed(from: localPrefs)
         } catch {
-            print("⚠️ Failed to load preferences, using defaults: \(error)")
+            dprint("⚠️ Failed to load preferences, using defaults: \(error)")
             return UserPreferencesDetailed()
         }
     }
@@ -64,14 +64,14 @@ class CookingSessionManager: ObservableObject, TimerManager {
         cookingAgent = nil
         clearAllTimers()
 
-        print("🔴 Ended cooking session and reset state")
+        dprint("🔴 Ended cooking session and reset state")
     }
 
     private func clearAllTimers() {
         TimerNotificationManager.shared.cancelAllNotifications()
         localTimers.forEach { $0.stopLiveActivity() }
         localTimers.removeAll()
-        print("🗑️ Cleared all timers")
+        dprint("🗑️ Cleared all timers")
     }
 
     // MARK: - Agent Communication
@@ -111,7 +111,7 @@ class CookingSessionManager: ObservableObject, TimerManager {
 
         } catch {
             self.error = "Failed to get response: \(error.localizedDescription)"
-            print("Agent query error: \(error)")
+            dprint("Agent query error: \(error)")
         }
 
         isLoading = false
@@ -197,7 +197,7 @@ class CookingSessionManager: ObservableObject, TimerManager {
 
         } catch {
             self.error = "Failed to get response: \(error.localizedDescription)"
-            print("Agent query error: \(error)")
+            dprint("Agent query error: \(error)")
 
             // Remove the empty placeholder on error
             if let index = currentSession?.conversationHistory.firstIndex(where: { $0.id == assistantMessageId }) {
@@ -268,7 +268,7 @@ class CookingSessionManager: ObservableObject, TimerManager {
             startedAt: session.startedAt
         )
 
-        print("🔄 Updated servings from \(originalServings) to \(newServings) (multiplier: \(multiplier))")
+        dprint("🔄 Updated servings from \(originalServings) to \(newServings) (multiplier: \(multiplier))")
     }
 
     func getCurrentServings() -> Int {
@@ -365,7 +365,7 @@ class CookingSessionManager: ObservableObject, TimerManager {
 
     func setTimer(name: String, durationSeconds: Int) {
         if findTimer(named: name) != nil {
-            print("Timer '\(name)' already exists, not creating duplicate")
+            dprint("Timer '\(name)' already exists, not creating duplicate")
             return
         }
         let timerId = UUID().uuidString
@@ -378,7 +378,7 @@ class CookingSessionManager: ObservableObject, TimerManager {
             createdAt: Date()
         )
         localTimers.append(timer)
-        print("Set timer: \(name) (\(durationSeconds)s)")
+        dprint("Set timer: \(name) (\(durationSeconds)s)")
         timer.start()
     }
 
@@ -388,7 +388,7 @@ class CookingSessionManager: ObservableObject, TimerManager {
                 self?.localTimers[index].start()
             }
         } else {
-            print("Timer '\(name)' not found")
+            dprint("Timer '\(name)' not found")
         }
     }
 
@@ -396,7 +396,7 @@ class CookingSessionManager: ObservableObject, TimerManager {
         if let index = findTimerIndex(named: name) {
             localTimers[index].pause()
         } else {
-            print("Timer '\(name)' not found")
+            dprint("Timer '\(name)' not found")
         }
     }
 
@@ -420,7 +420,7 @@ class CookingSessionManager: ObservableObject, TimerManager {
     /// Fuzzy match a timer by name — handles the model using slightly different names
     private func findTimer(named name: String) -> LocalTimer? {
         let query = name.lowercased()
-        print("=== FIND TIMER: query='\(query)', existing timers: \(localTimers.map { "'\($0.label)'" }) ===")
+        dprint("=== FIND TIMER: query='\(query)', existing timers: \(localTimers.map { "'\($0.label)'" }) ===")
         // Exact match first
         if let timer = localTimers.first(where: { $0.label.lowercased() == query }) {
             return timer
@@ -451,7 +451,7 @@ class CookingSessionManager: ObservableObject, TimerManager {
 
     func addManualTimer(label: String, durationSeconds: Int) {
         if findTimer(named: label) != nil {
-            print("Timer '\(label)' already exists, not creating duplicate")
+            dprint("Timer '\(label)' already exists, not creating duplicate")
             return
         }
         let timerId = UUID().uuidString
@@ -467,7 +467,7 @@ class CookingSessionManager: ObservableObject, TimerManager {
             let timer = localTimers[timerIndex]
             timer.stopLiveActivity()
             localTimers.remove(at: timerIndex)
-            print("🗑️ Manually deleted timer: \(timer.label)")
+            dprint("🗑️ Manually deleted timer: \(timer.label)")
         }
     }
 }

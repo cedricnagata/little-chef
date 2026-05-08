@@ -438,7 +438,7 @@ struct RecipeDetailView: View {
     private func updateRecipe(_ updatedRecipe: RecipeData) async {
         let success = await recipeManager.updateRecipe(id: recipe.id, with: updatedRecipe)
         if !success {
-            print("Failed to update recipe: \(recipeManager.errorMessage ?? "Unknown error")")
+            dprint("Failed to update recipe: \(recipeManager.errorMessage ?? "Unknown error")")
         }
     }
 }

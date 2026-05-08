@@ -29,7 +29,7 @@ final class TimerNotificationManager {
 
         UNUserNotificationCenter.current().removePendingNotificationRequests(withIdentifiers: [timerId])
         UNUserNotificationCenter.current().add(request) { error in
-            if let error { print("Timer notification schedule error: \(error)") }
+            if let error { dprint("Timer notification schedule error: \(error)") }
         }
     }
 

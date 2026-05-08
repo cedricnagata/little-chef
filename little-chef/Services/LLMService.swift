@@ -78,12 +78,12 @@ class LLMService: ObservableObject {
         let id = modelId ?? CookingModelChoice.bonsai8B.modelId
 
         if let container = modelContainers[id] {
-            print("🤖 [LLM] Model \(id) already loaded, returning cached container")
+            dprint("🤖 [LLM] Model \(id) already loaded, returning cached container")
             return container
         }
 
         guard currentlyLoadingModelId != id else {
-            print("🤖 [LLM] Model \(id) already loading, waiting...")
+            dprint("🤖 [LLM] Model \(id) already loading, waiting...")
             while currentlyLoadingModelId == id {
                 try await Task.sleep(nanoseconds: 100_000_000)
             }
@@ -93,12 +93,12 @@ class LLMService: ObservableObject {
 
         // Unload any other model first — only one model in memory at a time
         for existingId in modelContainers.keys where existingId != id {
-            print("🤖 [LLM] Unloading \(existingId) before loading \(id)")
+            dprint("🤖 [LLM] Unloading \(existingId) before loading \(id)")
             modelContainers.removeValue(forKey: existingId)
         }
         MLX.Memory.clearCache()
 
-        print("🤖 [LLM] Starting model load for \(id)...")
+        dprint("🤖 [LLM] Starting model load for \(id)...")
         currentlyLoadingModelId = id
         isLoadingModel = true
         loadProgress = 0.0
@@ -109,19 +109,19 @@ class LLMService: ObservableObject {
         let config = ModelConfiguration(id: id, defaultPrompt: "You are a helpful assistant.")
 
         do {
-            print("🤖 [LLM] Calling LLMModelFactory.loadContainer for \(id)...")
+            dprint("🤖 [LLM] Calling LLMModelFactory.loadContainer for \(id)...")
             let container = try await LLMModelFactory.shared.loadContainer(
                 configuration: config
             ) { progress in
                 Task { @MainActor in
                     self.loadProgress = progress.fractionCompleted
                     if Int(progress.fractionCompleted * 100) % 25 == 0 {
-                        print("🤖 [LLM] Download progress: \(Int(progress.fractionCompleted * 100))%")
+                        dprint("🤖 [LLM] Download progress: \(Int(progress.fractionCompleted * 100))%")
                     }
                 }
             }
 
-            print("🤖 [LLM] ✅ Model \(id) loaded successfully")
+            dprint("🤖 [LLM] ✅ Model \(id) loaded successfully")
             self.modelContainers[id] = container
             isLoaded = true
             loadProgress = 1.0
@@ -130,8 +130,8 @@ class LLMService: ObservableObject {
             refreshDownloadedModels()
             return container
         } catch {
-            print("🤖 [LLM] ❌ Model \(id) load failed: \(error)")
-            print("🤖 [LLM] Error type: \(type(of: error))")
+            dprint("🤖 [LLM] ❌ Model \(id) load failed: \(error)")
+            dprint("🤖 [LLM] Error type: \(type(of: error))")
             loadError = error.localizedDescription
             isLoadingModel = false
             currentlyLoadingModelId = nil
@@ -146,7 +146,7 @@ class LLMService: ObservableObject {
         modelContainers.removeValue(forKey: modelId)
         isLoaded = !modelContainers.isEmpty
         MLX.Memory.clearCache()
-        print("🤖 [LLM] Downloaded \(modelId) to cache, unloaded from memory")
+        dprint("🤖 [LLM] Downloaded \(modelId) to cache, unloaded from memory")
     }
 
     /// Download and load a model into memory (used internally).
@@ -240,15 +240,15 @@ class LLMService: ObservableObject {
                 break
             }
         }
-        print("=== OUTPUT: '\(output.prefix(200))' | TOOL CALLS: \(nativeToolCalls.count) ===")
+        dprint("=== OUTPUT: '\(output.prefix(200))' | TOOL CALLS: \(nativeToolCalls.count) ===")
 
         // Execute native tool calls
         if !nativeToolCalls.isEmpty, let tools {
             var toolResults: [String] = []
             for call in nativeToolCalls {
-                print("=== TOOL CALL: \(call.name), args: \(call.arguments) ===")
+                dprint("=== TOOL CALL: \(call.name), args: \(call.arguments) ===")
                 let result = tools.execute(toolName: call.name, arguments: call.arguments)
-                print("=== TOOL RESULT: \(result) ===")
+                dprint("=== TOOL RESULT: \(result) ===")
                 toolResults.append(result)
             }
             // Combine any text output with tool results
@@ -479,9 +479,9 @@ class LLMService: ObservableObject {
         let format: OllamaFormat? = toolList.isEmpty ? .json : nil
 
         let started = Date()
-        print("🌐 [BigBro] chat → model=\(Self.bigBroModel) msgs=\(messages.count) tools=\(toolList.count) format=\(format == nil ? "free" : "json") temp=\(temperature ?? -1) maxTokens=\(maxTokens ?? -1) connected=\(bigBroClient.isConnected)")
+        dprint("🌐 [BigBro] chat → model=\(Self.bigBroModel) msgs=\(messages.count) tools=\(toolList.count) format=\(format == nil ? "free" : "json") temp=\(temperature ?? -1) maxTokens=\(maxTokens ?? -1) connected=\(bigBroClient.isConnected)")
         if !bigBroClient.missingModels.isEmpty {
-            print("🌐 [BigBro] ⚠️ Missing models on Mac: \(bigBroClient.missingModels)")
+            dprint("🌐 [BigBro] ⚠️ Missing models on Mac: \(bigBroClient.missingModels)")
         }
 
         var output = ""
@@ -504,24 +504,24 @@ class LLMService: ObservableObject {
                 break chatLoop
             } catch let BigBroError.modelDownloading(model, alreadyInProgress) {
                 guard !attemptedDownloadWait else {
-                    print("🌐 [BigBro] ❌ Model still downloading after one wait — bailing out")
+                    dprint("🌐 [BigBro] ❌ Model still downloading after one wait — bailing out")
                     throw LLMError.generationFailed("Model '\(model)' is still downloading. Please try again shortly.")
                 }
                 attemptedDownloadWait = true
-                print("🌐 [BigBro] ⏳ Model '\(model)' downloading on Mac (alreadyInProgress=\(alreadyInProgress)). Waiting…")
+                dprint("🌐 [BigBro] ⏳ Model '\(model)' downloading on Mac (alreadyInProgress=\(alreadyInProgress)). Waiting…")
                 try await waitForModelDownload(model)
-                print("🌐 [BigBro] ✅ Model '\(model)' downloaded — retrying chat")
+                dprint("🌐 [BigBro] ✅ Model '\(model)' downloaded — retrying chat")
             } catch {
-                print("🌐 [BigBro] ❌ chat failed after \(String(format: "%.2f", Date().timeIntervalSince(started)))s: \(error)")
+                dprint("🌐 [BigBro] ❌ chat failed after \(String(format: "%.2f", Date().timeIntervalSince(started)))s: \(error)")
                 throw error
             }
         }
         let elapsed = Date().timeIntervalSince(started)
-        print("🌐 [BigBro] ✅ chat done in \(String(format: "%.2f", elapsed))s, chunks=\(chunkCount), \(output.count) chars")
+        dprint("🌐 [BigBro] ✅ chat done in \(String(format: "%.2f", elapsed))s, chunks=\(chunkCount), \(output.count) chars")
         if output.isEmpty {
-            print("🌐 [BigBro] ⚠️ Empty response from model")
+            dprint("🌐 [BigBro] ⚠️ Empty response from model")
         } else {
-            print("🌐 [BigBro] response preview: \(output.prefix(300))")
+            dprint("🌐 [BigBro] response preview: \(output.prefix(300))")
         }
         return output
     }
@@ -565,7 +565,7 @@ class LLMService: ObservableObject {
                     throw LLMError.generationFailed("Model '\(model)' is still downloading. Please try again shortly.")
                 }
                 attemptedDownloadWait = true
-                print("🌐 [BigBro] ⏳ Model '\(model)' downloading (alreadyInProgress=\(alreadyInProgress))")
+                dprint("🌐 [BigBro] ⏳ Model '\(model)' downloading (alreadyInProgress=\(alreadyInProgress))")
                 onChunk("⏳ Downloading \(model) on your Mac…\n")
                 var lastBucket = -1
                 try await waitForModelDownload(model) { status in

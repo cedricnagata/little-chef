@@ -194,7 +194,7 @@ class VoiceAssistant: NSObject, ObservableObject {
             try AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
             isAudioSessionActive = false
         } catch {
-            print("Audio session deactivation note: \(error.localizedDescription)")
+            dprint("Audio session deactivation note: \(error.localizedDescription)")
         }
     }
 
@@ -204,7 +204,7 @@ class VoiceAssistant: NSObject, ObservableObject {
             try AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
             isAudioSessionActive = false
         } catch {
-            print("Force deactivation note: \(error.localizedDescription)")
+            dprint("Force deactivation note: \(error.localizedDescription)")
         }
     }
 
@@ -395,7 +395,7 @@ class VoiceAssistant: NSObject, ObservableObject {
     /// Restart wake word listening from any state. Safe to call at any time.
     func resumeHandsFreeListening() {
         guard isHandsFreeMode else { return }
-        print("🎤 [HF] resumeHandsFreeListening")
+        dprint("🎤 [HF] resumeHandsFreeListening")
         tearDownAudioEngine()
         forceDeactivateAudioSession()
 
@@ -439,7 +439,7 @@ class VoiceAssistant: NSObject, ObservableObject {
                         let transcript = result.bestTranscription.formattedString.lowercased()
                         for wakeWord in self.wakeWords {
                             if transcript.contains(wakeWord) {
-                                print("🎤 [HF] Wake word detected!")
+                                dprint("🎤 [HF] Wake word detected!")
                                 self.onWakeWordDetected?()
                                 self.transitionToVoiceQuery()
                                 return
@@ -448,7 +448,7 @@ class VoiceAssistant: NSObject, ObservableObject {
                     }
 
                     if let taskError = taskError {
-                        print("🎤 [HF] Wake word task error: \(taskError.localizedDescription)")
+                        dprint("🎤 [HF] Wake word task error: \(taskError.localizedDescription)")
                         // Recognition timed out — restart if still in hands-free
                         self.isWakeWordListening = false
                         if self.isHandsFreeMode && !self.isSpeaking {
@@ -461,16 +461,16 @@ class VoiceAssistant: NSObject, ObservableObject {
             audioEngine.prepare()
             try audioEngine.start()
             isWakeWordListening = true
-            print("🎤 [HF] Wake word listening active")
+            dprint("🎤 [HF] Wake word listening active")
 
         } catch {
-            print("🎤 [HF] Failed to start wake word: \(error)")
+            dprint("🎤 [HF] Failed to start wake word: \(error)")
             self.error = "Failed to start wake word listening: \(error.localizedDescription)"
         }
     }
 
     private func transitionToVoiceQuery() {
-        print("🎤 [HF] Transitioning to voice query")
+        dprint("🎤 [HF] Transitioning to voice query")
         // Fully tear down wake word before starting voice recording
         tearDownAudioEngine()
         playStartListeningSound()
@@ -512,7 +512,7 @@ class VoiceAssistant: NSObject, ObservableObject {
                     }
 
                     if let taskError = taskError {
-                        print("🎤 [HF] Voice query error: \(taskError.localizedDescription)")
+                        dprint("🎤 [HF] Voice query error: \(taskError.localizedDescription)")
                         self.tearDownAudioEngine()
                         self.cancelSpeechTimeout()
                         self.resumeHandsFreeListening()
@@ -547,14 +547,14 @@ class VoiceAssistant: NSObject, ObservableObject {
             return
         }
 
-        print("🎤 [HF] Query: \(query)")
+        dprint("🎤 [HF] Query: \(query)")
         onVoiceQueryReady?(query)
 
         // Safety fallback: if TTS never plays (error, empty response), restart after timeout
         DispatchQueue.main.asyncAfter(deadline: .now() + 10.0) { [weak self] in
             guard let self else { return }
             if self.isHandsFreeMode && !self.isWakeWordListening && !self.isListening && !self.isSpeaking {
-                print("🎤 [HF] Safety fallback: restarting wake word")
+                dprint("🎤 [HF] Safety fallback: restarting wake word")
                 self.resumeHandsFreeListening()
             }
         }
@@ -597,7 +597,7 @@ extension VoiceAssistant: @preconcurrency AVSpeechSynthesizerDelegate {
             if self.sentenceQueue.isEmpty {
                 self.isSpeaking = false
                 if self.isHandsFreeMode {
-                    print("🎤 [HF] TTS finished, resuming wake word")
+                    dprint("🎤 [HF] TTS finished, resuming wake word")
                     self.resumeHandsFreeListening()
                 } else {
                     self.deactivateAudioSession()
@@ -614,7 +614,7 @@ extension VoiceAssistant: @preconcurrency AVSpeechSynthesizerDelegate {
             self.sentenceQueue.removeAll()
             self.isSpeaking = false
             if self.isHandsFreeMode {
-                print("🎤 [HF] TTS cancelled, resuming wake word")
+                dprint("🎤 [HF] TTS cancelled, resuming wake word")
                 self.resumeHandsFreeListening()
             } else {
                 self.deactivateAudioSession()

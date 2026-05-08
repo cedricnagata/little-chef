@@ -2,10 +2,9 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-	<key>LOCAL_API_URL</key>
-	<string>http://localhost:8000</string>
-	
-	<key>PRODUCTION_API_URL</key>
-	<string>https://your-production-api.com</string>
+	<key>com.apple.security.application-groups</key>
+	<array>
+		<string>group.NagataInc.little-chef</string>
+	</array>
 </dict>
 </plist>

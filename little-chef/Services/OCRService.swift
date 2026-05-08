@@ -47,7 +47,7 @@ class OCRService {
                 extractedTexts.append("--- Image \(index + 1) ---\n\(text)")
             } catch {
                 // Continue with other images if one fails
-                print("Failed to extract text from image \(index + 1): \(error)")
+                dprint("Failed to extract text from image \(index + 1): \(error)")
             }
         }
 

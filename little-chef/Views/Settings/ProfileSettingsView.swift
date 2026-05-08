@@ -5,6 +5,7 @@
 
 import SwiftUI
 import AVFoundation
+import Network
 
 struct ProfileSettingsView: View {
     @EnvironmentObject var llmService: LLMService
@@ -16,6 +17,14 @@ struct ProfileSettingsView: View {
     @State private var showingDeleteAlert = false
     @State private var isDeleting = false
     @State private var hasLoaded = false
+    @State private var pendingDownload: CookingModelChoice?
+    @State private var downloadAlertKind: DownloadAlertKind?
+
+    private enum DownloadAlertKind: Identifiable {
+        case wifiConfirm
+        case cellularWarn
+        var id: Int { self == .wifiConfirm ? 0 : 1 }
+    }
 
     private let iosVoices = [
         ("com.apple.ttsbundle.Samantha-compact", "Samantha"),
@@ -74,6 +83,15 @@ struct ProfileSettingsView: View {
             } footer: {
                 Text("Permanently deletes all saved recipes and resets preferences.")
             }
+
+            // MARK: - About
+            Section {
+                Text("Recipes imported from URLs remain the property of their original authors and are stored locally on your device for personal use only.")
+                    .font(.footnote)
+                    .foregroundColor(.secondary)
+            } header: {
+                Text("About")
+            }
         }
         .navigationTitle("Settings")
         .navigationBarTitleDisplayMode(.large)
@@ -91,6 +109,49 @@ struct ProfileSettingsView: View {
         } message: {
             Text("This will permanently delete all your recipes and reset preferences. This cannot be undone.")
         }
+        .alert(item: $downloadAlertKind) { kind in
+            downloadAlert(for: kind)
+        }
+    }
+
+    private func downloadAlert(for kind: DownloadAlertKind) -> Alert {
+        let name = pendingDownload?.displayName ?? "The model"
+        let size = pendingDownload?.approximateSize ?? "several GB"
+        switch kind {
+        case .wifiConfirm:
+            let msg = "\(name) is approximately \(size). Keep the app open until the download finishes."
+            return Alert(
+                title: Text("Download AI Model?"),
+                message: Text(msg),
+                primaryButton: .default(Text("Download")) { startPendingDownload() },
+                secondaryButton: .cancel { pendingDownload = nil }
+            )
+        case .cellularWarn:
+            let msg = "\(name) is approximately \(size) and may use significant cellular data. Connect to Wi-Fi for best results."
+            return Alert(
+                title: Text("Cellular Connection"),
+                message: Text(msg),
+                primaryButton: .destructive(Text("Download Anyway")) { startPendingDownload() },
+                secondaryButton: .cancel { pendingDownload = nil }
+            )
+        }
+    }
+
+    // MARK: - Download Gating
+
+    private func promptDownload(for choice: CookingModelChoice) {
+        pendingDownload = choice
+        if NetworkPathMonitor.shared.isExpensive {
+            downloadAlertKind = .cellularWarn
+        } else {
+            downloadAlertKind = .wifiConfirm
+        }
+    }
+
+    private func startPendingDownload() {
+        guard let choice = pendingDownload else { return }
+        pendingDownload = nil
+        Task { try? await llmService.downloadModel(modelId: choice.modelId) }
     }
 
     // MARK: - Provider Picker Section
@@ -169,7 +230,7 @@ struct ProfileSettingsView: View {
                     .foregroundColor(.green)
             } else {
                 Button {
-                    Task { try? await llmService.downloadModel(modelId: choice.modelId) }
+                    promptDownload(for: choice)
                 } label: {
                     Text("Download")
                         .font(.caption)
@@ -203,7 +264,7 @@ struct ProfileSettingsView: View {
                     hasLoaded = true
                 }
             } catch {
-                print("Failed to load preferences: \(error)")
+                dprint("Failed to load preferences: \(error)")
             }
         }
     }
@@ -218,7 +279,7 @@ struct ProfileSettingsView: View {
                     llmProvider: llmProvider
                 )
             } catch {
-                print("Failed to save preferences: \(error)")
+                dprint("Failed to save preferences: \(error)")
             }
         }
     }
@@ -235,7 +296,7 @@ struct ProfileSettingsView: View {
                     loadPreferences()
                 }
             } catch {
-                print("Failed to delete data: \(error)")
+                dprint("Failed to delete data: \(error)")
                 await MainActor.run { isDeleting = false }
             }
         }

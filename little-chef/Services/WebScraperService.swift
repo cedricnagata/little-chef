@@ -26,9 +26,9 @@ class WebScraperService: NSObject {
     /// Scrape recipe content from a URL. Loads the page in WKWebView to execute JavaScript,
     /// then extracts text content from the rendered DOM.
     func scrapeRecipe(from url: String) async throws -> String {
-        print("🌐 [SCRAPER] Starting scrape for URL: \(url)")
+        dprint("🌐 [SCRAPER] Starting scrape for URL: \(url)")
         guard let urlObj = URL(string: url) else {
-            print("🌐 [SCRAPER] ❌ Invalid URL")
+            dprint("🌐 [SCRAPER] ❌ Invalid URL")
             throw WebScraperError.invalidURL
         }
 
@@ -43,7 +43,7 @@ class WebScraperService: NSObject {
             self.timeoutTask = Task {
                 try? await Task.sleep(nanoseconds: 15_000_000_000)
                 if self.continuation != nil {
-                    print("🌐 [SCRAPER] ❌ Timeout after 15s")
+                    dprint("🌐 [SCRAPER] ❌ Timeout after 15s")
                     self.finish(with: .failure(WebScraperError.fetchFailed))
                 }
             }
@@ -51,8 +51,8 @@ class WebScraperService: NSObject {
             wv.load(URLRequest(url: urlObj))
         }
 
-        print("🌐 [SCRAPER] ✅ Got content (\(result.count) chars)")
-        print("🌐 [SCRAPER] Content preview:\n\(String(result.prefix(500)))")
+        dprint("🌐 [SCRAPER] ✅ Got content (\(result.count) chars)")
+        dprint("🌐 [SCRAPER] Content preview:\n\(String(result.prefix(500)))")
         return result
     }
 
@@ -114,12 +114,12 @@ class WebScraperService: NSObject {
 
             if let schemaText = result as? String, schemaText.hasPrefix("SCHEMA_JSON:") {
                 let json = String(schemaText.dropFirst("SCHEMA_JSON:".count))
-                print("🌐 [SCRAPER] Found JSON-LD schema (\(json.count) chars)")
+                dprint("🌐 [SCRAPER] Found JSON-LD schema (\(json.count) chars)")
                 self.finish(with: .success("Schema.org Recipe JSON:\n\(json)"))
                 return
             }
 
-            print("🌐 [SCRAPER] No JSON-LD schema found, falling back to body text")
+            dprint("🌐 [SCRAPER] No JSON-LD schema found, falling back to body text")
 
             // Fall back to body text
             let bodyJS = "document.body.innerText"
@@ -127,18 +127,18 @@ class WebScraperService: NSObject {
                 guard let self else { return }
 
                 if let error {
-                    print("🌐 [SCRAPER] ❌ Body text extraction error: \(error.localizedDescription)")
+                    dprint("🌐 [SCRAPER] ❌ Body text extraction error: \(error.localizedDescription)")
                     self.finish(with: .failure(error))
                     return
                 }
 
                 guard let text = result as? String, !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
-                    print("🌐 [SCRAPER] ❌ Body text is empty")
+                    dprint("🌐 [SCRAPER] ❌ Body text is empty")
                     self.finish(with: .failure(WebScraperError.noContentFound))
                     return
                 }
 
-                print("🌐 [SCRAPER] Got body text (\(text.count) raw chars)")
+                dprint("🌐 [SCRAPER] Got body text (\(text.count) raw chars)")
 
                 let cleaned = text
                     .components(separatedBy: .newlines)
@@ -146,7 +146,7 @@ class WebScraperService: NSObject {
                     .filter { !$0.isEmpty }
                     .joined(separator: "\n")
 
-                print("🌐 [SCRAPER] Cleaned body text (\(cleaned.count) chars)")
+                dprint("🌐 [SCRAPER] Cleaned body text (\(cleaned.count) chars)")
                 self.finish(with: .success(cleaned))
             }
         }

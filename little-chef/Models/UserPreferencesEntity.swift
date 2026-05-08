@@ -46,6 +46,13 @@ enum CookingModelChoice: String, Codable, CaseIterable {
         case .bonsai4B: return false
         }
     }
+
+    var approximateSize: String {
+        switch self {
+        case .bonsai8B: return "~3.5 GB"
+        case .bonsai4B: return "~1.8 GB"
+        }
+    }
 }
 
 /// SwiftData model for persisting user preferences locally
