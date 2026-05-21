@@ -49,14 +49,14 @@ class LocalCookingAgent: ObservableObject {
             messages = [systemMessage] + Array(messages.suffix(maxHistoryLength - 1))
         }
 
-        let cookingTools: CookingTools? = llmService.currentProvider == .bigBro
+        let cookingTools: CookingTools? = llmService.capability.toolCallingEnabled
             ? CookingTools(timerManager: timerManager)
             : nil
 
         let response = try await llmService.generateChatCompletion(
             messages: messages,
             tools: cookingTools,
-            modelId: llmService.currentProvider == .local ? CookingModelChoice.bonsai8B.modelId : nil
+            modelId: llmService.currentProvider == .local ? LLMService.supportedOnDeviceModel?.modelId : nil
         )
 
         conversationHistory.append(ChatMessage(role: .user, content: userMessage))
@@ -88,14 +88,14 @@ class LocalCookingAgent: ObservableObject {
             messages = [systemMessage] + Array(messages.suffix(maxHistoryLength - 1))
         }
 
-        let cookingTools: CookingTools? = llmService.currentProvider == .bigBro
+        let cookingTools: CookingTools? = llmService.capability.toolCallingEnabled
             ? CookingTools(timerManager: timerManager)
             : nil
 
         let response = try await llmService.generateChatCompletionStreaming(
             messages: messages,
             tools: cookingTools,
-            modelId: llmService.currentProvider == .local ? CookingModelChoice.bonsai8B.modelId : nil,
+            modelId: llmService.currentProvider == .local ? LLMService.supportedOnDeviceModel?.modelId : nil,
             onChunk: onChunk
         )
 

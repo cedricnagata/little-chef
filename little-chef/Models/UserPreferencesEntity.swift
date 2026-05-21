@@ -25,11 +25,13 @@ enum LLMProvider: String, Codable, CaseIterable {
 enum CookingModelChoice: String, Codable, CaseIterable {
     case bonsai8B = "bonsai8b"
     case bonsai4B = "bonsai4b"
+    case bonsai1_7B = "bonsai1_7b"
 
     var displayName: String {
         switch self {
         case .bonsai8B: return "Bonsai 8B (1-bit)"
         case .bonsai4B: return "Bonsai 4B (1-bit)"
+        case .bonsai1_7B: return "Bonsai 1.7B (1-bit)"
         }
     }
 
@@ -37,13 +39,14 @@ enum CookingModelChoice: String, Codable, CaseIterable {
         switch self {
         case .bonsai8B: return "prism-ml/Bonsai-8B-mlx-1bit"
         case .bonsai4B: return "prism-ml/Bonsai-4B-mlx-1bit"
+        case .bonsai1_7B: return "prism-ml/Bonsai-1.7B-mlx-1bit"
         }
     }
 
     var supportsTools: Bool {
         switch self {
         case .bonsai8B: return true
-        case .bonsai4B: return false
+        case .bonsai4B, .bonsai1_7B: return false
         }
     }
 
@@ -51,7 +54,14 @@ enum CookingModelChoice: String, Codable, CaseIterable {
         switch self {
         case .bonsai8B: return "~3.5 GB"
         case .bonsai4B: return "~1.8 GB"
+        case .bonsai1_7B: return "~0.9 GB"
         }
+    }
+
+    /// Whether this on-device model supports the full feature set (recipe parsing + timer tools).
+    /// Only the 8B model is capable; smaller models run cooking chat only.
+    var isFullCapability: Bool {
+        self == .bonsai8B
     }
 }
 

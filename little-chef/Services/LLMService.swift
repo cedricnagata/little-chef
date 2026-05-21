@@ -14,17 +14,56 @@ import MLXLMCommon
 import Tokenizers
 import BigBroKit
 
+/// What AI features are available given the active provider, device hardware, and
+/// connection state. Production builds degrade gracefully; DEBUG is always `.full`.
+enum AICapability {
+    /// Cooking chat + timer tools + LLM recipe parsing + schema.org import + manual timers.
+    case full
+    /// Cooking chat (no tools) + schema.org import + manual timers. No LLM recipe parsing.
+    case limited
+    /// schema.org import + manual timers only. No LLM features.
+    case none
+
+    var llmChatEnabled: Bool { self != .none }
+    var toolCallingEnabled: Bool { self == .full }
+    var llmRecipeParsingEnabled: Bool { self == .full }
+}
+
 @MainActor
 class LLMService: ObservableObject {
     static let shared = LLMService()
 
-    static let deviceSupportsLocalModels: Bool = {
+    /// The single on-device model this device's RAM can run, or nil if none.
+    /// DEBUG builds always report the full-capability 8B model for testing.
+    static let supportedOnDeviceModel: CookingModelChoice? = {
         #if DEBUG
-        return true
+        return .bonsai8B
         #else
-        return ProcessInfo.processInfo.physicalMemory >= 6 * 1_024 * 1_024 * 1_024
+        let gb = Double(ProcessInfo.processInfo.physicalMemory) / 1_073_741_824
+        if gb >= 6 { return .bonsai8B }
+        if gb >= 4 { return .bonsai4B }
+        if gb >= 3 { return .bonsai1_7B }
+        return nil
         #endif
     }()
+
+    /// Whether the device can run any on-device model.
+    static var deviceSupportsLocalModels: Bool { supportedOnDeviceModel != nil }
+
+    /// What the active provider + model can do, in production. DEBUG = always full.
+    var capability: AICapability {
+        #if DEBUG
+        return .full
+        #else
+        switch currentProvider {
+        case .bigBro:
+            return bigBroClient.isConnected ? .full : .none
+        case .local:
+            guard let model = LLMService.supportedOnDeviceModel else { return .none }
+            return model.isFullCapability ? .full : .limited
+        }
+        #endif
+    }
 
     // MARK: - Published State
     @Published var isLoaded = false

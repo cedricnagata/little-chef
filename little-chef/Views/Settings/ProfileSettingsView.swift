@@ -174,10 +174,14 @@ struct ProfileSettingsView: View {
 
     @ViewBuilder
     private var providerFooter: some View {
-        if !LLMService.deviceSupportsLocalModels {
-            Text("On-Device requires 6 GB of memory. This device supports BigBro only.")
-        } else if llmProvider == .local {
-            Text("On-device inference. Bonsai 8B handles both recipe parsing and cooking assistance.")
+        if let model = LLMService.supportedOnDeviceModel, llmProvider == .local {
+            if model.isFullCapability {
+                Text("On-device inference. \(model.displayName) handles both recipe parsing and cooking assistance.")
+            } else {
+                Text("On-device inference. \(model.displayName) powers the cooking assistant only — recipe import works from recipe websites (structured data), and timers are set manually.")
+            }
+        } else if !LLMService.deviceSupportsLocalModels {
+            Text("On-device AI requires at least 3 GB of memory. This device supports BigBro only. Without BigBro, you can still import recipes from websites and set timers manually.")
         } else {
             Text("Routes all inference through your paired BigBro Mac. Tools are always available. No downloads required.")
         }
@@ -187,7 +191,14 @@ struct ProfileSettingsView: View {
 
     @ViewBuilder
     private var localModelSection: some View {
-        modelRow(for: .bonsai8B, usage: "Recipe parsing & cooking assistant")
+        if let model = LLMService.supportedOnDeviceModel {
+            modelRow(
+                for: model,
+                usage: model.isFullCapability
+                    ? "Recipe parsing & cooking assistant"
+                    : "Cooking assistant only (no recipe import or timer tools)"
+            )
+        }
 
         if let error = llmService.loadError {
             Text(error)

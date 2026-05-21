@@ -39,7 +39,7 @@ struct AddRecipeView: View {
                             .frame(maxWidth: .infinity, alignment: .leading)
                         
                         LazyVGrid(columns: Array(repeating: GridItem(.flexible()), count: 3), spacing: 12) {
-                            ForEach(RecipeInputType.allCases, id: \.self) { inputType in
+                            ForEach(availableInputTypes, id: \.self) { inputType in
                                 InputTypeCard(
                                     inputType: inputType,
                                     isSelected: selectedInputType == inputType
@@ -48,6 +48,13 @@ struct AddRecipeView: View {
                                     clearInputs()
                                 }
                             }
+                        }
+
+                        if !llmRecipeParsingEnabled {
+                            Text("Text and image import need on-device AI, which isn't available on this device. Import from a recipe URL instead.")
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                                .frame(maxWidth: .infinity, alignment: .leading)
                         }
                     }
                     .padding(.horizontal)
@@ -168,6 +175,16 @@ struct AddRecipeView: View {
         .navigationViewStyle(.stack)
     }
     
+    /// Text and image import both require on-device/remote LLM parsing; URL import works via
+    /// schema.org even without it.
+    private var llmRecipeParsingEnabled: Bool {
+        LLMService.shared.capability.llmRecipeParsingEnabled
+    }
+
+    private var availableInputTypes: [RecipeInputType] {
+        llmRecipeParsingEnabled ? RecipeInputType.allCases : [.url]
+    }
+
     private var canParseRecipe: Bool {
         switch selectedInputType {
         case .url:

@@ -28,6 +28,9 @@ class LocalRecipeParser: ObservableObject {
         self.ocrService = ocrService
     }
 
+    /// What AI features are available given the active provider and device hardware.
+    private var capability: AICapability { llmService.capability }
+
     // MARK: - Public Methods
 
     func parseFromURL(_ url: String) async throws -> RecipeParseResponse {
@@ -59,9 +62,9 @@ class LocalRecipeParser: ObservableObject {
             dprint("📖 [PARSER] ✅ Parsed from schema.org")
             recipeData = parsed
 
-            // Only run LLM if something is missing
+            // Only run LLM cleanup if something is missing AND LLM parsing is available
             let (confidence, _) = evaluateRecipe(recipeData)
-            if confidence < 1.0 {
+            if confidence < 1.0 && capability.llmRecipeParsingEnabled {
                 dprint("📖 [PARSER] Schema.org incomplete (confidence \(confidence)), running LLM cleanup")
                 statusMessage = "Filling in missing details..."
                 if let cleaned = try? await cleanupWithLLM(schema: recipeData, sourceUrl: url) {
@@ -69,7 +72,11 @@ class LocalRecipeParser: ObservableObject {
                 }
             }
         } else {
-            // No schema.org — full LLM parse with higher token limit
+            // No schema.org — would require a full LLM parse. Only allowed when LLM parsing is available.
+            guard capability.llmRecipeParsingEnabled else {
+                dprint("📖 [PARSER] No schema.org data and LLM parsing unavailable — failing gracefully")
+                throw RecipeParserError.aiUnavailable
+            }
             dprint("📖 [PARSER] No schema.org data, falling back to LLM")
             statusMessage = "Analyzing recipe with AI..."
             recipeData = try await parseWithLLM(text: webContent, sourceUrl: url, maxTokens: 4096)
@@ -86,6 +93,7 @@ class LocalRecipeParser: ObservableObject {
     }
 
     func parseFromText(_ text: String) async throws -> RecipeParseResponse {
+        guard capability.llmRecipeParsingEnabled else { throw RecipeParserError.aiUnavailable }
         isProcessing = true
         progress = 0.2
         statusMessage = "Analyzing recipe with AI..."
@@ -99,6 +107,7 @@ class LocalRecipeParser: ObservableObject {
     }
 
     func parseFromImages(_ images: [UIImage]) async throws -> RecipeParseResponse {
+        guard capability.llmRecipeParsingEnabled else { throw RecipeParserError.aiUnavailable }
         isProcessing = true
         progress = 0.1
         statusMessage = "Reading text from images..."
@@ -501,6 +510,7 @@ enum RecipeParserError: LocalizedError {
     case noTextExtracted
     case invalidJSONResponse
     case parsingFailed(Error)
+    case aiUnavailable
 
     var errorDescription: String? {
         switch self {
@@ -512,6 +522,8 @@ enum RecipeParserError: LocalizedError {
             return "Failed to parse recipe. Please try again."
         case .parsingFailed(let error):
             return "Recipe parsing failed: \(error.localizedDescription)"
+        case .aiUnavailable:
+            return "This recipe needs AI parsing, which isn't available on this device. Try importing from a site with structured recipe data."
         }
     }
 }

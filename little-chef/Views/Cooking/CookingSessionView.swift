@@ -94,10 +94,16 @@ struct StartCookingView: View {
 struct ActiveCookingView: View {
     @EnvironmentObject var cookingSessionManager: CookingSessionManager
     @EnvironmentObject var voiceAssistant: VoiceAssistant
+    @EnvironmentObject var llmService: LLMService
+    @ObservedObject private var bigBroClient = LLMService.shared.bigBroClient
     @State private var textInput = ""
     @State private var showingEndSessionAlert = false
     @State private var isRecipeExpanded = true
     @FocusState private var isTextFieldFocused: Bool
+
+    /// When no LLM is available (no on-device model + BigBro not connected), the cooking
+    /// assistant chat is hidden; manual timers remain available.
+    private var chatEnabled: Bool { llmService.capability.llmChatEnabled }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -119,7 +125,18 @@ struct ActiveCookingView: View {
                     .onTapGesture { isTextFieldFocused = false }
             }
 
-            InputAreaView(textInput: $textInput, isTextFieldFocused: $isTextFieldFocused)
+            if chatEnabled {
+                InputAreaView(textInput: $textInput, isTextFieldFocused: $isTextFieldFocused)
+            } else {
+                VStack(spacing: 0) {
+                    Divider()
+                    Label("AI assistant unavailable — add timers manually", systemImage: "wand.and.stars.inverse")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                        .frame(maxWidth: .infinity)
+                        .padding()
+                }
+            }
         }
         .ignoresSafeArea(.container, edges: .bottom)
         .animation(.easeInOut(duration: 0.3), value: isRecipeExpanded)
