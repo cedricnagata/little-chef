@@ -231,6 +231,11 @@ class VoiceAssistant: NSObject, ObservableObject {
             }
 
             recognitionRequest.shouldReportPartialResults = true
+            // Keep all audio on-device to honor the privacy policy ("audio is never
+            // sent to any server"). Supported on all target devices/locales.
+            if speechRecognizer.supportsOnDeviceRecognition {
+                recognitionRequest.requiresOnDeviceRecognition = true
+            }
 
             let inputNode = audioEngine.inputNode
             let recordingFormat = inputNode.outputFormat(forBus: 0)
@@ -421,6 +426,10 @@ class VoiceAssistant: NSObject, ObservableObject {
             wakeWordRequest = SFSpeechAudioBufferRecognitionRequest()
             guard let wakeWordRequest = wakeWordRequest else { return }
             wakeWordRequest.shouldReportPartialResults = true
+            // Wake-word audio also stays on-device (see privacy policy).
+            if speechRecognizer.supportsOnDeviceRecognition {
+                wakeWordRequest.requiresOnDeviceRecognition = true
+            }
 
             let inputNode = audioEngine.inputNode
             let recordingFormat = inputNode.outputFormat(forBus: 0)
@@ -487,6 +496,10 @@ class VoiceAssistant: NSObject, ObservableObject {
             recognitionRequest = SFSpeechAudioBufferRecognitionRequest()
             guard let recognitionRequest = recognitionRequest else { return }
             recognitionRequest.shouldReportPartialResults = true
+            // Hands-free voice queries stay on-device (see privacy policy).
+            if speechRecognizer.supportsOnDeviceRecognition {
+                recognitionRequest.requiresOnDeviceRecognition = true
+            }
 
             let inputNode = audioEngine.inputNode
             let recordingFormat = inputNode.outputFormat(forBus: 0)

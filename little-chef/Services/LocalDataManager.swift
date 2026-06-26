@@ -34,19 +34,27 @@ class LocalDataManager: ObservableObject {
             UserPreferencesEntity.self
         ])
 
-        let modelConfiguration = ModelConfiguration(
+        let cloudConfiguration = ModelConfiguration(
             schema: schema,
             isStoredInMemoryOnly: false,
             cloudKitDatabase: .private("iCloud.com.littlechef.app")
         )
 
         do {
-            modelContainer = try ModelContainer(for: schema, configurations: [modelConfiguration])
-            modelContext = ModelContext(modelContainer)
+            modelContainer = try ModelContainer(for: schema, configurations: [cloudConfiguration])
         } catch {
-            dprint("Failed to create ModelContainer: \(error)")
-            throw error
+            // CloudKit can be unavailable at runtime (no iCloud account signed in,
+            // restricted iCloud, provisioning/entitlement issues during review, etc.).
+            // Fall back to a local-only store so the app still launches and works
+            // rather than crashing on first run.
+            dprint("CloudKit-backed ModelContainer failed (\(error)); falling back to local-only store")
+            let localConfiguration = ModelConfiguration(
+                schema: schema,
+                isStoredInMemoryOnly: false
+            )
+            modelContainer = try ModelContainer(for: schema, configurations: [localConfiguration])
         }
+        modelContext = ModelContext(modelContainer)
 
         // Reload when a remote CloudKit change arrives from another device
         NotificationCenter.default.addObserver(

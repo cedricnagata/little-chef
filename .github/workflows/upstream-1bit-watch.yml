@@ -1,0 +1,132 @@
+name: Upstream 1-bit MLX watch
+
+# Monitors the upstream work required before LittleChef can drop the PrismML
+# mlx-swift fork and depend only on stock ml-explore packages.
+#
+# Tracks these gates (see BONSAI_SETUP.md, "Goal A"):
+#   1. ml-explore/mlx PR #3161 (1-bit affine quant kernels) is merged
+#   2. a tagged ml-explore/mlx release exists dated after that merge
+#   3. ml-explore/mlx-swift has cut a release after the mlx 1-bit release
+#   4. ml-explore/mlx-swift-lm's Package.swift mlx-swift pin has moved past 0.30.6
+#   5. Bonsai weights actually load against upstream kernels  (MANUAL - needs a build)
+#
+# It maintains a single tracking issue, refreshes the checklist on every run,
+# and comments + @mentions the repo owner the first time gate 1 flips to merged.
+
+on:
+  schedule:
+    - cron: "0 9 * * 1"   # every Monday 09:00 UTC
+  workflow_dispatch: {}    # allow manual runs from the Actions tab
+
+permissions:
+  issues: write
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      ISSUE_TITLE: "Upstream 1-bit MLX tracking (drop the fork)"
+      OWNER: ${{ github.repository_owner }}
+      # Bump this if the upstream 1-bit work lands in a different minor series.
+      TARGET_MLX_SWIFT_MINOR: "0.31"
+    steps:
+      - name: Evaluate upstream gates
+        run: |
+          set -euo pipefail
+
+          # helper: latest release tag, falling back to the newest git tag
+          latest_tag() {
+            gh api "repos/$1/releases/latest" --jq '.tag_name' 2>/dev/null \
+              || gh api "repos/$1/tags?per_page=1" --jq '.[0].name' 2>/dev/null \
+              || echo "unknown"
+          }
+
+          # ---------- Gate 1: PR #3161 merged? ----------
+          PR_JSON=$(gh api repos/ml-explore/mlx/pulls/3161)
+          PR_MERGED=$(echo "$PR_JSON" | jq -r '.merged')
+          PR_STATE=$(echo "$PR_JSON" | jq -r '.state')
+          PR_MERGED_AT=$(echo "$PR_JSON" | jq -r '.merged_at // "-"')
+          if [ "$PR_MERGED" = "true" ]; then
+            G1="- [x] **Gate 1** - \`ml-explore/mlx#3161\` merged ($PR_MERGED_AT)"
+          else
+            G1="- [ ] **Gate 1** - \`ml-explore/mlx#3161\` still **$PR_STATE** (not merged)"
+          fi
+
+          # ---------- Gate 2: latest mlx release ----------
+          MLX_TAG=$(latest_tag "ml-explore/mlx")
+          if [ "$PR_MERGED" = "true" ]; then
+            G2="- [ ] **Gate 2** - confirm an \`ml-explore/mlx\` release contains #3161. Latest: \`$MLX_TAG\`"
+          else
+            G2="- [ ] **Gate 2** - (waiting on Gate 1). Latest \`mlx\`: \`$MLX_TAG\`"
+          fi
+
+          # ---------- Gate 3: latest mlx-swift release ----------
+          MLXS_TAG=$(latest_tag "ml-explore/mlx-swift")
+          G3="- [ ] **Gate 3** - confirm \`ml-explore/mlx-swift\` exposes 1-bit kernels. Latest: \`$MLXS_TAG\` (target >= ${TARGET_MLX_SWIFT_MINOR}.x)"
+
+          # ---------- Gate 4: mlx-swift-lm's mlx-swift pin ----------
+          LM_TAG=$(latest_tag "ml-explore/mlx-swift-lm")
+          LM_PIN=$(gh api "repos/ml-explore/mlx-swift-lm/contents/Package.swift?ref=$LM_TAG" --jq '.content' 2>/dev/null \
+                    | base64 -d 2>/dev/null \
+                    | grep -i 'mlx-swift' \
+                    | grep -iE 'upToNextMinor|from:|exact|revision|branch' \
+                    | head -1 \
+                    | sed 's/^[[:space:]]*//' || echo "could not read")
+          [ -z "$LM_PIN" ] && LM_PIN="unknown"
+          G4="- [ ] **Gate 4** - \`mlx-swift-lm\` ($LM_TAG) mlx-swift pin: \`$LM_PIN\` (target >= ${TARGET_MLX_SWIFT_MINOR})"
+
+          # ---------- Gate 5: manual ----------
+          G5="- [ ] **Gate 5** - _(manual)_ Bonsai weights load & generate against upstream kernels. Verify with a build once Gates 1-4 are green."
+
+          MARKER="<!-- upstream-1bit-watch -->"
+          GATE1_MARK="<!-- gate1:merged -->"
+          if [ "$PR_MERGED" = "true" ]; then GATE1_LINE="$GATE1_MARK"; else GATE1_LINE=""; fi
+          RUN_AT=$(date -u '+%Y-%m-%d %H:%M UTC')
+
+          # Build the issue body in a file (avoids quoting pitfalls).
+          {
+            echo "$MARKER"
+            [ -n "$GATE1_LINE" ] && echo "$GATE1_LINE"
+            echo "_Auto-updated by the \`upstream-1bit-watch\` workflow. Last run: $RUN_AT._"
+            echo ""
+            echo "When **all five** gates are green, LittleChef can drop the \`PrismML-Eng/mlx-swift\` fork and depend on stock \`ml-explore\` packages (see \`BONSAI_SETUP.md\`, \"Goal A\")."
+            echo ""
+            echo "$G1"
+            echo "$G2"
+            echo "$G3"
+            echo "$G4"
+            echo "$G5"
+            echo ""
+            echo "---"
+            echo "<details><summary>Raw signals</summary>"
+            echo ""
+            echo "- mlx PR #3161: merged=\`$PR_MERGED\` state=\`$PR_STATE\` merged_at=\`$PR_MERGED_AT\`"
+            echo "- latest \`ml-explore/mlx\`: \`$MLX_TAG\`"
+            echo "- latest \`ml-explore/mlx-swift\`: \`$MLXS_TAG\`"
+            echo "- latest \`ml-explore/mlx-swift-lm\`: \`$LM_TAG\`"
+            echo "- \`mlx-swift-lm\` mlx-swift dependency line: \`$LM_PIN\`"
+            echo "</details>"
+          } > body.md
+
+          # ---------- find or create the tracking issue ----------
+          NUM=$(gh issue list --state all --limit 100 --json number,title \
+                --jq ".[] | select(.title==\"$ISSUE_TITLE\") | .number" | head -1 || true)
+
+          if [ -z "${NUM:-}" ]; then
+            echo "Creating tracking issue..."
+            NUM=$(gh issue create --title "$ISSUE_TITLE" --body-file body.md | grep -oE '[0-9]+$' | tail -1)
+            PREV_BODY=""
+          else
+            echo "Updating tracking issue #$NUM..."
+            PREV_BODY=$(gh issue view "$NUM" --json body --jq '.body' || echo "")
+            gh issue edit "$NUM" --body-file body.md
+          fi
+
+          # ---------- notify the first time Gate 1 flips to merged ----------
+          if [ "$PR_MERGED" = "true" ] && ! printf '%s' "$PREV_BODY" | grep -q "$GATE1_MARK"; then
+            gh issue comment "$NUM" --body "@${OWNER} Gate 1 is merged - \`ml-explore/mlx#3161\` (1-bit kernels) has landed upstream. Watch for the next \`mlx-swift\` / \`mlx-swift-lm\` releases to clear Gates 2-4, then do the Gate 5 build check."
+          fi
+
+          echo "Done. Tracking issue: #$NUM"
