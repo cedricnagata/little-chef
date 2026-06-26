@@ -30,8 +30,6 @@ jobs:
       REPO: ${{ github.repository }}
       ISSUE_TITLE: "Upstream 1-bit MLX tracking (drop the fork)"
       OWNER: ${{ github.repository_owner }}
-      # Bump this if the upstream 1-bit work lands in a different minor series.
-      TARGET_MLX_SWIFT_MINOR: "0.31"
     steps:
       - name: Evaluate upstream gates
         run: |
@@ -65,7 +63,7 @@ jobs:
 
           # ---------- Gate 3: latest mlx-swift release ----------
           MLXS_TAG=$(latest_tag "ml-explore/mlx-swift")
-          G3="- [ ] **Gate 3** - confirm \`ml-explore/mlx-swift\` exposes 1-bit kernels. Latest: \`$MLXS_TAG\` (target >= ${TARGET_MLX_SWIFT_MINOR}.x)"
+          G3="- [ ] **Gate 3** - confirm \`ml-explore/mlx-swift\` has cut a release *after* #3161 merged that exposes the 1-bit kernels. Latest: \`$MLXS_TAG\`"
 
           # ---------- Gate 4: mlx-swift-lm's mlx-swift pin ----------
           LM_TAG=$(latest_tag "ml-explore/mlx-swift-lm")
@@ -76,7 +74,7 @@ jobs:
                     | head -1 \
                     | sed 's/^[[:space:]]*//' || echo "could not read")
           [ -z "$LM_PIN" ] && LM_PIN="unknown"
-          G4="- [ ] **Gate 4** - \`mlx-swift-lm\` ($LM_TAG) mlx-swift pin: \`$LM_PIN\` (target >= ${TARGET_MLX_SWIFT_MINOR})"
+          G4="- [ ] **Gate 4** - confirm \`mlx-swift-lm\` has bumped to that 1-bit-capable mlx-swift release. Latest: \`$LM_TAG\`, current mlx-swift pin: \`$LM_PIN\`"
 
           # ---------- Gate 5: manual ----------
           G5="- [ ] **Gate 5** - _(manual)_ Bonsai weights load & generate against upstream kernels. Verify with a build once Gates 1-4 are green."
