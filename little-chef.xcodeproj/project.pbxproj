@@ -290,8 +290,8 @@
 			mainGroup = 8B89280F2E6B467600A3BADD;
 			minimizedProjectReferenceProxies = 1;
 			packageReferences = (
-				8BD0A0062EBF000000BB0001 /* XCLocalSwiftPackageReference "mlx-swift" */,
-				8BD0A0072EBF000000BB0001 /* XCLocalSwiftPackageReference "mlx-swift-lm" */,
+				8BD0A0062EBF000000BB0001 /* XCRemoteSwiftPackageReference "mlx-swift" */,
+				8BD0A0072EBF000000BB0001 /* XCRemoteSwiftPackageReference "mlx-swift-lm" */,
 				8B28BF332F981150001DD2B5 /* XCRemoteSwiftPackageReference "bigbro-kit" */,
 			);
 			preferredProjectObjectVersion = 77;
@@ -778,17 +778,6 @@
 		};
 /* End XCConfigurationList section */
 
-/* Begin XCLocalSwiftPackageReference section */
-		8BD0A0062EBF000000BB0001 /* XCLocalSwiftPackageReference "mlx-swift" */ = {
-			isa = XCLocalSwiftPackageReference;
-			relativePath = "mlx-swift";
-		};
-		8BD0A0072EBF000000BB0001 /* XCLocalSwiftPackageReference "mlx-swift-lm" */ = {
-			isa = XCLocalSwiftPackageReference;
-			relativePath = "mlx-swift-lm";
-		};
-/* End XCLocalSwiftPackageReference section */
-
 /* Begin XCRemoteSwiftPackageReference section */
 		8B28BF332F981150001DD2B5 /* XCRemoteSwiftPackageReference "bigbro-kit" */ = {
 			isa = XCRemoteSwiftPackageReference;
@@ -796,6 +785,22 @@
 			requirement = {
 				branch = main;
 				kind = branch;
+			};
+		};
+		8BD0A0062EBF000000BB0001 /* XCRemoteSwiftPackageReference "mlx-swift" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/cedricnagata/mlx-swift";
+			requirement = {
+				kind = exactVersion;
+				version = "0.30.3-bonsai-ios";
+			};
+		};
+		8BD0A0072EBF000000BB0001 /* XCRemoteSwiftPackageReference "mlx-swift-lm" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/cedricnagata/mlx-swift-lm";
+			requirement = {
+				kind = exactVersion;
+				version = "2.30.6-bonsai";
 			};
 		};
 /* End XCRemoteSwiftPackageReference section */
@@ -808,17 +813,17 @@
 		};
 		8BD0A0002EBF000000BB0001 /* MLX */ = {
 			isa = XCSwiftPackageProductDependency;
-			package = 8BD0A0062EBF000000BB0001 /* XCLocalSwiftPackageReference "mlx-swift" */;
+			package = 8BD0A0062EBF000000BB0001 /* XCRemoteSwiftPackageReference "mlx-swift" */;
 			productName = MLX;
 		};
 		8BD0A0022EBF000000BB0001 /* MLXLLM */ = {
 			isa = XCSwiftPackageProductDependency;
-			package = 8BD0A0072EBF000000BB0001 /* XCLocalSwiftPackageReference "mlx-swift-lm" */;
+			package = 8BD0A0072EBF000000BB0001 /* XCRemoteSwiftPackageReference "mlx-swift-lm" */;
 			productName = MLXLLM;
 		};
 		8BD0A0042EBF000000BB0001 /* MLXLMCommon */ = {
 			isa = XCSwiftPackageProductDependency;
-			package = 8BD0A0072EBF000000BB0001 /* XCLocalSwiftPackageReference "mlx-swift-lm" */;
+			package = 8BD0A0072EBF000000BB0001 /* XCRemoteSwiftPackageReference "mlx-swift-lm" */;
 			productName = MLXLMCommon;
 		};
 /* End XCSwiftPackageProductDependency section */
