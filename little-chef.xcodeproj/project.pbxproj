@@ -13,9 +13,18 @@
 		8BD0A0012EBF000000BB0001 /* MLX in Frameworks */ = {isa = PBXBuildFile; productRef = 8BD0A0002EBF000000BB0001 /* MLX */; };
 		8BD0A0032EBF000000BB0001 /* MLXLLM in Frameworks */ = {isa = PBXBuildFile; productRef = 8BD0A0022EBF000000BB0001 /* MLXLLM */; };
 		8BD0A0052EBF000000BB0001 /* MLXLMCommon in Frameworks */ = {isa = PBXBuildFile; productRef = 8BD0A0042EBF000000BB0001 /* MLXLMCommon */; };
+		8BAC10000000000000A1 /* TimerWidgetExtension.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = 8B112FF62FAD2A8400C9C796 /* TimerWidgetExtension.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
+		8BAC10000000000000B2 /* TimerActivityAttributes.swift in Sources (TimerWidgetExtension) */ = {isa = PBXBuildFile; fileRef = 8BAC10000000000000B1 /* TimerActivityAttributes.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
+		8BAC10000000000000A2 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 8B8928102E6B467600A3BADD /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 8B112FF52FAD2A8400C9C796;
+			remoteInfo = TimerWidgetExtension;
+		};
 		8B8928262E6B467700A3BADD /* PBXContainerItemProxy */ = {
 			isa = PBXContainerItemProxy;
 			containerPortal = 8B8928102E6B467600A3BADD /* Project object */;
@@ -32,7 +41,22 @@
 		};
 /* End PBXContainerItemProxy section */
 
+/* Begin PBXCopyFilesBuildPhase section */
+		8BAC10000000000000A3 /* Embed Foundation Extensions */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "";
+			dstSubfolderSpec = 13;
+			files = (
+				8BAC10000000000000A1 /* TimerWidgetExtension.appex in Embed Foundation Extensions */,
+			);
+			name = "Embed Foundation Extensions";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXCopyFilesBuildPhase section */
+
 /* Begin PBXFileReference section */
+		8BAC10000000000000B1 /* TimerActivityAttributes.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = "TimerActivityAttributes.swift (shared with TimerWidgetExtension)"; path = "little-chef/Models/TimerActivityAttributes.swift"; sourceTree = "<group>"; };
 		8B112FF62FAD2A8400C9C796 /* TimerWidgetExtension.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = TimerWidgetExtension.appex; sourceTree = BUILT_PRODUCTS_DIR; };
 		8B112FF82FAD2A8400C9C796 /* WidgetKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = WidgetKit.framework; path = System/Library/Frameworks/WidgetKit.framework; sourceTree = SDKROOT; };
 		8B112FFA2FAD2A8400C9C796 /* SwiftUI.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = SwiftUI.framework; path = System/Library/Frameworks/SwiftUI.framework; sourceTree = SDKROOT; };
@@ -141,6 +165,7 @@
 				8B8928282E6B467700A3BADD /* little-chefTests */,
 				8B8928322E6B467700A3BADD /* little-chefUITests */,
 				8B112FFC2FAD2A8400C9C796 /* TimerWidget */,
+				8BAC10000000000000B1 /* TimerActivityAttributes.swift */,
 				8B112FF72FAD2A8400C9C796 /* Frameworks */,
 				8B8928192E6B467600A3BADD /* Products */,
 			);
@@ -189,10 +214,12 @@
 				8B8928142E6B467600A3BADD /* Sources */,
 				8B8928152E6B467600A3BADD /* Frameworks */,
 				8B8928162E6B467600A3BADD /* Resources */,
+				8BAC10000000000000A3 /* Embed Foundation Extensions */,
 			);
 			buildRules = (
 			);
 			dependencies = (
+				8BAC10000000000000A4 /* PBXTargetDependency */,
 			);
 			fileSystemSynchronizedGroups = (
 				8B89281A2E6B467600A3BADD /* little-chef */,
@@ -343,6 +370,7 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				8BAC10000000000000B2 /* TimerActivityAttributes.swift in Sources (TimerWidgetExtension) */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -370,6 +398,11 @@
 /* End PBXSourcesBuildPhase section */
 
 /* Begin PBXTargetDependency section */
+		8BAC10000000000000A4 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 8B112FF52FAD2A8400C9C796 /* TimerWidgetExtension */;
+			targetProxy = 8BAC10000000000000A2 /* PBXContainerItemProxy */;
+		};
 		8B8928272E6B467700A3BADD /* PBXTargetDependency */ = {
 			isa = PBXTargetDependency;
 			target = 8B8928172E6B467600A3BADD /* little-chef */;
@@ -512,7 +545,7 @@
 				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
 				GCC_WARN_UNUSED_FUNCTION = YES;
 				GCC_WARN_UNUSED_VARIABLE = YES;
-				IPHONEOS_DEPLOYMENT_TARGET = 18.5;
+				IPHONEOS_DEPLOYMENT_TARGET = 18.6;
 				LOCALIZATION_PREFERS_STRING_CATALOGS = YES;
 				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
 				MTL_FAST_MATH = YES;
@@ -570,7 +603,7 @@
 				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
 				GCC_WARN_UNUSED_FUNCTION = YES;
 				GCC_WARN_UNUSED_VARIABLE = YES;
-				IPHONEOS_DEPLOYMENT_TARGET = 18.5;
+				IPHONEOS_DEPLOYMENT_TARGET = 18.6;
 				LOCALIZATION_PREFERS_STRING_CATALOGS = YES;
 				MTL_ENABLE_DEBUG_INFO = NO;
 				MTL_FAST_MATH = YES;
@@ -664,7 +697,7 @@
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = MJ3P95GLA4;
 				GENERATE_INFOPLIST_FILE = YES;
-				IPHONEOS_DEPLOYMENT_TARGET = 18.5;
+				IPHONEOS_DEPLOYMENT_TARGET = 18.6;
 				MARKETING_VERSION = 1.0;
 				PRODUCT_BUNDLE_IDENTIFIER = "NagataInc.little-chefTests";
 				PRODUCT_NAME = "$(TARGET_NAME)";
@@ -683,7 +716,7 @@
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = MJ3P95GLA4;
 				GENERATE_INFOPLIST_FILE = YES;
-				IPHONEOS_DEPLOYMENT_TARGET = 18.5;
+				IPHONEOS_DEPLOYMENT_TARGET = 18.6;
 				MARKETING_VERSION = 1.0;
 				PRODUCT_BUNDLE_IDENTIFIER = "NagataInc.little-chefTests";
 				PRODUCT_NAME = "$(TARGET_NAME)";

@@ -65,6 +65,20 @@ class LLMService: ObservableObject {
         #endif
     }
 
+    /// Whether an opportunistic (non-user-initiated) LLM pass can run right now without
+    /// surprising the user with a first-time multi-GB on-device model download. True for
+    /// BigBro (network-based, no local download) or when the on-device model the user
+    /// would use is already downloaded.
+    var isReadyForOpportunisticCleanup: Bool {
+        switch currentProvider {
+        case .bigBro:
+            return true
+        case .local:
+            guard let model = LLMService.supportedOnDeviceModel else { return false }
+            return isModelDownloaded(model.modelId)
+        }
+    }
+
     // MARK: - Published State
     @Published var isLoaded = false
     @Published var isGenerating = false

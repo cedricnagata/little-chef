@@ -62,9 +62,12 @@ class LocalRecipeParser: ObservableObject {
             dprint("📖 [PARSER] ✅ Parsed from schema.org")
             recipeData = parsed
 
-            // Only run LLM cleanup if something is missing AND LLM parsing is available
+            // Only run LLM cleanup if something is missing, LLM parsing is available, and
+            // doing so won't surprise the user with a multi-GB on-device model download —
+            // schema.org already gave us a usable recipe, so cleanup is a nice-to-have,
+            // not worth silently kicking off a first-time download for.
             let (confidence, _) = evaluateRecipe(recipeData)
-            if confidence < 1.0 && capability.llmRecipeParsingEnabled {
+            if confidence < 1.0 && capability.llmRecipeParsingEnabled && llmService.isReadyForOpportunisticCleanup {
                 dprint("📖 [PARSER] Schema.org incomplete (confidence \(confidence)), running LLM cleanup")
                 statusMessage = "Filling in missing details..."
                 if let cleaned = try? await cleanupWithLLM(schema: recipeData, sourceUrl: url) {
