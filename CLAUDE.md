@@ -110,6 +110,11 @@ Read the error before changing anything; these look alike and aren't.
 | `error: … doesn't include signing certificate` at **Archive** | Profile predates the certificate. Delete the profile in the portal and let CI remint it |
 | `security import` fails on empty input | Secrets set on an environment the job doesn't declare |
 
+Validate a `.p8` locally with `openssl pkey -noout -in key.p8` — prints nothing and
+exits 0 when the key is good. **Not** `openssl pkcs8 … -noout`: `pkcs8` has no `-noout`
+flag in LibreSSL (`/usr/bin/openssl` on macOS) or in OpenSSL 3, so that spelling
+rejects every key and tells you nothing.
+
 Inspect a run:
 
 ```sh

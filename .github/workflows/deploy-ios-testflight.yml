@@ -71,9 +71,14 @@ jobs:
           # decodes cleanly here and then dies inside xcodebuild as
           # "Invalid authentication key credential (invalidPEMDocument)", which reads
           # like an auth failure rather than a malformed file. Diagnose it here instead.
-          # -noout prints nothing, so the key never reaches the log.
-          if ! openssl pkcs8 -in "$KEY_PATH" -nocrypt -inform PEM -noout 2>/dev/null; then
-            echo "::error::ASC_KEY_P8_BASE64 does not decode to a valid PKCS#8 PEM. It must be the base64 of the whole .p8 file, delimiter lines included. Rebuild it and check locally with: openssl pkcs8 -in key.p8 -nocrypt -inform PEM -noout"
+          #
+          # `pkey -noout`, not `pkcs8 -noout`: pkcs8 has no -noout flag in either
+          # LibreSSL (/usr/bin/openssl on macOS) or OpenSSL 3, so that spelling would
+          # reject every key, valid or not. `pkey -noout` accepts a well-formed PKCS#8
+          # PEM and rejects a bare body on both, and prints nothing on success — so the
+          # key never reaches the log.
+          if ! openssl pkey -noout -in "$KEY_PATH" 2>/dev/null; then
+            echo "::error::ASC_KEY_P8_BASE64 does not decode to a valid PKCS#8 PEM. It must be the base64 of the entire .p8 file, -----BEGIN PRIVATE KEY----- delimiters included. Verify locally with: openssl pkey -noout -in key.p8"
             exit 1
           fi
 
