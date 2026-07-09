@@ -29,6 +29,9 @@ jobs:
       BUILD_DIR: ${{ github.workspace }}/build
       ARCHIVE_PATH: ${{ github.workspace }}/build/little-chef.xcarchive
       EXPORT_PATH: ${{ github.workspace }}/build/export
+      # Not secrets — they ship inside every copy of the app.
+      APP_BUNDLE_ID: NagataInc.little-chef
+      WIDGET_BUNDLE_ID: NagataInc.little-chef.TimerWidget
 
     steps:
       - uses: actions/checkout@v4
@@ -94,6 +97,35 @@ jobs:
 
           rm -f "$RUNNER_TEMP/cert.p12"
 
+      # Export signs for distribution, and `signingStyle: automatic` would make it
+      # attempt cloud signing — which needs to mint an Apple-managed distribution
+      # certificate and so requires an Admin key. An App Manager key gets
+      # "Cloud signing permission error", then "No profiles were found" as the
+      # downstream symptom. Ship the two App Store profiles explicitly instead, bound
+      # to the distribution certificate imported above.
+      - name: Install provisioning profiles
+        env:
+          PROFILE_APP_BASE64: ${{ secrets.IOS_PROFILE_APP_BASE64 }}
+          PROFILE_WIDGET_BASE64: ${{ secrets.IOS_PROFILE_WIDGET_BASE64 }}
+        run: |
+          set -euo pipefail
+          # Xcode 16+ reads UserData/...; older xcodebuild reads the legacy MobileDevice
+          # path. Write both so this survives a runner image bump.
+          DIRS=(
+            "$HOME/Library/MobileDevice/Provisioning Profiles"
+            "$HOME/Library/Developer/Xcode/UserData/Provisioning Profiles"
+          )
+          for d in "${DIRS[@]}"; do mkdir -p "$d"; done
+
+          for pair in "app:$PROFILE_APP_BASE64" "widget:$PROFILE_WIDGET_BASE64"; do
+            name="${pair%%:*}"; b64="${pair#*:}"
+            echo "$b64" | base64 -d > "$RUNNER_TEMP/$name.mobileprovision"
+            for d in "${DIRS[@]}"; do
+              cp "$RUNNER_TEMP/$name.mobileprovision" "$d/$name.mobileprovision"
+            done
+            rm -f "$RUNNER_TEMP/$name.mobileprovision"
+          done
+
       - name: Archive
         env:
           TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
@@ -126,14 +158,18 @@ jobs:
       - name: Export IPA
         env:
           TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
-          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
-          ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+          PROFILE_APP_NAME: ${{ secrets.IOS_PROFILE_APP_NAME }}
+          PROFILE_WIDGET_NAME: ${{ secrets.IOS_PROFILE_WIDGET_NAME }}
         run: |
           set -euo pipefail
           mkdir -p "$BUILD_DIR"
-          # signingStyle=automatic means no provisioningProfiles map: xcodebuild resolves
-          # a profile per embedded bundle ID (app + TimerWidget) through the ASC API.
+          # Manual signing: every embedded bundle ID is mapped to an explicit profile,
+          # so export never calls the App Store Connect API and never needs cloud-signing
+          # rights. signingCertificate pins the identity imported into the keychain above.
           # manageAppVersionAndBuildNumber=false stops export from rewriting our build number.
+          #
+          # No -allowProvisioningUpdates and no -authenticationKey* here on purpose: those
+          # re-enable the cloud-signing path this step exists to avoid.
           cat > "$BUILD_DIR/ExportOptions.plist" <<EOF
           <?xml version="1.0" encoding="UTF-8"?>
           <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -141,7 +177,13 @@ jobs:
           <dict>
             <key>method</key><string>app-store-connect</string>
             <key>teamID</key><string>$TEAM_ID</string>
-            <key>signingStyle</key><string>automatic</string>
+            <key>signingStyle</key><string>manual</string>
+            <key>signingCertificate</key><string>Apple Distribution</string>
+            <key>provisioningProfiles</key>
+            <dict>
+              <key>$APP_BUNDLE_ID</key><string>$PROFILE_APP_NAME</string>
+              <key>$WIDGET_BUNDLE_ID</key><string>$PROFILE_WIDGET_NAME</string>
+            </dict>
             <key>uploadSymbols</key><true/>
             <key>manageAppVersionAndBuildNumber</key><false/>
           </dict>
@@ -151,11 +193,7 @@ jobs:
           xcodebuild -exportArchive \
             -archivePath "$ARCHIVE_PATH" \
             -exportPath "$EXPORT_PATH" \
-            -exportOptionsPlist "$BUILD_DIR/ExportOptions.plist" \
-            -allowProvisioningUpdates \
-            -authenticationKeyPath "$ASC_KEY_PATH" \
-            -authenticationKeyID "$ASC_KEY_ID" \
-            -authenticationKeyIssuerID "$ASC_ISSUER_ID"
+            -exportOptionsPlist "$BUILD_DIR/ExportOptions.plist"
 
       - name: Upload to TestFlight
         env:

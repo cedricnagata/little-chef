@@ -18,27 +18,38 @@ Two ways in, and nothing else:
 `concurrency: testflight-ios` with `cancel-in-progress: false` so two uploads can
 never race for the same build number.
 
-### Signing style: automatic — and why
+### Signing style: automatic archive, manual export — and why
 
 This project has **two signable targets**, `little-chef`
 (`NagataInc.little-chef`) and `TimerWidgetExtension`
 (`NagataInc.little-chef.TimerWidget`). Each needs its own provisioning profile.
 
-`xcodebuild` command-line build settings apply to *every target at once*, so
-manual signing physically cannot hand the app and its widget different profiles.
-The pipeline therefore uses `-allowProvisioningUpdates` with
-`-authenticationKeyPath/-authenticationKeyID/-authenticationKeyIssuerID`, and
-`signingStyle: automatic` in the export options. xcodebuild mints each profile
-through the App Store Connect API.
+`xcodebuild` command-line build settings apply to *every target at once*, so manual
+signing cannot hand the app and its widget different profiles from the command line.
+**Archive** therefore signs automatically: `-allowProvisioningUpdates` with
+`-authenticationKeyPath/-authenticationKeyID/-authenticationKeyIssuerID`. It signs
+with an **Apple Development** identity (which it created via the API, and reuses) and
+Xcode-managed `iOS Team Provisioning Profile`s. That is expected — an archive is not
+the shipping artifact.
 
-The tradeoff, accepted deliberately: **CI creates and mutates provisioning
-profiles in the Apple account.** Certificates are not created — the Apple
-Distribution identity is imported from `IOS_DIST_CERT_P12_BASE64` into a throwaway
-keychain in `$RUNNER_TEMP`.
+**Export** is where distribution signing happens, and it is **manual**. The two App
+Store profiles are installed on the runner and named explicitly in
+`ExportOptions.plist` via a bundle-ID→profile-name map, with
+`signingCertificate: Apple Distribution` pinning the identity imported from
+`IOS_DIST_CERT_P12_BASE64`.
 
-(Manual signing remains possible via per-target xcconfigs plus an
-`ExportOptions.plist` mapping every bundle ID to a profile name. More moving
-parts; only worth it if account mutation becomes unacceptable.)
+Export must *not* use `signingStyle: automatic`, and must not be passed
+`-allowProvisioningUpdates` or `-authenticationKey*`. Those enable **cloud signing**,
+which mints an Apple-managed distribution certificate and requires an **Admin** App
+Store Connect key. Our key is **App Manager**, which is allowed to create the
+*development* certificate Archive uses but not the *distribution* one — so cloud
+signing fails with `Cloud signing permission error`, followed by
+`No profiles for '<bundle id>' were found` as a downstream symptom. Elevating the key
+to Admin would fix it, at the cost of an account-wide credential in CI and a second,
+cloud-managed distribution certificate. We chose explicit profiles instead.
+
+Net effect: CI creates no distribution certificates and mints no distribution
+profiles. Archive still reuses the API-created development certificate.
 
 ### Build numbers
 
@@ -64,14 +75,23 @@ fail confusingly mid-run.
 | Secret | Scope |
 | --- | --- |
 | `APPLE_TEAM_ID` | account (`MJ3P95GLA4`) |
-| `ASC_KEY_ID`, `ASC_ISSUER_ID`, `ASC_KEY_P8_BASE64` | account |
+| `ASC_KEY_ID`, `ASC_ISSUER_ID`, `ASC_KEY_P8_BASE64` | account (**App Manager** role) |
 | `IOS_DIST_CERT_P12_BASE64`, `IOS_DIST_CERT_PASSWORD` | certificate |
+| `IOS_PROFILE_APP_NAME`, `IOS_PROFILE_APP_BASE64` | per app target |
+| `IOS_PROFILE_WIDGET_NAME`, `IOS_PROFILE_WIDGET_BASE64` | per widget target |
 
 Plus repository **variable** `BUILD_NUMBER_OFFSET`.
 
-There are no `IOS_PROVISIONING_PROFILE_*` secrets: automatic signing resolves
-profiles at build time. There is no `IOS_BUNDLE_ID` secret either — with
-`signingStyle: automatic` the export options carry no bundle-ID→profile map.
+Both profiles must be **App Store** distribution profiles bound to the Apple
+Distribution certificate above, and must **not** be Xcode-managed. Verify one before
+wiring it into a secret with
+`~/.claude/skills/ios-testflight-pipeline/scripts/verify-profile.sh <file> <bundle-id>`,
+which checks the App ID, that the embedded certificate's private key is in your
+keychain, and that no devices are provisioned (devices ⇒ Development/Ad Hoc, not App
+Store).
+
+The bundle IDs are plain `env:` in the workflow, not secrets — they ship inside every
+copy of the app.
 
 ### No test gate, on purpose
 
@@ -108,6 +128,9 @@ Read the error before changing anything; these look alike and aren't.
 | `error: … is Xcode managed` at **Archive** | A managed profile met manual signing. This project signs automatically; something regressed the signing style |
 | `error: … doesn't include signing certificate` at **Archive** | Profile predates the certificate. Delete the profile in the portal and let CI remint it |
 | `security import` fails on empty input | Secrets set on an environment the job doesn't declare |
+| `Cloud signing permission error` + `No profiles for '<id>' were found` at **Export** | Export fell back to cloud signing. Check `signingStyle` is `manual` and that no `-allowProvisioningUpdates`/`-authenticationKey*` reached `-exportArchive`. **Not** a missing-profile problem — the lookup was denied, not empty |
+| `Invalid authentication key credential … invalidPEMDocument` at **Archive** | `ASC_KEY_P8_BASE64` decodes to something that isn't a PEM — usually the base64 body saved without its `-----BEGIN PRIVATE KEY-----` delimiters. **Not** an auth failure. Validate with `openssl pkey -noout -in key.p8` (not `openssl pkcs8 … -noout`, which has no such flag in LibreSSL or OpenSSL 3 and rejects every key) |
+| Profile name mismatch at **Export** | `IOS_PROFILE_*_NAME` must be the profile's **Name** field, not its filename or UUID |
 
 Inspect a run:
 
