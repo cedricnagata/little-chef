@@ -20,6 +20,12 @@ build/
 # Configuration files with sensitive data
 little-chef/Config.plist
 
+# Signing material — never commit
+*.p12
+*.p8
+*.mobileprovision
+*.cer
+
 # Local MLX packages (PrismML fork + mlx-swift-lm)
 mlx-swift/
 mlx-swift-lm/
