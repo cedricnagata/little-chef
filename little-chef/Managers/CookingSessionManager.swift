@@ -384,9 +384,7 @@ class CookingSessionManager: ObservableObject, TimerManager {
 
     func startTimer(name: String) {
         if let index = findTimerIndex(named: name) {
-            DispatchQueue.main.async { [weak self] in
-                self?.localTimers[index].start()
-            }
+            localTimers[index].start()
         } else {
             dprint("Timer '\(name)' not found")
         }
