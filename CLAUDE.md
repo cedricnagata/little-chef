@@ -101,6 +101,7 @@ Read the error before changing anything; these look alike and aren't.
 
 | Symptom | Cause |
 | --- | --- |
+| `Invalid authentication key credential … invalidPEMDocument` at **Archive** | `ASC_KEY_P8_BASE64` decodes to something that isn't a PEM — usually the bare base64 body saved without its `-----BEGIN PRIVATE KEY-----` delimiters. **Not** an auth failure. The `Prepare App Store Connect API key` step now catches this |
 | `altool` **401** | Bad/expired App Store Connect key, or wrong issuer |
 | **409 `INVALID_APP_STATE`** | App record deleted/removed in App Store Connect. **Not** a signing problem — check the bundle ID against the live record |
 | **409 `VALIDATION_ERROR`**, "SDK version issue" | Runner's Xcode too old; see the `macos-26` invariant |

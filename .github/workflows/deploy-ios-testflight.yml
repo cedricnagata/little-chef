@@ -66,6 +66,17 @@ jobs:
           KEY_PATH="$RUNNER_TEMP/AuthKey_${ASC_KEY_ID}.p8"
           echo "$ASC_KEY_P8_BASE64" | base64 -d > "$KEY_PATH"
           chmod 600 "$KEY_PATH"
+
+          # A secret holding the bare base64 body, with no -----BEGIN----- delimiters,
+          # decodes cleanly here and then dies inside xcodebuild as
+          # "Invalid authentication key credential (invalidPEMDocument)", which reads
+          # like an auth failure rather than a malformed file. Diagnose it here instead.
+          # -noout prints nothing, so the key never reaches the log.
+          if ! openssl pkcs8 -in "$KEY_PATH" -nocrypt -inform PEM -noout 2>/dev/null; then
+            echo "::error::ASC_KEY_P8_BASE64 does not decode to a valid PKCS#8 PEM. It must be the base64 of the whole .p8 file, delimiter lines included. Rebuild it and check locally with: openssl pkcs8 -in key.p8 -nocrypt -inform PEM -noout"
+            exit 1
+          fi
+
           echo "ASC_KEY_PATH=$KEY_PATH" >> "$GITHUB_ENV"
 
       # Automatic signing creates *profiles*, not certificates — the Apple Distribution
