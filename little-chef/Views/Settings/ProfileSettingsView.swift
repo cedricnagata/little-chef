@@ -6,6 +6,7 @@
 import SwiftUI
 import AVFoundation
 import Network
+import BigBroKit
 
 struct ProfileSettingsView: View {
     @EnvironmentObject var llmService: LLMService
@@ -17,6 +18,7 @@ struct ProfileSettingsView: View {
     @State private var speechRate: Float = AVSpeechUtteranceDefaultSpeechRate
     @State private var voiceIdentifier = "com.apple.ttsbundle.Samantha-compact"
     @State private var autoSpeakResponses = true
+    @State private var useBigBroSpeech = false
     @State private var showingDeleteAlert = false
     @State private var isDeleting = false
     @State private var hasLoaded = false
@@ -102,6 +104,11 @@ struct ProfileSettingsView: View {
                         Slider(value: speechRateMultiplier, in: 0.5...2.0, step: 0.1)
                             .tint(.orange)
                     }
+
+                    BigBroSpeechToggle(
+                        client: llmService.bigBroClient,
+                        useBigBroSpeech: $useBigBroSpeech
+                    )
                 }
             } header: {
                 Text("Voice")
@@ -138,6 +145,7 @@ struct ProfileSettingsView: View {
         .onChange(of: speechRate) { _, _ in saveIfLoaded() }
         .onChange(of: voiceIdentifier) { _, _ in saveIfLoaded() }
         .onChange(of: autoSpeakResponses) { _, _ in saveIfLoaded() }
+        .onChange(of: useBigBroSpeech) { _, _ in saveIfLoaded() }
         .alert("Delete All Data", isPresented: $showingDeleteAlert) {
             Button("Cancel", role: .cancel) { }
             Button("Delete", role: .destructive) { deleteAllData() }
@@ -306,6 +314,7 @@ struct ProfileSettingsView: View {
                     speechRate = prefs.voiceSettings.speechRate
                     voiceIdentifier = prefs.voiceSettings.voiceIdentifier
                     autoSpeakResponses = prefs.voiceSettings.autoSpeakResponses
+                    useBigBroSpeech = prefs.voiceSettings.useBigBroSpeech
                     LLMService.shared.currentProvider = provider
                     hasLoaded = true
                 }
@@ -326,7 +335,8 @@ struct ProfileSettingsView: View {
             LocalVoiceSettings(
                 speechRate: speechRate,
                 voiceIdentifier: voiceIdentifier,
-                autoSpeakResponses: autoSpeakResponses
+                autoSpeakResponses: autoSpeakResponses,
+                useBigBroSpeech: useBigBroSpeech
             )
         )
 
@@ -336,6 +346,7 @@ struct ProfileSettingsView: View {
                     speechRate: speechRate,
                     voiceIdentifier: voiceIdentifier,
                     autoSpeakResponses: autoSpeakResponses,
+                    useBigBroSpeech: useBigBroSpeech,
                     llmProvider: llmProvider
                 )
             } catch {
@@ -360,6 +371,36 @@ struct ProfileSettingsView: View {
                 await MainActor.run { isDeleting = false }
             }
         }
+    }
+}
+
+/// Opt-in to speaking through a paired Mac.
+///
+/// Observes the client directly: `ProfileSettingsView` watches `LLMService`, which does not
+/// republish when its `BigBroClient` connects, so the row would otherwise stay greyed out until
+/// something else forced a redraw.
+private struct BigBroSpeechToggle: View {
+    @ObservedObject var client: BigBroClient
+    @Binding var useBigBroSpeech: Bool
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Toggle("Use BigBro voice", isOn: $useBigBroSpeech)
+                .disabled(!client.isConnected)
+
+            Text(footnote)
+                .font(.caption)
+                .foregroundColor(.secondary)
+        }
+    }
+
+    private var footnote: String {
+        if !client.isConnected {
+            return "Connect to a BigBro Mac to use its voice."
+        }
+        return useBigBroSpeech
+            ? "Speaking through \(client.connectedDevice?.name ?? "BigBro"). Falls back to the on-device voice if the Mac goes away."
+            : "Speaking with the on-device voice."
     }
 }
 

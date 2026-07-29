@@ -228,6 +228,7 @@ class LocalDataManager: ObservableObject {
         speechRate: Float? = nil,
         voiceIdentifier: String? = nil,
         autoSpeakResponses: Bool? = nil,
+        useBigBroSpeech: Bool? = nil,
         cookingModel: CookingModelChoice? = nil,
         llmProvider: LLMProvider? = nil
     ) throws {
@@ -239,6 +240,7 @@ class LocalDataManager: ObservableObject {
             speechRate: speechRate,
             voiceIdentifier: voiceIdentifier,
             autoSpeakResponses: autoSpeakResponses,
+            useBigBroSpeech: useBigBroSpeech,
             cookingModel: cookingModel,
             llmProvider: llmProvider
         )
@@ -255,6 +257,7 @@ class LocalDataManager: ObservableObject {
         preferences.speechRate = 0.5
         preferences.voiceIdentifier = "com.apple.ttsbundle.Samantha-compact"
         preferences.autoSpeakResponses = true
+        preferences.useBigBroSpeech = false
         preferences.cookingModel = CookingModelChoice.bonsai8B.rawValue
         preferences.updatedAt = Date()
 

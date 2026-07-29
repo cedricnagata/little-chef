@@ -10,6 +10,7 @@ import Speech
 import AVFoundation
 import SwiftUI
 import AudioToolbox
+import BigBroKit
 
 @MainActor
 class VoiceAssistant: NSObject, ObservableObject {
@@ -51,8 +52,20 @@ class VoiceAssistant: NSObject, ObservableObject {
     // Track whether we activated the audio session
     private var isAudioSessionActive = false
 
+    // BigBro speech backend
+    private let llmService: LLMService
+    /// `configuresAudioSession: false` because `activateForSpeaking()` below owns the session —
+    /// two owners fighting over the category breaks audio routing.
+    private let bigBroPlayer = BigBroAudioPlayer(configuresAudioSession: false)
+    /// The in-flight BigBro utterance, retained so it can be cancelled on stop.
+    private var bigBroSpeechTask: Task<Void, Never>?
 
-    override init() {
+    override convenience init() {
+        self.init(llmService: .shared)
+    }
+
+    init(llmService: LLMService) {
+        self.llmService = llmService
         super.init()
         synthesizer.delegate = self
         requestPermissions()
@@ -190,6 +203,9 @@ class VoiceAssistant: NSObject, ObservableObject {
         guard isAudioSessionActive else { return }
         guard !isListening && !isSpeaking && !isWakeWordListening else { return }
 
+        // Release the playback engine before the session goes away, or it holds the route open.
+        bigBroPlayer.shutdown()
+
         do {
             try AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
             isAudioSessionActive = false
@@ -320,18 +336,97 @@ class VoiceAssistant: NSObject, ObservableObject {
         return utterance
     }
 
+    /// Whether spoken output should go through the Mac right now.
+    ///
+    /// Needs both the preference *and* a live connection: the toggle is a preference, and
+    /// falling back to the on-device voice beats going silent when the Mac disappears.
+    private var shouldUseBigBro: Bool {
+        (voiceSettings?.useBigBroSpeech ?? false) && llmService.bigBroClient.isConnected
+    }
+
+    /// Speaks one utterance with whichever backend is active.
+    private func speakUtterance(_ text: String) {
+        if shouldUseBigBro {
+            speakViaBigBro(text)
+        } else {
+            synthesizer.speak(configuredUtterance(for: text))
+        }
+    }
+
+    /// Streams one utterance from the Mac, converging on the same completion path the
+    /// synthesizer delegate uses so the sentence queue drains identically either way.
+    private func speakViaBigBro(_ text: String) {
+        bigBroSpeechTask?.cancel()
+        bigBroSpeechTask = Task { [weak self] in
+            guard let self else { return }
+            do {
+                try await self.bigBroPlayer.play(
+                    self.llmService.bigBroClient.speak(text, speed: self.bigBroSpeed())
+                )
+                // stop() makes play() return normally rather than throwing, so without this a
+                // superseded utterance would report completion and advance the queue a second time.
+                guard !Task.isCancelled else { return }
+                self.finishedSpeaking(cancelled: false)
+            } catch is CancellationError {
+                // stopCurrentSpeech() already reset the state.
+            } catch {
+                dprint("🔊 BigBro speech failed (\(error.localizedDescription)) — using the on-device voice")
+                // Say it locally rather than dropping the sentence. The synthesizer delegate
+                // then drives the queue from here as usual.
+                self.synthesizer.speak(self.configuredUtterance(for: text))
+            }
+        }
+    }
+
+    /// little-chef stores an absolute `AVSpeechUtterance.rate`; BigBro takes a multiplier where
+    /// 1.0 is normal speed.
+    private func bigBroSpeed() -> Double {
+        let rate = voiceSettings?.speechRate ?? AVSpeechUtteranceDefaultSpeechRate
+        return Double(rate / AVSpeechUtteranceDefaultSpeechRate)
+    }
+
+    /// Silences whichever backend is currently speaking.
+    private func stopCurrentSpeech() {
+        bigBroSpeechTask?.cancel()
+        bigBroSpeechTask = nil
+        bigBroPlayer.stop()
+        synthesizer.stopSpeaking(at: .immediate)
+    }
+
+    /// The single completion path for a finished utterance, whichever backend produced it.
+    ///
+    /// This logic used to live in the `AVSpeechSynthesizerDelegate` callbacks, but BigBro
+    /// playback has no delegate — both paths must converge here or the sentence queue stalls
+    /// and hands-free mode never resumes listening.
+    private func finishedSpeaking(cancelled: Bool) {
+        isSpeakingFromQueue = false
+        if cancelled { sentenceQueue.removeAll() }
+
+        if sentenceQueue.isEmpty {
+            isSpeaking = false
+            if isHandsFreeMode {
+                dprint("🎤 [HF] TTS finished, resuming wake word")
+                resumeHandsFreeListening()
+            } else {
+                deactivateAudioSession()
+            }
+        } else {
+            speakNextInQueue()
+        }
+    }
+
     func speak(_ text: String) {
         guard !text.isEmpty else { return }
 
-        synthesizer.stopSpeaking(at: .immediate)
+        stopCurrentSpeech()
         activateForSpeaking()
 
         isSpeaking = true
-        synthesizer.speak(configuredUtterance(for: text))
+        speakUtterance(text)
     }
 
     func stopSpeaking() {
-        synthesizer.stopSpeaking(at: .immediate)
+        stopCurrentSpeech()
         sentenceQueue.removeAll()
         isSpeakingFromQueue = false
         isSpeaking = false
@@ -361,7 +456,7 @@ class VoiceAssistant: NSObject, ObservableObject {
         activateForSpeaking()
 
         isSpeaking = true
-        synthesizer.speak(configuredUtterance(for: sentence))
+        speakUtterance(sentence)
     }
 
     // MARK: - Convenience Methods
@@ -408,7 +503,7 @@ class VoiceAssistant: NSObject, ObservableObject {
 
     func stopHandsFreeMode() {
         isHandsFreeMode = false
-        synthesizer.stopSpeaking(at: .immediate)
+        stopCurrentSpeech()
         sentenceQueue.removeAll()
         isSpeakingFromQueue = false
         isSpeaking = false
@@ -625,33 +720,10 @@ class VoiceAssistant: NSObject, ObservableObject {
 
 extension VoiceAssistant: @preconcurrency AVSpeechSynthesizerDelegate {
     func speechSynthesizer(_ synthesizer: AVSpeechSynthesizer, didFinish utterance: AVSpeechUtterance) {
-        DispatchQueue.main.async {
-            self.isSpeakingFromQueue = false
-            if self.sentenceQueue.isEmpty {
-                self.isSpeaking = false
-                if self.isHandsFreeMode {
-                    dprint("🎤 [HF] TTS finished, resuming wake word")
-                    self.resumeHandsFreeListening()
-                } else {
-                    self.deactivateAudioSession()
-                }
-            } else {
-                self.speakNextInQueue()
-            }
-        }
+        DispatchQueue.main.async { self.finishedSpeaking(cancelled: false) }
     }
 
     func speechSynthesizer(_ synthesizer: AVSpeechSynthesizer, didCancel utterance: AVSpeechUtterance) {
-        DispatchQueue.main.async {
-            self.isSpeakingFromQueue = false
-            self.sentenceQueue.removeAll()
-            self.isSpeaking = false
-            if self.isHandsFreeMode {
-                dprint("🎤 [HF] TTS cancelled, resuming wake word")
-                self.resumeHandsFreeListening()
-            } else {
-                self.deactivateAudioSession()
-            }
-        }
+        DispatchQueue.main.async { self.finishedSpeaking(cancelled: true) }
     }
 }
