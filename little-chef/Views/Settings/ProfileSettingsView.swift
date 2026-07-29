@@ -9,6 +9,7 @@ import Network
 
 struct ProfileSettingsView: View {
     @EnvironmentObject var llmService: LLMService
+    @EnvironmentObject var voiceAssistant: VoiceAssistant
 
     @State private var llmProvider: LLMProvider = .local
     /// Absolute `AVSpeechUtterance.rate`, where `AVSpeechUtteranceDefaultSpeechRate` is normal
@@ -28,12 +29,25 @@ struct ProfileSettingsView: View {
         var id: Int { self == .wifiConfirm ? 0 : 1 }
     }
 
-    private let iosVoices = [
-        ("com.apple.ttsbundle.Samantha-compact", "Samantha"),
-        ("com.apple.ttsbundle.Alex-compact", "Alex"),
-        ("com.apple.ttsbundle.Victoria-compact", "Victoria"),
-        ("com.apple.ttsbundle.Daniel-compact", "Daniel (UK)")
-    ]
+    /// Voices actually installed on this device.
+    ///
+    /// This was previously a hardcoded list of legacy `com.apple.ttsbundle.*` identifiers.
+    /// Modern iOS ships `com.apple.voice.compact.*` forms and the old ones are frequently
+    /// absent, so `AVSpeechSynthesisVoice(identifier:)` returned nil and the synthesizer fell
+    /// back to the system default without any error — the picker changed but the voice did not.
+    /// Enumerating the device guarantees every option resolves.
+    private var availableVoices: [AVSpeechSynthesisVoice] {
+        let deviceLanguage = Locale.current.language.languageCode?.identifier ?? "en"
+        let wanted = Set(["en", deviceLanguage])
+        return AVSpeechSynthesisVoice.speechVoices()
+            .filter { voice in wanted.contains { voice.language.hasPrefix($0) } }
+            .sorted { ($0.name, $0.language) < ($1.name, $1.language) }
+    }
+
+    private func voiceLabel(_ voice: AVSpeechSynthesisVoice) -> String {
+        let language = Locale.current.localizedString(forIdentifier: voice.language) ?? voice.language
+        return "\(voice.name) (\(language))"
+    }
 
     /// Presents the stored rate as a multiple of normal speed, so "normal" reads as 1.0x.
     ///
@@ -65,8 +79,14 @@ struct ProfileSettingsView: View {
 
                 if autoSpeakResponses {
                     Picker("Voice", selection: $voiceIdentifier) {
-                        ForEach(iosVoices, id: \.0) { voice in
-                            Text(voice.1).tag(voice.0)
+                        // A saved voice that is no longer installed would otherwise drop out of
+                        // the picker and silently reset the selection on the next render.
+                        if !availableVoices.contains(where: { $0.identifier == voiceIdentifier }) {
+                            Text("System Default").tag(voiceIdentifier)
+                            Divider()
+                        }
+                        ForEach(availableVoices, id: \.identifier) { voice in
+                            Text(voiceLabel(voice)).tag(voice.identifier)
                         }
                     }
 
@@ -296,6 +316,20 @@ struct ProfileSettingsView: View {
     }
 
     private func savePreferences() {
+        // Push straight to the assistant as well as persisting.
+        //
+        // VoiceAssistant.voiceSettings is otherwise only ever fed from
+        // CookingSession.userPreferences, which is a `let` snapshot taken once when a cooking
+        // session starts and never refreshed from SwiftData. Without this, an edit here would
+        // not take effect until the session was ended and restarted.
+        voiceAssistant.updateVoiceSettings(
+            LocalVoiceSettings(
+                speechRate: speechRate,
+                voiceIdentifier: voiceIdentifier,
+                autoSpeakResponses: autoSpeakResponses
+            )
+        )
+
         Task {
             do {
                 try LocalDataManager.shared.updatePreferences(
@@ -333,5 +367,6 @@ struct ProfileSettingsView: View {
     NavigationStack {
         ProfileSettingsView()
             .environmentObject(LLMService.shared)
+            .environmentObject(VoiceAssistant())
     }
 }

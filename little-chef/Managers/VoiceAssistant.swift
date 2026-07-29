@@ -296,14 +296,27 @@ class VoiceAssistant: NSObject, ObservableObject {
         min(max(rate, AVSpeechUtteranceMinimumSpeechRate), AVSpeechUtteranceMaximumSpeechRate)
     }
 
+    /// Resolves the configured voice, falling back explicitly when it is not installed.
+    ///
+    /// `AVSpeechSynthesisVoice(identifier:)` is failable. Assigning its nil result straight to
+    /// `utterance.voice` makes the synthesizer fall back to the system default *silently*,
+    /// which reads as "I picked a different voice and nothing changed". Logging the miss makes
+    /// the cause visible.
+    private func resolvedVoice() -> AVSpeechSynthesisVoice? {
+        if let identifier = voiceSettings?.voiceIdentifier {
+            if let voice = AVSpeechSynthesisVoice(identifier: identifier) {
+                return voice
+            }
+            dprint("🔊 Voice '\(identifier)' is not installed on this device — using the default")
+        }
+        return AVSpeechSynthesisVoice(language: Locale.current.identifier)
+            ?? AVSpeechSynthesisVoice(language: "en-US")
+    }
+
     private func configuredUtterance(for text: String) -> AVSpeechUtterance {
         let utterance = AVSpeechUtterance(string: text)
         utterance.rate = clampedRate(voiceSettings?.speechRate ?? AVSpeechUtteranceDefaultSpeechRate)
-        if let identifier = voiceSettings?.voiceIdentifier {
-            utterance.voice = AVSpeechSynthesisVoice(identifier: identifier)
-        } else {
-            utterance.voice = AVSpeechSynthesisVoice(language: "en-US")
-        }
+        utterance.voice = resolvedVoice()
         return utterance
     }
 
