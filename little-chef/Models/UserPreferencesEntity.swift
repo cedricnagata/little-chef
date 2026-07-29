@@ -74,6 +74,9 @@ final class UserPreferencesEntity {
     var speechRate: Float = 0.5
     var voiceIdentifier: String = "com.apple.ttsbundle.Samantha-compact"
     var autoSpeakResponses: Bool = true
+    /// Route spoken output through a paired BigBro Mac instead of AVSpeechSynthesizer.
+    /// Ignored unless a Mac is actually connected.
+    var useBigBroSpeech: Bool = false
     var cookingModel: String = "bonsai8b"
     var llmProvider: String = "local"
     var updatedAt: Date = Date()
@@ -85,6 +88,7 @@ final class UserPreferencesEntity {
         speechRate: Float = 0.5,
         voiceIdentifier: String = "com.apple.ttsbundle.Samantha-compact",
         autoSpeakResponses: Bool = true,
+        useBigBroSpeech: Bool = false,
         cookingModel: String = "bonsai8b",
         llmProvider: String = "local",
         updatedAt: Date = Date()
@@ -95,6 +99,7 @@ final class UserPreferencesEntity {
         self.speechRate = speechRate
         self.voiceIdentifier = voiceIdentifier
         self.autoSpeakResponses = autoSpeakResponses
+        self.useBigBroSpeech = useBigBroSpeech
         self.cookingModel = cookingModel
         self.llmProvider = llmProvider
         self.updatedAt = updatedAt
@@ -110,7 +115,8 @@ final class UserPreferencesEntity {
             voiceSettings: LocalVoiceSettings(
                 speechRate: speechRate,
                 voiceIdentifier: voiceIdentifier,
-                autoSpeakResponses: autoSpeakResponses
+                autoSpeakResponses: autoSpeakResponses,
+                useBigBroSpeech: useBigBroSpeech
             ),
             cookingModel: CookingModelChoice(rawValue: cookingModel) ?? .bonsai8B,
             llmProvider: LLMProvider(rawValue: llmProvider) ?? .local
@@ -129,6 +135,7 @@ final class UserPreferencesEntity {
         speechRate: Float? = nil,
         voiceIdentifier: String? = nil,
         autoSpeakResponses: Bool? = nil,
+        useBigBroSpeech: Bool? = nil,
         cookingModel: CookingModelChoice? = nil,
         llmProvider: LLMProvider? = nil
     ) {
@@ -147,6 +154,9 @@ final class UserPreferencesEntity {
         if let autoSpeakResponses = autoSpeakResponses {
             self.autoSpeakResponses = autoSpeakResponses
         }
+        if let useBigBroSpeech = useBigBroSpeech {
+            self.useBigBroSpeech = useBigBroSpeech
+        }
         if let cookingModel = cookingModel {
             self.cookingModel = cookingModel.rawValue
         }
@@ -161,14 +171,21 @@ final class UserPreferencesEntity {
 
 /// Local voice settings (simplified - no ElevenLabs)
 struct LocalVoiceSettings: Codable, Equatable {
+    /// Absolute `AVSpeechUtterance.rate` on its 0.0–1.0 scale, where 0.5
+    /// (`AVSpeechUtteranceDefaultSpeechRate`) is normal speed — not a multiplier. Settings
+    /// displays it as a multiple of normal, so a stored 0.5 shows as "1.0x".
     let speechRate: Float
     let voiceIdentifier: String
     let autoSpeakResponses: Bool
+    /// Route spoken output through a paired BigBro Mac. Falls back to `AVSpeechSynthesizer`
+    /// whenever no Mac is connected, so this is a preference rather than a hard switch.
+    var useBigBroSpeech: Bool = false
 
     static let defaultSettings = LocalVoiceSettings(
         speechRate: 0.5,
         voiceIdentifier: "com.apple.ttsbundle.Samantha-compact",
-        autoSpeakResponses: true
+        autoSpeakResponses: true,
+        useBigBroSpeech: false
     )
 }
 

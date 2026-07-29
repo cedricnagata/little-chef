@@ -61,7 +61,7 @@ struct little_chefApp: App {
     init() {
         let llm = LLMService.shared
         _llmService = StateObject(wrappedValue: llm)
-        _voiceAssistant = StateObject(wrappedValue: VoiceAssistant())
+        _voiceAssistant = StateObject(wrappedValue: VoiceAssistant(llmService: llm))
         _cookingSessionManager = StateObject(wrappedValue: CookingSessionManager(llmService: llm))
     }
 
