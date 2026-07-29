@@ -283,7 +283,8 @@ struct RecipeDetailView: View {
             // Ingredients
             Section(header: Text("Ingredients (\(editIngredients.count))")) {
                 ForEach($editIngredients.indices, id: \.self) { index in
-                    TextField("Ingredient", text: $editIngredients[index])
+                    TextField("Ingredient", text: $editIngredients[index], axis: .vertical)
+                        .lineLimit(1...)
                 }
                 .onMove { editIngredients.move(fromOffsets: $0, toOffset: $1) }
                 .onDelete { editIngredients.remove(atOffsets: $0) }
@@ -315,7 +316,7 @@ struct RecipeDetailView: View {
                         }
                         .padding(.top, 2)
                         TextField("Instruction", text: $editInstructions[index], axis: .vertical)
-                            .lineLimit(2...6)
+                            .lineLimit(2...)
                     }
                 }
                 .onMove { editInstructions.move(fromOffsets: $0, toOffset: $1) }
@@ -333,7 +334,7 @@ struct RecipeDetailView: View {
                     }
                     .padding(.top, 2)
                     TextField("Add instruction...", text: $newInstruction, axis: .vertical)
-                        .lineLimit(2...6)
+                        .lineLimit(2...)
                         .onSubmit { addInstruction() }
                     Button(action: addInstruction) {
                         Image(systemName: "plus.circle.fill")

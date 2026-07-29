@@ -121,8 +121,9 @@ struct EditRecipeView: View {
     private var ingredientsSection: some View {
         Section {
             ForEach($ingredients.indices, id: \.self) { index in
-                HStack {
-                    TextField("Ingredient", text: $ingredients[index])
+                HStack(alignment: .top) {
+                    TextField("Ingredient", text: $ingredients[index], axis: .vertical)
+                        .lineLimit(1...)
 
                     Button(action: {
                         withAnimation { _ = ingredients.remove(at: index) }
@@ -163,7 +164,7 @@ struct EditRecipeView: View {
                         .padding(.top, 8)
 
                     TextField("Instruction", text: $instructions[index], axis: .vertical)
-                        .lineLimit(2...5)
+                        .lineLimit(2...)
 
                     Button(action: {
                         withAnimation { _ = instructions.remove(at: index) }
@@ -185,7 +186,7 @@ struct EditRecipeView: View {
                     .padding(.top, 8)
 
                 TextField("Add instruction...", text: $newInstruction, axis: .vertical)
-                    .lineLimit(2...5)
+                    .lineLimit(2...)
                     .onSubmit { addInstruction() }
 
                 Button(action: addInstruction) {
