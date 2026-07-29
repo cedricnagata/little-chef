@@ -161,6 +161,9 @@ final class UserPreferencesEntity {
 
 /// Local voice settings (simplified - no ElevenLabs)
 struct LocalVoiceSettings: Codable, Equatable {
+    /// Absolute `AVSpeechUtterance.rate` on its 0.0–1.0 scale, where 0.5
+    /// (`AVSpeechUtteranceDefaultSpeechRate`) is normal speed — not a multiplier. Settings
+    /// displays it as a multiple of normal, so a stored 0.5 shows as "1.0x".
     let speechRate: Float
     let voiceIdentifier: String
     let autoSpeakResponses: Bool

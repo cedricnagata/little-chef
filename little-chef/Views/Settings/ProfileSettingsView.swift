@@ -11,7 +11,9 @@ struct ProfileSettingsView: View {
     @EnvironmentObject var llmService: LLMService
 
     @State private var llmProvider: LLMProvider = .local
-    @State private var speechRate: Float = 0.5
+    /// Absolute `AVSpeechUtterance.rate`, where `AVSpeechUtteranceDefaultSpeechRate` is normal
+    /// speed. Shown to the user as a multiple of that via `speechRateMultiplier`.
+    @State private var speechRate: Float = AVSpeechUtteranceDefaultSpeechRate
     @State private var voiceIdentifier = "com.apple.ttsbundle.Samantha-compact"
     @State private var autoSpeakResponses = true
     @State private var showingDeleteAlert = false
@@ -32,6 +34,19 @@ struct ProfileSettingsView: View {
         ("com.apple.ttsbundle.Victoria-compact", "Victoria"),
         ("com.apple.ttsbundle.Daniel-compact", "Daniel (UK)")
     ]
+
+    /// Presents the stored rate as a multiple of normal speed, so "normal" reads as 1.0x.
+    ///
+    /// `AVSpeechUtterance.rate` runs 0.0–1.0 with 0.5 as normal, which surfaced as "0.5x" and
+    /// made the top half of the old 0.1–2.0 slider dead: every value above 1.0 saturated at
+    /// maximum and sounded identical. Because the default is exactly half the maximum, a
+    /// 0.5x–2.0x multiplier covers the whole usable range with none of it wasted.
+    private var speechRateMultiplier: Binding<Float> {
+        Binding(
+            get: { speechRate / AVSpeechUtteranceDefaultSpeechRate },
+            set: { speechRate = $0 * AVSpeechUtteranceDefaultSpeechRate }
+        )
+    }
 
     var body: some View {
         Form {
@@ -59,12 +74,12 @@ struct ProfileSettingsView: View {
                         HStack {
                             Text("Speech Rate")
                             Spacer()
-                            Text("\(speechRate, specifier: "%.1f")x")
+                            Text("\(speechRateMultiplier.wrappedValue, specifier: "%.1f")x")
                                 .font(.caption)
                                 .foregroundColor(.secondary)
                                 .monospacedDigit()
                         }
-                        Slider(value: $speechRate, in: 0.1...2.0, step: 0.1)
+                        Slider(value: speechRateMultiplier, in: 0.5...2.0, step: 0.1)
                             .tint(.orange)
                     }
                 }

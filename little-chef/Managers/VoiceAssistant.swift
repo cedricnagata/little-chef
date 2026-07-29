@@ -288,13 +288,20 @@ class VoiceAssistant: NSObject, ObservableObject {
         self.voiceSettings = settings
     }
 
+    /// `AVSpeechUtterance.rate` is an absolute scale from `AVSpeechUtteranceMinimumSpeechRate`
+    /// to `AVSpeechUtteranceMaximumSpeechRate`, where `AVSpeechUtteranceDefaultSpeechRate`
+    /// (0.5) is normal speed — not a multiplier. Settings stores that absolute value and
+    /// presents it as a multiple of the default; see `ProfileSettingsView`.
+    private func clampedRate(_ rate: Float) -> Float {
+        min(max(rate, AVSpeechUtteranceMinimumSpeechRate), AVSpeechUtteranceMaximumSpeechRate)
+    }
+
     private func configuredUtterance(for text: String) -> AVSpeechUtterance {
         let utterance = AVSpeechUtterance(string: text)
-        if let voiceSettings {
-            utterance.rate = voiceSettings.speechRate
-            utterance.voice = AVSpeechSynthesisVoice(identifier: voiceSettings.voiceIdentifier)
+        utterance.rate = clampedRate(voiceSettings?.speechRate ?? AVSpeechUtteranceDefaultSpeechRate)
+        if let identifier = voiceSettings?.voiceIdentifier {
+            utterance.voice = AVSpeechSynthesisVoice(identifier: identifier)
         } else {
-            utterance.rate = 0.5
             utterance.voice = AVSpeechSynthesisVoice(language: "en-US")
         }
         return utterance
