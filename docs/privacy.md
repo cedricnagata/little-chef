@@ -16,14 +16,14 @@ LittleChef does not collect, transmit, sell, or share any personal information. 
 
 **Recipes you import or create.** Stored locally on your device using Apple's SwiftData framework. If you have iCloud enabled, recipes also sync to your personal private iCloud database so they appear on your other devices. We have no access to this data — it is encrypted and visible only to you.
 
-**Voice and speech.** When you use the hands-free assistant, audio is captured by the microphone and converted to text using Apple's on-device Speech Recognition framework. Audio is never sent to LittleChef or any third-party server.
+**Voice and speech.** By default, audio captured by the microphone is converted to text using Apple's on-device Speech Recognition framework and never leaves your device. If you turn on "Use BigBro for voice" in Settings — which requires pairing with your own Mac first — recordings of what you say are sent over your local Wi-Fi network to that Mac, which transcribes them and speaks the reply back. Audio is never sent to LittleChef or any third-party server in either case.
 
 **Recipe photos.** When you import a recipe by photo, the image is processed locally using Apple's Vision framework for OCR. Images are not uploaded anywhere.
 
 **AI inference.**
 
 - *On-device mode (default):* The Bonsai 8B model runs entirely on your iPhone using Apple's MLX framework. No prompts or responses leave the device. The model weights are downloaded once from HuggingFace's public model repository on first use.
-- *BigBro mode (optional):* If you choose to pair LittleChef with a Mac running the BigBro companion app on your local network, prompts and responses are sent over your local Wi-Fi network to that Mac for processing. They do not leave your local network.
+- *BigBro mode (optional):* If you choose to pair LittleChef with a Mac running the BigBro companion app on your local network, prompts and responses — and, if you turn on BigBro voice, recorded audio and synthesized speech — are sent over your local Wi-Fi network to that Mac for processing. They do not leave your local network.
 
 **Recipe URL imports.** When you import a recipe from a URL, the app fetches the page directly from that website using the standard iOS web view. The destination website may log the request as it would any normal browser visit, subject to that site's own privacy policy.
 

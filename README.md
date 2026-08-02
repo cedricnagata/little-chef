@@ -38,10 +38,11 @@ Runs [PrismML Bonsai 8B (1-bit)](https://huggingface.co/prism-ml/Bonsai-8B-mlx-1
 - ~44 tok/s generation on iPhone 16 Pro Max
 
 ### BigBro (Mac Companion)
-Pairs with a Mac running the BigBro companion app over local network. The Mac runs `gpt-oss:20b` and handles all inference, with tool use fully supported. Suitable for older devices that don't meet the RAM requirement.
+Pairs with a Mac running the BigBro companion app over local network. The Mac runs `gpt-oss-20b` on MLX in-process and handles all inference, with tool use fully supported. Suitable for older devices that don't meet the RAM requirement.
 
 - No model download on iPhone
 - Full tool support (timers, recipe modifications)
+- Optional voice: transcription (Parakeet) and speech (Kokoro) on the Mac, with a hands-free loop that can be interrupted mid-answer
 - Requires a paired Mac on the same network
 
 ## Architecture
@@ -63,10 +64,11 @@ Pairs with a Mac running the BigBro companion app over local network. The Mac ru
 ```
 
 **Key components:**
-- `LLMService` — manages inference backend selection, model download/loading, and chat completions
+- `LLMService` — backend selection, model download/run/stop, and one streaming `chat()` both backends answer through
 - `LocalCookingAgent` — maintains conversation history and builds prompts for the cooking session
 - `LocalRecipeParser` — parses recipes from URLs (schema.org + LLM cleanup), images (OCR), and text
-- `BigBroClient` (BigBroKit) — handles pairing, connection, and streaming chat with the Mac companion
+- `BigBroClient` (BigBroKit) — handles pairing, connection, model lifecycle, and streaming chat with the Mac companion
+- `BigBroVoiceSession` (BigBroKit) — the hands-free loop when voice runs on the Mac: endpointing, transcription, tools, spoken reply, barge-in
 - `TimerManager` — manages multiple concurrent cooking timers with iOS notifications
 - `LocalDataManager` — Core Data persistence for recipes and user preferences
 

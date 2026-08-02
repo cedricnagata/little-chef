@@ -113,14 +113,28 @@ class LocalCookingAgent: ObservableObject {
         conversationHistory.removeAll()
     }
 
+    /// Adopts a conversation that happened somewhere else.
+    ///
+    /// A hands-free session keeps its own history inside BigBroKit, so without this a typed
+    /// follow-up after speaking would answer as though the spoken turns never happened.
+    func setHistory(_ messages: [ChatMessage]) {
+        conversationHistory = Array(messages.suffix(maxHistoryLength))
+    }
+
     func reset() {
         conversationHistory.removeAll()
         isProcessing = false
     }
 
-    // MARK: - Private Methods
+    // MARK: - System Prompt
 
-    private func buildSystemMessage(recipe: Recipe?) -> ChatMessage {
+    /// The assistant's instructions, recipe and current timers.
+    ///
+    /// Static because a spoken session needs the same prompt: `BigBroVoiceSession` is given it
+    /// once at construction and runs its own turns from there, so the two paths have to be
+    /// reading from one place or the voice assistant answers about a different recipe than the
+    /// typed one.
+    static func systemPrompt(recipe: Recipe?, activeTimers: [LocalTimer]) -> String {
         var prompt = "You are LittleChef, a concise and helpful cooking assistant. Answer cooking questions directly. Be brief."
 
         if let recipe = recipe {
@@ -138,7 +152,6 @@ class LocalCookingAgent: ObservableObject {
             }
         }
 
-        let activeTimers = timerManager.getAllTimers()
         if !activeTimers.isEmpty {
             prompt += "\n\nActive timers:"
             for timer in activeTimers {
@@ -146,7 +159,16 @@ class LocalCookingAgent: ObservableObject {
             }
         }
 
-        return ChatMessage(role: .system, content: prompt)
+        return prompt
+    }
+
+    // MARK: - Private Methods
+
+    private func buildSystemMessage(recipe: Recipe?) -> ChatMessage {
+        ChatMessage(
+            role: .system,
+            content: Self.systemPrompt(recipe: recipe, activeTimers: timerManager.getAllTimers())
+        )
     }
 }
 

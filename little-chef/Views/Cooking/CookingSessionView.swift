@@ -6,6 +6,7 @@
 //
 
 import SwiftUI
+import BigBroKit
 
 struct CookingSessionView: View {
     @EnvironmentObject var cookingSessionManager: CookingSessionManager
@@ -126,6 +127,7 @@ struct ActiveCookingView: View {
             }
 
             if chatEnabled {
+                BigBroStatusStrip(client: bigBroClient, isStartingModel: llmService.isStartingBigBroModel)
                 InputAreaView(textInput: $textInput, isTextFieldFocused: $isTextFieldFocused)
             } else {
                 VStack(spacing: 0) {
@@ -164,6 +166,46 @@ struct ActiveCookingView: View {
     private func updateVoiceAssistantSettings() {
         if let session = cookingSessionManager.currentSession {
             voiceAssistant.updateVoiceSettings(session.userPreferences.voiceSettings)
+        }
+    }
+}
+
+// MARK: - BigBro Status Strip
+
+/// What the Mac is doing that the answer depends on.
+///
+/// Two things, both otherwise invisible. Starting a model is several seconds of nothing before
+/// the first message; without a line saying so the app looks hung on the user's first question.
+/// And `modelNotes` is the Mac's own account of what the model running the request could not do
+/// — a dropped tool produces a perfectly ordinary answer that simply never sets the timer,
+/// which is indistinguishable from the model choosing not to unless it says so.
+private struct BigBroStatusStrip: View {
+    @ObservedObject var client: BigBroClient
+    let isStartingModel: Bool
+
+    var body: some View {
+        if client.isConnected && (isStartingModel || !client.modelNotes.isEmpty) {
+            VStack(alignment: .leading, spacing: 4) {
+                Divider()
+                if isStartingModel {
+                    HStack(spacing: 6) {
+                        ProgressView().scaleEffect(0.7)
+                        Text("Waking the model on \(client.connectedDevice?.name ?? "your Mac")…")
+                            .font(.caption2)
+                            .foregroundColor(.secondary)
+                    }
+                    .padding(.horizontal)
+                }
+                ForEach(client.modelNotes, id: \.self) { note in
+                    Label(note, systemImage: "info.circle")
+                        .font(.caption2)
+                        .foregroundColor(.secondary)
+                        .padding(.horizontal)
+                }
+            }
+            .padding(.vertical, 6)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(Color.orange.opacity(0.08))
         }
     }
 }

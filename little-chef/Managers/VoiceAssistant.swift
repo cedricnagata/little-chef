@@ -302,6 +302,12 @@ class VoiceAssistant: NSObject, ObservableObject {
 
     func updateVoiceSettings(_ settings: LocalVoiceSettings) {
         self.voiceSettings = settings
+        // Kokoro and Parakeet load lazily on the Mac, on whichever request is first. Starting
+        // them the moment the user opts in moves that wait somewhere it isn't the first thing
+        // they ask for. No-op unless a Mac is connected, and once per connection.
+        if settings.useBigBroSpeech {
+            llmService.runBigBroSpeech()
+        }
     }
 
     /// `AVSpeechUtterance.rate` is an absolute scale from `AVSpeechUtteranceMinimumSpeechRate`
@@ -488,6 +494,12 @@ class VoiceAssistant: NSObject, ObservableObject {
     }
 
     // MARK: - Hands-Free Mode
+    //
+    // The on-device loop, and the fallback when the Mac isn't running one:
+    // `CookingSessionManager.startHandsFreeVoice` hands the whole conversation to
+    // `BigBroVoiceSession` instead whenever BigBro voice is on and a Mac is connected. This
+    // path stays because it is the only one that works with no Mac in the house — and it is
+    // the one that keeps every recording on the phone.
     //
     // Flow: startWakeWordListening → (wake word detected) → transitionToVoiceQuery
     //       → (user speaks, timeout) → processSpeechResult → onVoiceQueryReady

@@ -101,6 +101,26 @@ struct BigBroPairingView: View {
                 }
             }
 
+            // Models LittleChef asked for that the Mac doesn't have yet. Not an error: the
+            // first question starts the download, and the progress rows below then report it.
+            if client.isConnected && !client.missingModels.isEmpty {
+                VStack(alignment: .leading, spacing: 4) {
+                    Label("Not downloaded on this Mac yet", systemImage: "arrow.down.circle")
+                        .font(.caption)
+                        .fontWeight(.medium)
+                        .foregroundStyle(.orange)
+                    ForEach(client.missingModels, id: \.self) { model in
+                        Text(model)
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                            .monospaced()
+                    }
+                    Text("Your first question will start the download — or download it in BigBro's Settings on the Mac.")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
+            }
+
             // Live model-download progress from the Mac
             if !client.modelDownloads.isEmpty {
                 ForEach(Array(client.modelDownloads.values), id: \.model) { progress in
@@ -159,7 +179,7 @@ struct BigBroPairingView: View {
 
             VStack(alignment: .leading, spacing: 8) {
                 SetupStep(number: 1, text: "Download and install BigBro on your Mac")
-                SetupStep(number: 2, text: "Open BigBro — it will download the model automatically")
+                SetupStep(number: 2, text: "Open BigBro and download gpt-oss 20B in its Settings (LittleChef will also start the download on your first question)")
                 SetupStep(number: 3, text: "Make sure your iPhone and Mac are on the same Wi-Fi network")
                 SetupStep(number: 4, text: "Tap \"Find Devices\" below and select your Mac")
                 SetupStep(number: 5, text: "Approve the connection request on your Mac")

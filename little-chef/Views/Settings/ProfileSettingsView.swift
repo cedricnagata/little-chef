@@ -374,7 +374,12 @@ struct ProfileSettingsView: View {
     }
 }
 
-/// Opt-in to speaking through a paired Mac.
+/// Opt-in to running the voice on a paired Mac — both directions of it.
+///
+/// This switches more than the voice: with it on, hands-free mode is BigBroKit's own loop,
+/// which listens through the Mac's transcription and can be interrupted mid-answer, instead of
+/// the app's wake-word-and-silence-timer path built on Apple's on-device recognizer. That is
+/// worth saying plainly, because it moves recorded audio off the phone and onto the Mac.
 ///
 /// Observes the client directly: `ProfileSettingsView` watches `LLMService`, which does not
 /// republish when its `BigBroClient` connects, so the row would otherwise stay greyed out until
@@ -385,7 +390,7 @@ private struct BigBroSpeechToggle: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
-            Toggle("Use BigBro voice", isOn: $useBigBroSpeech)
+            Toggle("Use BigBro for voice", isOn: $useBigBroSpeech)
                 .disabled(!client.isConnected)
 
             Text(footnote)
@@ -399,8 +404,8 @@ private struct BigBroSpeechToggle: View {
             return "Connect to a BigBro Mac to use its voice."
         }
         return useBigBroSpeech
-            ? "Speaking through \(client.connectedDevice?.name ?? "BigBro"). Falls back to the on-device voice if the Mac goes away."
-            : "Speaking with the on-device voice."
+            ? "Listening and speaking run on \(client.connectedDevice?.name ?? "BigBro") — recordings go to that Mac over your Wi-Fi, and hands-free mode can be interrupted mid-answer. Falls back to the on-device voice if the Mac goes away."
+            : "Listening and speaking stay on this device."
     }
 }
 

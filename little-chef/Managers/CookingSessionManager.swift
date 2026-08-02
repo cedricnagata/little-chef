@@ -6,7 +6,10 @@
 //
 
 import Foundation
+import AVFoundation
+import Combine
 import SwiftUI
+import BigBroKit
 
 @MainActor
 class CookingSessionManager: ObservableObject, TimerManager {
@@ -16,9 +19,32 @@ class CookingSessionManager: ObservableObject, TimerManager {
     @Published var lastResponse: String = ""
     @Published var localTimers: [LocalTimer] = []
 
+    // MARK: - Hands-free state (BigBro voice loop)
+
+    /// True while BigBroKit is running the spoken conversation.
+    @Published private(set) var isHandsFreeActive = false
+    @Published private(set) var voicePhase: BigBroVoiceSession.Phase = .idle
+    @Published private(set) var voiceLevel: Float = 0
+    /// The level speech has to clear before the loop counts it as a turn. Worth drawing next
+    /// to `voiceLevel`: a microphone that hears nothing and a threshold sitting above one that
+    /// hears plenty look identical without it.
+    @Published private(set) var voiceThreshold: Float = 0
+
+    /// What LittleChef answers to when the Mac is running the loop.
+    ///
+    /// The phrase belongs to the app — BigBroKit ships its own only as a placeholder. Spacing,
+    /// case and punctuation are all ignored when matching, so "hey littlechef" needs no alias;
+    /// the tolerance covers what a transcriber actually returns for a name it has never seen.
+    static let wakeWord = WakeWord("hey little chef")
+
     private let dataManager = LocalDataManager.shared
     private var cookingAgent: LocalCookingAgent?
     private let llmService: LLMService
+
+    private var voiceSession: BigBroVoiceSession?
+    private var voiceCancellables: Set<AnyCancellable> = []
+    /// The assistant message the current spoken turn is streaming into.
+    private var voiceReplyId: UUID?
 
     convenience init() {
         self.init(llmService: .shared)
@@ -42,7 +68,28 @@ class CookingSessionManager: ObservableObject, TimerManager {
 
     func initAgentForSession() {
         cookingAgent = LocalCookingAgent(timerManager: self)
+        prepareModelForSession()
         error = nil
+    }
+
+    /// Starts whichever model is about to answer, while the user is still reading the recipe.
+    ///
+    /// The same idea as `BigBroClient.runModel`, applied to both providers: weights on disk and
+    /// weights in memory are different states, and turning the first into the second takes
+    /// seconds that otherwise land on the first question of the session.
+    ///
+    /// Never starts a *download*. A model that isn't on disk yet is left alone — that is
+    /// gigabytes over somebody's cellular connection, and it stays behind the prompt in
+    /// Settings.
+    private func prepareModelForSession() {
+        switch llmService.currentProvider {
+        case .bigBro:
+            llmService.runBigBroModel()
+        case .local:
+            guard let model = LLMService.supportedOnDeviceModel,
+                  llmService.downloadedModelIds.contains(model.modelId) else { return }
+            Task { [llmService] in try? await llmService.runModel(modelId: model.modelId) }
+        }
     }
 
     private func loadLocalPreferences() async -> UserPreferencesDetailed {
@@ -58,6 +105,7 @@ class CookingSessionManager: ObservableObject, TimerManager {
     }
 
     func endCookingSession() {
+        stopHandsFreeVoice()
         currentSession = nil
         lastResponse = ""
         error = nil
@@ -206,6 +254,168 @@ class CookingSessionManager: ObservableObject, TimerManager {
         }
 
         isLoading = false
+    }
+
+    // MARK: - Hands-Free Voice (BigBro)
+
+    /// Whether the whole spoken loop can run on the paired Mac.
+    ///
+    /// Needs the preference *and* a live connection. Without both, hands-free falls back to
+    /// the on-device path in `VoiceAssistant` — Apple's recognizer and `AVSpeechSynthesizer` —
+    /// which is also what keeps the loop working when the Mac goes away.
+    func canUseBigBroVoice(_ settings: LocalVoiceSettings?) -> Bool {
+        (settings?.useBigBroSpeech ?? false) && llmService.bigBroClient.isConnected
+    }
+
+    /// Hands the whole spoken conversation to BigBroKit: listen, transcribe on the Mac, answer
+    /// with the timer tools, speak the reply, listen again.
+    ///
+    /// All of this used to be the app's own — a wake word matched against `SFSpeechRecognizer`
+    /// partial results, a three-second silence timer for endpointing, `AVSpeechSynthesizer` for
+    /// the answer, and no way to interrupt one once it started. `BigBroVoiceSession` replaces
+    /// it with one object that also gets barge-in and the echo cancellation barge-in needs.
+    ///
+    /// The session runs its own turns, so it is given the same system prompt and the same
+    /// timer tools the typed path uses, and its turns are mirrored into the session transcript
+    /// as they happen.
+    func startHandsFreeVoice(speaksReplies: Bool) async {
+        guard currentSession != nil, !isHandsFreeActive else { return }
+        guard llmService.bigBroClient.isConnected else {
+            error = "Connect to a BigBro Mac to use hands-free mode."
+            return
+        }
+        // Asked for here rather than relying on `VoiceAssistant`, which only gets as far as the
+        // microphone if speech recognition was granted first — and this path needs no
+        // recognizer, so that permission is not one to be blocked behind.
+        guard await AVAudioApplication.requestRecordPermission() else {
+            error = "Microphone access is needed for hands-free mode."
+            return
+        }
+
+        let recipe = currentSession.map { createRecipeFromSession($0) }
+        let session = BigBroVoiceSession(
+            client: llmService.bigBroClient,
+            model: LLMService.bigBroModel,
+            tools: CookingTools(timerManager: self).bigBroTools,
+            reasoningEffort: LLMService.bigBroReasoningEffort,
+            systemPrompt: LocalCookingAgent.systemPrompt(recipe: recipe, activeTimers: localTimers),
+            speaksReplies: speaksReplies,
+            wakeWord: Self.wakeWord
+        )
+        // Carry the typed conversation across, so speaking continues it rather than starting
+        // over halfway through a recipe.
+        session.setHistory(bigBroHistory())
+        observe(session)
+        voiceSession = session
+        isHandsFreeActive = true
+        error = nil
+
+        await session.start()
+    }
+
+    func stopHandsFreeVoice() {
+        guard let session = voiceSession else { return }
+        session.stop()
+        // The typed path keeps its own history in the agent; hand it the spoken turns so a
+        // follow-up typed question still has them as context.
+        cookingAgent?.setHistory(
+            (currentSession?.conversationHistory ?? []).map {
+                ChatMessage(role: $0.role == "user" ? .user : .assistant, content: $0.content)
+            }
+        )
+        voiceCancellables.removeAll()
+        voiceSession = nil
+        voiceReplyId = nil
+        isHandsFreeActive = false
+        // Ended mid-turn, the phase publisher never reports its way back out of `.thinking`.
+        isLoading = false
+        voicePhase = .idle
+        voiceLevel = 0
+        voiceThreshold = 0
+    }
+
+    /// Stops a spoken reply without ending the loop.
+    func stopSpeakingReply() {
+        voiceSession?.stopSpeaking()
+    }
+
+    private func bigBroHistory() -> [BigBroKit.Message] {
+        (currentSession?.conversationHistory ?? []).map {
+            $0.role == "user" ? .user($0.content) : .assistant($0.content)
+        }
+    }
+
+    /// Mirrors the session into the cooking transcript, so spoken turns appear as bubbles
+    /// alongside typed ones instead of in a separate conversation.
+    private func observe(_ session: BigBroVoiceSession) {
+        session.$phase
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] phase in
+                guard let self else { return }
+                self.voicePhase = phase
+                self.isLoading = (phase == .transcribing || phase == .thinking)
+                // A finished turn releases the bubble so the next one starts a fresh pair.
+                // Both resting phases count: with no follow-up window a turn goes straight
+                // back to `.armed` without passing through `.listening`.
+                if phase == .listening || phase == .armed { self.voiceReplyId = nil }
+            }
+            .store(in: &voiceCancellables)
+
+        session.$level
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] in self?.voiceLevel = $0 }
+            .store(in: &voiceCancellables)
+
+        session.$threshold
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] in self?.voiceThreshold = $0 }
+            .store(in: &voiceCancellables)
+
+        session.$transcript
+            .receive(on: DispatchQueue.main)
+            .filter { !$0.isEmpty }
+            .sink { [weak self] heard in
+                guard let self, self.voiceReplyId == nil else { return }
+                self.appendVoiceTurn(heard)
+            }
+            .store(in: &voiceCancellables)
+
+        session.$reply
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] text in
+                guard let self, let replyId = self.voiceReplyId, !text.isEmpty else { return }
+                self.updateMessage(replyId, content: text)
+                self.lastResponse = text
+            }
+            .store(in: &voiceCancellables)
+
+        session.$error
+            .receive(on: DispatchQueue.main)
+            .compactMap { $0 }
+            .sink { [weak self] in self?.error = $0 }
+            .store(in: &voiceCancellables)
+    }
+
+    /// One question and the bubble its answer streams into.
+    private func appendVoiceTurn(_ heard: String) {
+        currentSession?.conversationHistory.append(
+            Message(id: UUID(), role: "user", content: heard, timestamp: Date())
+        )
+        let replyId = UUID()
+        currentSession?.conversationHistory.append(
+            Message(id: replyId, role: "assistant", content: "", timestamp: Date())
+        )
+        voiceReplyId = replyId
+    }
+
+    private func updateMessage(_ id: UUID, content: String) {
+        guard let index = currentSession?.conversationHistory.firstIndex(where: { $0.id == id }) else { return }
+        currentSession?.conversationHistory[index] = Message(
+            id: id,
+            role: "assistant",
+            content: content,
+            timestamp: Date()
+        )
     }
 
     private func createRecipeFromSession(_ session: CookingSession) -> Recipe {

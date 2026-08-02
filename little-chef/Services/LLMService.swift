@@ -2,12 +2,13 @@
 //  LLMService.swift
 //  little-chef
 //
-//  On-device LLM inference using MLX with PrismML Bonsai 8B 1-bit model.
-//  Follows MLXChatExample patterns: lazy load, AsyncStream generation, Memory.cacheLimit.
-//  Uses MLX native tool calling for timer operations.
+//  Inference for both providers behind one API: MLX on this device, or a paired Mac through
+//  BigBroKit. `chat()` is the entry point — it streams text deltas, runs tools, and keeps a
+//  model's reasoning out of its answer, the same contract `BigBroClient.chat` offers.
 //
 
 import Foundation
+import Combine
 import MLX
 import MLXLLM
 import MLXLMCommon
@@ -50,6 +51,27 @@ class LLMService: ObservableObject {
     /// Whether the device can run any on-device model.
     static var deviceSupportsLocalModels: Bool { supportedOnDeviceModel != nil }
 
+    // MARK: - BigBro Configuration
+
+    /// The model a paired Mac is asked to answer with.
+    ///
+    /// This is BigBro's own catalog id, not an Ollama tag. The Mac no longer proxies to Ollama
+    /// — it runs MLX in process — so `gpt-oss-20b` is what its catalog, its download progress
+    /// and its `missingModels` all call this model. It still resolves the older `gpt-oss:20b`
+    /// loosely, but naming the canonical id keeps every message keyed the way the Mac reports
+    /// it: `modelDownloads["gpt-oss-20b"]` is looked up by exactly this string.
+    static let bigBroModel = "gpt-oss-20b"
+
+    /// How long the Mac's model deliberates before answering.
+    ///
+    /// gpt-oss always reasons — the Harmony template carries a budget, not an off switch — and
+    /// `.low` is the closest thing to skipping it. Cooking questions are short and wanted while
+    /// a pan is on the heat, so the shortest analysis pass is the right trade. Named outright
+    /// rather than left to `think: false`, which the Mac reads as a request for speed and
+    /// lowers to `.low` on our behalf: saying it here keeps the intent if that inference
+    /// changes.
+    static let bigBroReasoningEffort: ReasoningEffort = .low
+
     /// What the active provider + model can do, in production. DEBUG = always full.
     var capability: AICapability {
         #if DEBUG
@@ -86,6 +108,8 @@ class LLMService: ObservableObject {
     @Published var loadProgress: Double = 0.0
     @Published var isLoadingModel = false
     @Published var downloadedModelIds: Set<String> = []
+    /// True while the Mac is materializing the model's weights ahead of the first message.
+    @Published private(set) var isStartingBigBroModel = false
     @Published var currentProvider: LLMProvider = .local {
         didSet { UserDefaults.standard.set(currentProvider.rawValue, forKey: "little-chef.llm-provider") }
     }
@@ -96,12 +120,14 @@ class LLMService: ObservableObject {
     /// Which model ID is currently being loaded (to prevent double-loads)
     @Published var currentlyLoadingModelId: String?
 
-    let bigBroClient = BigBroClient(appName: "LittleChef", requiredModels: ["gpt-oss:20b"])
+    let bigBroClient = BigBroClient(appName: "LittleChef", requiredModels: [LLMService.bigBroModel])
 
-    private let defaultModelConfig = ModelConfiguration(
-        id: "prism-ml/Bonsai-8B-mlx-1bit",
-        defaultPrompt: "You are a helpful assistant."
-    )
+    private var cancellables: Set<AnyCancellable> = []
+    private var startModelTask: Task<Void, Never>?
+    /// Stamps each start attempt, so a cancelled one still sitting in `await` cannot clear the
+    /// live one's state on its way out.
+    private var startModelGeneration = 0
+    private var didStartSpeechForConnection = false
 
     private init() {
         if LLMService.deviceSupportsLocalModels {
@@ -110,6 +136,7 @@ class LLMService: ObservableObject {
             currentProvider = .bigBro
         }
         refreshDownloadedModels()
+        observeBigBroConnection()
         // Restore BigBro auto-reconnect from previous launches.
         bigBroClient.resumeAutoReconnectIfEnabled()
     }
@@ -125,7 +152,90 @@ class LLMService: ObservableObject {
         downloadedModelIds = ids
     }
 
-    // MARK: - Model Lifecycle
+    // MARK: - BigBro Model Lifecycle
+
+    /// Starts the Mac's model the moment there is a Mac to start it on.
+    ///
+    /// BigBro loads a model lazily, on whichever request happens to be first, and a cold 20B
+    /// model takes several seconds to materialize. Left alone that cost lands on the user's
+    /// first question; started here it overlaps with them getting to a recipe.
+    private func observeBigBroConnection() {
+        bigBroClient.$connectionState
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] state in
+                guard let self else { return }
+                switch state {
+                case .connected:
+                    self.runBigBroModel()
+                case .disconnected:
+                    self.cancelBigBroModelStart()
+                    self.didStartSpeechForConnection = false
+                case .reconnecting:
+                    break
+                }
+            }
+            .store(in: &cancellables)
+    }
+
+    /// Asks the Mac to put the model's weights in memory, without generating anything.
+    ///
+    /// Fire-and-forget by design. Every failure here is one the next request handles on its
+    /// own — a model still downloading, a Mac too old to know the message, a connection that
+    /// drops in between — and none is worth an error in the UI for an optimization the user
+    /// never asked for.
+    ///
+    /// Deliberately has no stop counterpart. Models are shared by every device paired with that
+    /// Mac, so stopping one on our way out would take it away from whatever else is using it;
+    /// stopping belongs to whoever owns the Mac, in BigBro's own Settings.
+    func runBigBroModel() {
+        guard startModelTask == nil else { return }   // already starting; a second ask is redundant
+        isStartingBigBroModel = true
+        startModelGeneration &+= 1
+        let generation = startModelGeneration
+        startModelTask = Task { [weak self] in
+            guard let self else { return }
+            do {
+                try await self.bigBroClient.runModel(LLMService.bigBroModel)
+                dprint("🌐 [BigBro] \(LLMService.bigBroModel) running")
+            } catch {
+                dprint("🌐 [BigBro] run skipped: \(error.localizedDescription)")
+            }
+            guard self.startModelGeneration == generation else { return }
+            self.isStartingBigBroModel = false
+            self.startModelTask = nil
+        }
+    }
+
+    private func cancelBigBroModelStart() {
+        startModelGeneration &+= 1
+        startModelTask?.cancel()
+        startModelTask = nil
+        isStartingBigBroModel = false
+    }
+
+    /// Starts the Mac's speech models — Kokoro and Parakeet — ahead of the first spoken turn.
+    ///
+    /// Same lazy-load problem as a language model, and worse in a voice loop: the cold load
+    /// lands on the user's first words, which is exactly the moment hands-free looks broken.
+    /// Once per connection is enough; a running model stays running until the Mac stops it.
+    ///
+    /// `BigBroVoiceSession` does this itself on `start()`, so this is for the paths that speak
+    /// without a session — an answer read aloud after a typed question.
+    func runBigBroSpeech() {
+        guard bigBroClient.isConnected, !didStartSpeechForConnection else { return }
+        didStartSpeechForConnection = true
+        Task { [weak self] in
+            guard let self else { return }
+            do {
+                try await self.bigBroClient.runSpeech()
+                dprint("🔊 [BigBro] speech models running")
+            } catch {
+                dprint("🔊 [BigBro] speech start skipped: \(error.localizedDescription)")
+            }
+        }
+    }
+
+    // MARK: - On-Device Model Lifecycle
 
     private func loadModel(modelId: String? = nil) async throws -> MLXLMCommon.ModelContainer {
         let id = modelId ?? CookingModelChoice.bonsai8B.modelId
@@ -193,6 +303,10 @@ class LLMService: ObservableObject {
     }
 
     /// Download a model to disk cache without keeping it loaded in memory.
+    ///
+    /// Downloaded and running are different states, the same way they are on a Mac: weights on
+    /// disk cost only disk, weights in memory cost RAM. This pays the first cost and not the
+    /// second.
     func downloadModel(modelId: String) async throws {
         _ = try await loadModel(modelId: modelId)
         // Unload from memory — the files stay cached on disk
@@ -202,12 +316,18 @@ class LLMService: ObservableObject {
         dprint("🤖 [LLM] Downloaded \(modelId) to cache, unloaded from memory")
     }
 
-    /// Download and load a model into memory (used internally).
-    func preloadModel(modelId: String? = nil) async throws {
+    /// Puts a downloaded model's weights in memory, ahead of the first message.
+    ///
+    /// The on-device counterpart of `BigBroClient.runModel`, and named to match it: safe to
+    /// skip, safe to call twice, and downloads the model first if it isn't on disk yet.
+    func runModel(modelId: String? = nil) async throws {
         _ = try await loadModel(modelId: modelId)
     }
 
-    func unloadModel(modelId: String? = nil) {
+    /// Frees the memory a model was holding, keeping its download.
+    ///
+    /// The opposite of `runModel`, not a delete — `nil` stops every loaded model.
+    func stopModel(modelId: String? = nil) {
         if let modelId {
             modelContainers.removeValue(forKey: modelId)
         } else {
@@ -232,120 +352,125 @@ class LLMService: ObservableObject {
         return FileManager.default.fileExists(atPath: modelPath.path)
     }
 
-    // MARK: - Chat Completion
+    // MARK: - Chat
 
+    /// Answers `messages` with whichever provider is active, streaming text deltas.
+    ///
+    /// Shaped after `BigBroClient.chat` so the two providers are one call site rather than two
+    /// parallel ones:
+    ///
+    /// - `streaming: false` yields exactly one value — the whole answer — then finishes.
+    /// - Tool calls never reach the caller. They are executed here and their results take the
+    ///   model's tool-call block's place in the stream.
+    /// - Reasoning never reaches the caller either. A model that thinks out loud has its trace
+    ///   routed to `onThinking`, which is what keeps `<think>` blocks out of a chat bubble.
+    ///
+    /// - Parameters:
+    ///   - model: On-device model id. Ignored by the BigBro path, which names
+    ///     ``bigBroModel`` — the Mac keeps no default and will not guess one.
+    ///   - format: Constrains the answer. Honoured by the Mac; the on-device path has no
+    ///     grammar to constrain with and relies on the prompt saying so, which is why callers
+    ///     that need JSON ask for it in both places.
+    func chat(
+        _ messages: [ChatMessage],
+        model: String? = nil,
+        streaming: Bool = true,
+        tools: CookingTools? = nil,
+        format: ResponseFormat? = nil,
+        temperature: Float? = nil,
+        maxTokens: Int? = nil,
+        onThinking: (@Sendable (String) -> Void)? = nil
+    ) -> AsyncThrowingStream<String, Error> {
+        let provider = currentProvider
+        return AsyncThrowingStream { continuation in
+            let work = Task { @MainActor in
+                self.isGenerating = true
+                defer { self.isGenerating = false }
+                do {
+                    switch provider {
+                    case .bigBro:
+                        try await self.runBigBroChat(
+                            messages: messages, streaming: streaming, tools: tools,
+                            format: format, temperature: temperature, maxTokens: maxTokens,
+                            onThinking: onThinking, into: continuation
+                        )
+                    case .local:
+                        try await self.runLocalChat(
+                            messages: messages, modelId: model, streaming: streaming,
+                            tools: tools, format: format, temperature: temperature,
+                            maxTokens: maxTokens, onThinking: onThinking, into: continuation
+                        )
+                    }
+                    continuation.finish()
+                } catch {
+                    continuation.finish(throwing: error)
+                }
+            }
+            // Iterating a stream does not cancel what produces it, so without this a caller
+            // that walks away — an ended session, a barge-in — leaves a model generating an
+            // answer nobody will read.
+            continuation.onTermination = { _ in work.cancel() }
+        }
+    }
+
+    /// Whole-answer convenience over ``chat(_:model:streaming:tools:format:temperature:maxTokens:onThinking:)``.
     func generateChatCompletion(
         messages: [ChatMessage],
         temperature: Float? = nil,
         maxTokens: Int? = nil,
         tools: CookingTools? = nil,
-        modelId: String? = nil
+        modelId: String? = nil,
+        format: ResponseFormat? = nil
     ) async throws -> String {
-        if currentProvider == .bigBro {
-            return try await generateBigBroChatCompletion(messages: messages, tools: tools, temperature: temperature, maxTokens: maxTokens)
-        }
-
-        isGenerating = true
-        defer { isGenerating = false }
-
-        let container = try await loadModel(modelId: modelId)
-
-        // Convert to Chat.Message
-        let chatMessages: [Chat.Message] = messages.map { msg in
-            switch msg.role {
-            case .system: return .system(msg.content)
-            case .user: return .user(msg.content)
-            case .assistant: return .assistant(msg.content)
-            }
-        }
-
-        // Build native tool specs if tools are provided
-        let toolSpecs: [ToolSpec]? = tools?.nativeToolSpecs
-
-        let userInput = UserInput(chat: chatMessages, tools: toolSpecs)
-
-        // Generate using AsyncStream API
-        let stream: AsyncStream<Generation> = try await container.perform { (context: ModelContext) in
-            let lmInput = try await context.processor.prepare(input: userInput)
-            let parameters = GenerateParameters(
-                maxTokens: maxTokens ?? 2048,
-                temperature: temperature ?? 0.7
-            )
-            return try MLXLMCommon.generate(
-                input: lmInput, parameters: parameters, context: context
-            )
-        }
-
-        // Consume stream — collect text chunks and native tool calls
         var output = ""
-        var nativeToolCalls: [(name: String, arguments: [String: Any])] = []
-
-        for await generation in stream {
-            switch generation {
-            case .chunk(let chunk):
-                output += chunk
-            case .info(_):
-                break
-            case .toolCall(let toolCall):
-                let args = toolCall.function.arguments.mapValues { $0.anyValue }
-                nativeToolCalls.append((name: toolCall.function.name, arguments: args))
-            @unknown default:
-                break
-            }
+        for try await chunk in chat(
+            messages, model: modelId, streaming: false, tools: tools,
+            format: format, temperature: temperature, maxTokens: maxTokens
+        ) {
+            output += chunk
         }
-        dprint("=== OUTPUT: '\(output.prefix(200))' | TOOL CALLS: \(nativeToolCalls.count) ===")
-
-        // Execute native tool calls
-        if !nativeToolCalls.isEmpty, let tools {
-            var toolResults: [String] = []
-            for call in nativeToolCalls {
-                dprint("=== TOOL CALL: \(call.name), args: \(call.arguments) ===")
-                let result = tools.execute(toolName: call.name, arguments: call.arguments)
-                dprint("=== TOOL RESULT: \(result) ===")
-                toolResults.append(result)
-            }
-            // Combine any text output with tool results
-            let textPart = stripThinkingTags(from: output)
-            let toolPart = toolResults.joined(separator: "\n")
-            if textPart.isEmpty {
-                return toolPart
-            }
-            return textPart + "\n" + toolPart
-        }
-
-        // No native tool calls — clean up text and try fallbacks
-        let cleaned = stripThinkingTags(from: output)
-
-        // Try text-based <tool_call> tags first
-        let afterTextTools = processTextToolCalls(output: cleaned, tools: tools)
-
-        // If tools are available and no tool calls were found, try to infer timer actions from the text
-        if let tools, nativeToolCalls.isEmpty {
-            inferTimerAction(from: afterTextTools, tools: tools)
-        }
-
-        return afterTextTools
+        return output
     }
 
-    // MARK: - Streaming Chat Completion
-
-    /// Streaming variant — calls `onChunk` with each text fragment as it arrives.
-    /// Returns the full response. If the model emits tool calls, they are executed
-    /// and the result is returned (no streaming for tool responses).
+    /// Streaming convenience — calls `onChunk` with each delta and returns the whole answer.
     func generateChatCompletionStreaming(
         messages: [ChatMessage],
         temperature: Float? = nil,
         maxTokens: Int? = nil,
         tools: CookingTools? = nil,
         modelId: String? = nil,
+        format: ResponseFormat? = nil,
         onChunk: @escaping (String) -> Void
     ) async throws -> String {
-        if currentProvider == .bigBro {
-            return try await generateBigBroChatCompletionStreaming(messages: messages, tools: tools, temperature: temperature, maxTokens: maxTokens, onChunk: onChunk)
+        var output = ""
+        for try await chunk in chat(
+            messages, model: modelId, streaming: true, tools: tools,
+            format: format, temperature: temperature, maxTokens: maxTokens
+        ) {
+            output += chunk
+            if !chunk.isEmpty { onChunk(chunk) }
         }
+        return output
+    }
 
-        isGenerating = true
-        defer { isGenerating = false }
+    // MARK: - On-Device Chat
+
+    private func runLocalChat(
+        messages: [ChatMessage],
+        modelId: String?,
+        streaming: Bool,
+        tools: CookingTools?,
+        format: ResponseFormat?,
+        temperature: Float?,
+        maxTokens: Int?,
+        onThinking: (@Sendable (String) -> Void)?,
+        into continuation: AsyncThrowingStream<String, Error>.Continuation
+    ) async throws {
+        if format != nil {
+            // Said out loud rather than dropped: MLX has no response-format switch here, so a
+            // caller that needs JSON has to have asked for it in the prompt as well.
+            dprint("🤖 [LLM] response format is prompt-only on device")
+        }
 
         let container = try await loadModel(modelId: modelId)
 
@@ -357,8 +482,7 @@ class LLMService: ObservableObject {
             }
         }
 
-        let toolSpecs: [ToolSpec]? = tools?.nativeToolSpecs
-        let userInput = UserInput(chat: chatMessages, tools: toolSpecs)
+        let userInput = UserInput(chat: chatMessages, tools: tools?.nativeToolSpecs)
 
         let stream: AsyncStream<Generation> = try await container.perform { (context: ModelContext) in
             let lmInput = try await context.processor.prepare(input: userInput)
@@ -371,18 +495,48 @@ class LLMService: ObservableObject {
             )
         }
 
-        var output = ""
+        var parser = ResponseStreamParser()
+        var answer = ""
         var nativeToolCalls: [(name: String, arguments: [String: Any])] = []
 
+        /// Text-tagged tool calls and native ones both end up here.
+        func run(_ name: String, _ arguments: [String: Any]) -> String? {
+            guard let tools else { return nil }
+            dprint("=== TOOL CALL: \(name), args: \(arguments) ===")
+            let result = tools.execute(toolName: name, arguments: arguments)
+            dprint("=== TOOL RESULT: \(result) ===")
+            return result
+        }
+
+        func emit(_ text: String) {
+            guard !text.isEmpty else { return }
+            let delta = answer.isEmpty ? text : (answer.hasSuffix("\n") ? text : "\n" + text)
+            answer += delta
+            if streaming { continuation.yield(delta) }
+        }
+
+        func handle(_ piece: ResponseStreamParser.Piece) {
+            switch piece {
+            case .answer(let text):
+                answer += text
+                if streaming { continuation.yield(text) }
+            case .thinking(let text):
+                onThinking?(text)
+            case .toolCall(let body):
+                guard let call = Self.decodeToolCall(body) else {
+                    dprint("🤖 [LLM] Discarding an unparseable tool call: \(body.prefix(200))")
+                    return
+                }
+                if let result = run(call.name, call.arguments) { emit(result) }
+            }
+        }
+
         for await generation in stream {
+            if Task.isCancelled { break }
             switch generation {
             case .chunk(let chunk):
-                output += chunk
-                // Stream text chunks to caller in real-time
-                if !chunk.isEmpty {
-                    onChunk(chunk)
-                }
-            case .info(_):
+                for piece in parser.consume(chunk) { handle(piece) }
+            case .info:
                 break
             case .toolCall(let toolCall):
                 let args = toolCall.function.arguments.mapValues { $0.anyValue }
@@ -392,28 +546,26 @@ class LLMService: ObservableObject {
             }
         }
 
-        // Execute native tool calls (not streamed — delivered as final result)
-        if !nativeToolCalls.isEmpty, let tools {
-            var toolResults: [String] = []
-            for call in nativeToolCalls {
-                let result = tools.execute(toolName: call.name, arguments: call.arguments)
-                toolResults.append(result)
-            }
-            let textPart = stripThinkingTags(from: output)
-            let toolPart = toolResults.joined(separator: "\n")
-            let finalResult = textPart.isEmpty ? toolPart : textPart + "\n" + toolPart
-            return finalResult
+        for piece in parser.finish() { handle(piece) }
+
+        // Native tool calls arrive out of band rather than inside the text, so they are run
+        // after the stream ends. Their results are appended the same way.
+        for call in nativeToolCalls {
+            if let result = run(call.name, call.arguments) { emit(result) }
         }
 
-        // No native tool calls — clean up text and try fallbacks
-        let cleaned = stripThinkingTags(from: output)
-        let afterTextTools = processTextToolCalls(output: cleaned, tools: tools)
+        let finalAnswer = answer.trimmingCharacters(in: .whitespacesAndNewlines)
+        dprint("=== OUTPUT: '\(finalAnswer.prefix(200))' | TOOL CALLS: \(nativeToolCalls.count) ===")
+        if !streaming { continuation.yield(finalAnswer) }
+    }
 
-        if let tools, nativeToolCalls.isEmpty {
-            inferTimerAction(from: afterTextTools, tools: tools)
-        }
-
-        return afterTextTools
+    /// Decodes the JSON body of a `<tool_call>` block some templates emit as plain text
+    /// instead of as a native tool call.
+    private static func decodeToolCall(_ body: String) -> (name: String, arguments: [String: Any])? {
+        guard let data = body.trimmingCharacters(in: .whitespacesAndNewlines).data(using: .utf8),
+              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let name = json["name"] as? String else { return nil }
+        return (name, (json["arguments"] as? [String: Any]) ?? [:])
     }
 
     // MARK: - BigBro Chat
@@ -428,66 +580,86 @@ class LLMService: ObservableObject {
         }
     }
 
-    private struct SendableCookingBox: @unchecked Sendable { let tools: CookingTools }
+    private func runBigBroChat(
+        messages: [ChatMessage],
+        streaming: Bool,
+        tools: CookingTools?,
+        format: ResponseFormat?,
+        temperature: Float?,
+        maxTokens: Int?,
+        onThinking: (@Sendable (String) -> Void)?,
+        into continuation: AsyncThrowingStream<String, Error>.Continuation
+    ) async throws {
+        let toolList = tools?.bigBroTools ?? []
+        let options = GenerationOptions(
+            temperature: temperature.map { Double($0) },
+            numPredict: maxTokens
+        )
 
-    private func bigBroTools(from cookingTools: CookingTools) -> [BigBroTool] {
-        let box = SendableCookingBox(tools: cookingTools)
-        return [
-            BigBroTool(
-                definition: BigBroTool.Definition(
-                    name: "set_timer",
-                    description: "Set a new cooking timer with a name and duration in minutes",
-                    parameters: BigBroTool.Definition.Parameters(
-                        properties: [
-                            "name": .init(type: "string", description: "Timer label e.g. pasta, chicken"),
-                            "minutes": .init(type: "integer", description: "Duration in minutes")
-                        ],
-                        required: ["name", "minutes"]
-                    )
-                ),
-                handler: { args in await MainActor.run { box.tools.execute(toolName: "set_timer", arguments: args) } }
-            ),
-            BigBroTool(
-                definition: BigBroTool.Definition(
-                    name: "start_timer",
-                    description: "Start or resume an existing timer by name",
-                    parameters: BigBroTool.Definition.Parameters(
-                        properties: ["name": .init(type: "string", description: "Timer name to start")],
-                        required: ["name"]
-                    )
-                ),
-                handler: { args in await MainActor.run { box.tools.execute(toolName: "start_timer", arguments: args) } }
-            ),
-            BigBroTool(
-                definition: BigBroTool.Definition(
-                    name: "pause_timer",
-                    description: "Pause a running timer by name",
-                    parameters: BigBroTool.Definition.Parameters(
-                        properties: ["name": .init(type: "string", description: "Timer name to pause")],
-                        required: ["name"]
-                    )
-                ),
-                handler: { args in await MainActor.run { box.tools.execute(toolName: "pause_timer", arguments: args) } }
-            ),
-            BigBroTool(
-                definition: BigBroTool.Definition(
-                    name: "delete_timer",
-                    description: "Delete a timer by name",
-                    parameters: BigBroTool.Definition.Parameters(
-                        properties: ["name": .init(type: "string", description: "Timer name to delete")],
-                        required: ["name"]
-                    )
-                ),
-                handler: { args in await MainActor.run { box.tools.execute(toolName: "delete_timer", arguments: args) } }
-            ),
-        ]
+        let started = Date()
+        dprint("🌐 [BigBro] chat → model=\(Self.bigBroModel) msgs=\(messages.count) tools=\(toolList.count) format=\(format == nil ? "free" : "json") temp=\(temperature ?? -1) maxTokens=\(maxTokens ?? -1) connected=\(bigBroClient.isConnected)")
+        if !bigBroClient.missingModels.isEmpty {
+            dprint("🌐 [BigBro] ⚠️ Missing models on Mac: \(bigBroClient.missingModels)")
+        }
+
+        var chunkCount = 0
+        var attemptedDownloadWait = false
+        while true {
+            do {
+                for try await chunk in bigBroClient.chat(
+                    bigBroMessages(from: messages),
+                    model: Self.bigBroModel,
+                    streaming: streaming,
+                    tools: toolList,
+                    format: format,
+                    options: options,
+                    // Forward the reasoning trace only when somebody is listening for it —
+                    // the effort below is what decides how much the model actually does.
+                    think: onThinking != nil,
+                    reasoningEffort: Self.bigBroReasoningEffort,
+                    onThinking: onThinking
+                ) {
+                    continuation.yield(chunk)
+                    chunkCount += 1
+                }
+                let elapsed = Date().timeIntervalSince(started)
+                dprint("🌐 [BigBro] ✅ chat done in \(String(format: "%.2f", elapsed))s, chunks=\(chunkCount)")
+                if !bigBroClient.modelNotes.isEmpty {
+                    dprint("🌐 [BigBro] model notes: \(bigBroClient.modelNotes.joined(separator: " "))")
+                }
+                return
+            } catch let BigBroError.modelDownloading(model, alreadyInProgress) {
+                guard !attemptedDownloadWait else {
+                    dprint("🌐 [BigBro] ❌ Model still downloading after one wait — bailing out")
+                    throw LLMError.generationFailed("Model '\(model)' is still downloading. Please try again shortly.")
+                }
+                attemptedDownloadWait = true
+                dprint("🌐 [BigBro] ⏳ Model '\(model)' downloading on Mac (alreadyInProgress=\(alreadyInProgress)). Waiting…")
+                // Progress is reported into the answer only while streaming. Folded into a
+                // single response it would land inside whatever the caller is parsing.
+                if streaming {
+                    continuation.yield("⏳ Downloading \(model) on your Mac…\n")
+                    var lastStatus = ""
+                    try await waitForModelDownload(model) { status in
+                        guard status != lastStatus else { return }
+                        lastStatus = status
+                        continuation.yield("\(status)\n")
+                    }
+                    continuation.yield("✅ Model ready, generating response…\n")
+                } else {
+                    try await waitForModelDownload(model)
+                }
+                dprint("🌐 [BigBro] ✅ Model '\(model)' downloaded — retrying chat")
+            } catch {
+                dprint("🌐 [BigBro] ❌ chat failed after \(String(format: "%.2f", Date().timeIntervalSince(started)))s: \(error)")
+                throw error
+            }
+        }
     }
-
-    private static let bigBroModel = "gpt-oss:20b"
 
     /// Block until the Mac finishes pulling `model`. Calls `onProgress` with a
     /// short human-readable status string each time progress changes (suitable for
-    /// streaming back through `onChunk`).
+    /// streaming back to the caller).
     private func waitForModelDownload(_ model: String, onProgress: ((String) -> Void)? = nil) async throws {
         var lastStatus: String? = nil
         var lastPercentBucket = -1
@@ -515,129 +687,6 @@ class LLMService: ObservableObject {
         }
     }
 
-    private func generateBigBroChatCompletion(
-        messages: [ChatMessage],
-        tools: CookingTools? = nil,
-        temperature: Float? = nil,
-        maxTokens: Int? = nil
-    ) async throws -> String {
-        isGenerating = true
-        defer { isGenerating = false }
-
-        let toolList = tools.map { bigBroTools(from: $0) } ?? []
-        let options = OllamaOptions(
-            temperature: temperature.map { Double($0) },
-            numPredict: maxTokens
-        )
-        let format: OllamaFormat? = toolList.isEmpty ? .json : nil
-
-        let started = Date()
-        dprint("🌐 [BigBro] chat → model=\(Self.bigBroModel) msgs=\(messages.count) tools=\(toolList.count) format=\(format == nil ? "free" : "json") temp=\(temperature ?? -1) maxTokens=\(maxTokens ?? -1) connected=\(bigBroClient.isConnected)")
-        if !bigBroClient.missingModels.isEmpty {
-            dprint("🌐 [BigBro] ⚠️ Missing models on Mac: \(bigBroClient.missingModels)")
-        }
-
-        var output = ""
-        var chunkCount = 0
-        var attemptedDownloadWait = false
-        chatLoop: while true {
-            do {
-                for try await chunk in bigBroClient.chat(
-                    bigBroMessages(from: messages),
-                    model: Self.bigBroModel,
-                    streaming: false,
-                    tools: toolList,
-                    format: format,
-                    options: options,
-                    think: false
-                ) {
-                    output += chunk
-                    chunkCount += 1
-                }
-                break chatLoop
-            } catch let BigBroError.modelDownloading(model, alreadyInProgress) {
-                guard !attemptedDownloadWait else {
-                    dprint("🌐 [BigBro] ❌ Model still downloading after one wait — bailing out")
-                    throw LLMError.generationFailed("Model '\(model)' is still downloading. Please try again shortly.")
-                }
-                attemptedDownloadWait = true
-                dprint("🌐 [BigBro] ⏳ Model '\(model)' downloading on Mac (alreadyInProgress=\(alreadyInProgress)). Waiting…")
-                try await waitForModelDownload(model)
-                dprint("🌐 [BigBro] ✅ Model '\(model)' downloaded — retrying chat")
-            } catch {
-                dprint("🌐 [BigBro] ❌ chat failed after \(String(format: "%.2f", Date().timeIntervalSince(started)))s: \(error)")
-                throw error
-            }
-        }
-        let elapsed = Date().timeIntervalSince(started)
-        dprint("🌐 [BigBro] ✅ chat done in \(String(format: "%.2f", elapsed))s, chunks=\(chunkCount), \(output.count) chars")
-        if output.isEmpty {
-            dprint("🌐 [BigBro] ⚠️ Empty response from model")
-        } else {
-            dprint("🌐 [BigBro] response preview: \(output.prefix(300))")
-        }
-        return output
-    }
-
-    private func generateBigBroChatCompletionStreaming(
-        messages: [ChatMessage],
-        tools: CookingTools? = nil,
-        temperature: Float? = nil,
-        maxTokens: Int? = nil,
-        onChunk: @escaping (String) -> Void
-    ) async throws -> String {
-        isGenerating = true
-        defer { isGenerating = false }
-
-        let toolList = tools.map { bigBroTools(from: $0) } ?? []
-        let options = OllamaOptions(
-            temperature: temperature.map { Double($0) },
-            numPredict: maxTokens
-        )
-        let format: OllamaFormat? = toolList.isEmpty ? .json : nil
-
-        var output = ""
-        var attemptedDownloadWait = false
-        chatLoop: while true {
-            do {
-                for try await chunk in bigBroClient.chat(
-                    bigBroMessages(from: messages),
-                    model: Self.bigBroModel,
-                    streaming: true,
-                    tools: toolList,
-                    format: format,
-                    options: options,
-                    think: false
-                ) {
-                    output += chunk
-                    if !chunk.isEmpty { onChunk(chunk) }
-                }
-                break chatLoop
-            } catch let BigBroError.modelDownloading(model, alreadyInProgress) {
-                guard !attemptedDownloadWait else {
-                    throw LLMError.generationFailed("Model '\(model)' is still downloading. Please try again shortly.")
-                }
-                attemptedDownloadWait = true
-                dprint("🌐 [BigBro] ⏳ Model '\(model)' downloading (alreadyInProgress=\(alreadyInProgress))")
-                onChunk("⏳ Downloading \(model) on your Mac…\n")
-                var lastBucket = -1
-                try await waitForModelDownload(model) { status in
-                    // Replace previous status line — caller streams will append, so just emit
-                    // a new line with the latest status.
-                    let bucket = (status as NSString).hash
-                    if bucket != lastBucket {
-                        lastBucket = bucket
-                        onChunk("\(status)\n")
-                    }
-                }
-                onChunk("✅ Model ready, generating response…\n")
-            } catch {
-                throw error
-            }
-        }
-        return output
-    }
-
     // MARK: - Model Info
 
     func getModelInfo(for choice: CookingModelChoice = .bonsai8B) -> ModelInfo? {
@@ -649,85 +698,118 @@ class LLMService: ObservableObject {
             contextLength: 8192
         )
     }
+}
 
-    // MARK: - Text-based Tool Call Fallback
+// MARK: - Response Stream Parser
 
-    private static let textToolCallRegex = try? NSRegularExpression(
-        pattern: "<tool_call>\\s*(.+?)\\s*</tool_call>",
-        options: .dotMatchesLineSeparators
-    )
-    private static let timerNameRegex = try? NSRegularExpression(pattern: "['\"]([^'\"]+)['\"]")
-    private static let thinkTagRegex = try? NSRegularExpression(
-        pattern: "<think>.*?</think>",
-        options: .dotMatchesLineSeparators
-    )
+/// Splits a raw on-device token stream into the three things it can contain.
+///
+/// The Mac does this for its own models before anything is sent — reasoning arrives as separate
+/// `thinking` messages and tool calls as `toolCall` messages, so a caller's text stream is only
+/// ever the answer. On-device the app has to do it itself, and doing it after the fact (which is
+/// what stripping `<think>` from the finished string amounted to) cleaned the returned value but
+/// not the stream the chat bubble was already showing: the trace appeared, then vanished when
+/// the final message replaced it.
+///
+/// Tags can straddle chunk boundaries, so text that could still turn out to be the start of one
+/// is held back until the next chunk settles it.
+struct ResponseStreamParser {
+    enum Piece: Equatable {
+        case answer(String)
+        case thinking(String)
+        /// The body of a `<tool_call>` block — JSON naming a tool and its arguments. Emitted
+        /// whole; a partial one is useless.
+        case toolCall(String)
+    }
 
-    /// Fallback parser for models that output <tool_call> tags as text instead of native tool calls
-    private func processTextToolCalls(output: String, tools: CookingTools?) -> String {
-        guard let tools else { return output }
+    private enum Region {
+        case answer, thinking, toolCall
 
-        guard let regex = Self.textToolCallRegex else {
-            return output
-        }
-
-        let range = NSRange(output.startIndex..., in: output)
-        let matches = regex.matches(in: output, options: [], range: range)
-        guard !matches.isEmpty else { return output }
-
-        var result = output
-        for match in matches.reversed() {
-            guard let jsonRange = Range(match.range(at: 1), in: result),
-                  let fullRange = Range(match.range, in: result) else { continue }
-
-            let jsonStr = String(result[jsonRange]).trimmingCharacters(in: .whitespacesAndNewlines)
-
-            if let data = jsonStr.data(using: .utf8),
-               let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-               let toolName = json["name"] as? String,
-               let arguments = json["arguments"] as? [String: Any] {
-                let toolResult = tools.execute(toolName: toolName, arguments: arguments)
-                result.replaceSubrange(fullRange, with: toolResult)
-            } else {
-                result.replaceSubrange(fullRange, with: "")
+        var closingTag: String? {
+            switch self {
+            case .answer:   return nil
+            case .thinking: return "</think>"
+            case .toolCall: return "</tool_call>"
             }
         }
-
-        let trimmed = result.trimmingCharacters(in: .whitespacesAndNewlines)
-        return trimmed.isEmpty ? "Done!" : trimmed
     }
 
-    // MARK: - Timer Action Inference
+    private static let openers: [(tag: String, region: Region)] = [
+        ("<think>", .thinking),
+        ("<tool_call>", .toolCall),
+    ]
 
-    /// When the model responds with text like "Timer stopped" without a tool call,
-    /// infer the action and execute it.
-    private func inferTimerAction(from text: String, tools: CookingTools) {
-        let lower = text.lowercased()
+    private var buffer = ""
+    private var region: Region = .answer
 
-        let nameRange = NSRange(text.startIndex..., in: text)
-        let timerName = Self.timerNameRegex?.firstMatch(in: text, range: nameRange)
-            .flatMap { Range($0.range(at: 1), in: text) }
-            .map { String(text[$0]) }
+    /// Consumes a raw chunk, returning whatever it made unambiguous.
+    mutating func consume(_ chunk: String) -> [Piece] {
+        buffer += chunk
+        var pieces: [Piece] = []
 
-        let name = timerName ?? "timer"
+        while true {
+            if let closing = region.closingTag {
+                guard let range = buffer.range(of: closing) else { break }
+                append(String(buffer[buffer.startIndex..<range.lowerBound]), to: &pieces)
+                buffer = String(buffer[range.upperBound...])
+                region = .answer
+                continue
+            }
+            // In the answer, whichever tag opens first wins — a `<think>` block can contain
+            // the words of a tool call and vice versa.
+            let found = Self.openers.compactMap { opener -> (range: Range<String.Index>, region: Region)? in
+                buffer.range(of: opener.tag).map { (range: $0, region: opener.region) }
+            }
+            guard let opener = found.min(by: { $0.range.lowerBound < $1.range.lowerBound }) else { break }
+            append(String(buffer[buffer.startIndex..<opener.range.lowerBound]), to: &pieces)
+            buffer = String(buffer[opener.range.upperBound...])
+            region = opener.region
+        }
 
-        if lower.contains("stop") || lower.contains("paus") {
-            _ = tools.execute(toolName: "pause_timer", arguments: ["name": name])
-        } else if lower.contains("delet") || lower.contains("remov") || lower.contains("cancel") {
-            _ = tools.execute(toolName: "delete_timer", arguments: ["name": name])
-        } else if lower.contains("start") || lower.contains("resum") {
-            _ = tools.execute(toolName: "start_timer", arguments: ["name": name])
+        // A tool call is only useful whole, so nothing is emitted until it closes. Answer and
+        // reasoning text streams as it arrives, minus any tail that could be a tag opening.
+        if region != .toolCall {
+            let held = heldBackCount()
+            if held < buffer.count {
+                append(String(buffer.dropLast(held)), to: &pieces)
+                buffer = String(buffer.suffix(held))
+            }
+        }
+        return pieces
+    }
+
+    /// Flushes whatever the stream ended in the middle of.
+    mutating func finish() -> [Piece] {
+        var pieces: [Piece] = []
+        append(buffer, to: &pieces)
+        buffer = ""
+        region = .answer
+        return pieces
+    }
+
+    private func append(_ text: String, to pieces: inout [Piece]) {
+        guard !text.isEmpty else { return }
+        switch region {
+        case .answer:   pieces.append(.answer(text))
+        case .thinking: pieces.append(.thinking(text))
+        case .toolCall: pieces.append(.toolCall(text))
         }
     }
 
-    // MARK: - Text Processing
+    /// How much of the buffer's tail could still be the start of a tag we are watching for.
+    private func heldBackCount() -> Int {
+        let markers = region.closingTag.map { [$0] } ?? Self.openers.map(\.tag)
+        return markers.map { Self.partialSuffixLength(of: buffer, matching: $0) }.max() ?? 0
+    }
 
-    private func stripThinkingTags(from text: String) -> String {
-        var result = text
-        if let regex = Self.thinkTagRegex {
-            let range = NSRange(result.startIndex..., in: result)
-            result = regex.stringByReplacingMatches(in: result, options: [], range: range, withTemplate: "")
+    /// Length of the longest suffix of `text` that is a (proper) prefix of `marker`.
+    private static func partialSuffixLength(of text: String, matching marker: String) -> Int {
+        let maximum = min(text.count, marker.count - 1)
+        guard maximum > 0 else { return 0 }
+        for length in stride(from: maximum, through: 1, by: -1) {
+            if marker.hasPrefix(String(text.suffix(length))) { return length }
         }
-        return result.trimmingCharacters(in: .whitespacesAndNewlines)
+        return 0
     }
 }
 

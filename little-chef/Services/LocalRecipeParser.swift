@@ -7,6 +7,7 @@
 
 import Foundation
 import UIKit
+import BigBroKit
 
 @MainActor
 class LocalRecipeParser: ObservableObject {
@@ -168,7 +169,11 @@ class LocalRecipeParser: ObservableObject {
                 ChatMessage(role: .user, content: prompt)
             ],
             temperature: 0.2,
-            maxTokens: maxTokens
+            maxTokens: maxTokens,
+            // Asked for outright rather than inferred from "this call passes no tools", which
+            // is what used to decide it. A Mac constrains the answer to JSON; on device the
+            // prompt above is the only thing that can, hence both.
+            format: .json
         )
 
         dprint("📖 [PARSER] LLM raw response (\(response.count) chars):\n\(response.prefix(1000))")
@@ -334,7 +339,8 @@ class LocalRecipeParser: ObservableObject {
                 ChatMessage(role: .user, content: prompt)
             ],
             temperature: 0.2,
-            maxTokens: 4096
+            maxTokens: 4096,
+            format: .json
         )
 
         dprint("📖 [PARSER] LLM cleanup response (\(response.count) chars):\n\(response.prefix(500))")
