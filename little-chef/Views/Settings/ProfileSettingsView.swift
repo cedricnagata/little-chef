@@ -8,6 +8,14 @@ import AVFoundation
 import Network
 import BigBroKit
 
+/// Settings, split down the middle by where inference happens.
+///
+/// The provider picker is a tab, not just a switch: everything below it belongs to the side
+/// that is selected. On-device shows the model's download and the voice this phone speaks with;
+/// BigBro shows pairing, what the Mac has downloaded, and whether the Mac is doing the talking.
+/// Mixing them — which is what a shared Voice section did — put a greyed-out "Use BigBro voice"
+/// row in front of people who had no Mac, and hid the model manager behind a tab that had
+/// nothing to do with it.
 struct ProfileSettingsView: View {
     @EnvironmentObject var llmService: LLMService
     @EnvironmentObject var voiceAssistant: VoiceAssistant
@@ -22,13 +30,15 @@ struct ProfileSettingsView: View {
     @State private var showingDeleteAlert = false
     @State private var isDeleting = false
     @State private var hasLoaded = false
-    @State private var pendingDownload: CookingModelChoice?
-    @State private var downloadAlertKind: DownloadAlertKind?
+    @State private var pendingModel: CookingModelChoice?
+    @State private var modelAlert: ModelAlertKind?
+    @State private var modelError: String?
 
-    private enum DownloadAlertKind: Identifiable {
+    private enum ModelAlertKind: Int, Identifiable {
         case wifiConfirm
         case cellularWarn
-        var id: Int { self == .wifiConfirm ? 0 : 1 }
+        case removeConfirm
+        var id: Int { rawValue }
     }
 
     /// Voices actually installed on this device.
@@ -80,35 +90,13 @@ struct ProfileSettingsView: View {
                 Toggle("Auto-speak responses", isOn: $autoSpeakResponses)
 
                 if autoSpeakResponses {
-                    Picker("Voice", selection: $voiceIdentifier) {
-                        // A saved voice that is no longer installed would otherwise drop out of
-                        // the picker and silently reset the selection on the next render.
-                        if !availableVoices.contains(where: { $0.identifier == voiceIdentifier }) {
-                            Text("System Default").tag(voiceIdentifier)
-                            Divider()
-                        }
-                        ForEach(availableVoices, id: \.identifier) { voice in
-                            Text(voiceLabel(voice)).tag(voice.identifier)
-                        }
+                    // Whose voice depends on which side is answering, so this follows the tab
+                    // above rather than listing both and disabling one.
+                    if llmProvider == .local {
+                        deviceVoiceSettings
+                    } else {
+                        bigBroVoiceSettings
                     }
-
-                    VStack(alignment: .leading, spacing: 4) {
-                        HStack {
-                            Text("Speech Rate")
-                            Spacer()
-                            Text("\(speechRateMultiplier.wrappedValue, specifier: "%.1f")x")
-                                .font(.caption)
-                                .foregroundColor(.secondary)
-                                .monospacedDigit()
-                        }
-                        Slider(value: speechRateMultiplier, in: 0.5...2.0, step: 0.1)
-                            .tint(.orange)
-                    }
-
-                    BigBroSpeechToggle(
-                        client: llmService.bigBroClient,
-                        useBigBroSpeech: $useBigBroSpeech
-                    )
                 }
             } header: {
                 Text("Voice")
@@ -152,14 +140,14 @@ struct ProfileSettingsView: View {
         } message: {
             Text("This will permanently delete all your recipes and reset preferences. This cannot be undone.")
         }
-        .alert(item: $downloadAlertKind) { kind in
-            downloadAlert(for: kind)
+        .alert(item: $modelAlert) { kind in
+            alertContent(for: kind)
         }
     }
 
-    private func downloadAlert(for kind: DownloadAlertKind) -> Alert {
-        let name = pendingDownload?.displayName ?? "The model"
-        let size = pendingDownload?.approximateSize ?? "several GB"
+    private func alertContent(for kind: ModelAlertKind) -> Alert {
+        let name = pendingModel?.displayName ?? "The model"
+        let size = pendingModel?.approximateSize ?? "several GB"
         switch kind {
         case .wifiConfirm:
             let msg = "\(name) is approximately \(size). Keep the app open until the download finishes."
@@ -167,7 +155,7 @@ struct ProfileSettingsView: View {
                 title: Text("Download AI Model?"),
                 message: Text(msg),
                 primaryButton: .default(Text("Download")) { startPendingDownload() },
-                secondaryButton: .cancel { pendingDownload = nil }
+                secondaryButton: .cancel { pendingModel = nil }
             )
         case .cellularWarn:
             let msg = "\(name) is approximately \(size) and may use significant cellular data. Connect to Wi-Fi for best results."
@@ -175,26 +163,51 @@ struct ProfileSettingsView: View {
                 title: Text("Cellular Connection"),
                 message: Text(msg),
                 primaryButton: .destructive(Text("Download Anyway")) { startPendingDownload() },
-                secondaryButton: .cancel { pendingDownload = nil }
+                secondaryButton: .cancel { pendingModel = nil }
+            )
+        case .removeConfirm:
+            let msg = "Frees about \(size). Cooking chat and recipe parsing stop working on this device until \(name) is downloaded again."
+            return Alert(
+                title: Text("Remove \(name)?"),
+                message: Text(msg),
+                primaryButton: .destructive(Text("Remove")) { removePendingModel() },
+                secondaryButton: .cancel { pendingModel = nil }
             )
         }
     }
 
-    // MARK: - Download Gating
+    // MARK: - Model Download / Removal
 
     private func promptDownload(for choice: CookingModelChoice) {
-        pendingDownload = choice
+        pendingModel = choice
+        modelError = nil
         if NetworkPathMonitor.shared.isExpensive {
-            downloadAlertKind = .cellularWarn
+            modelAlert = .cellularWarn
         } else {
-            downloadAlertKind = .wifiConfirm
+            modelAlert = .wifiConfirm
         }
     }
 
+    private func promptRemoval(of choice: CookingModelChoice) {
+        pendingModel = choice
+        modelError = nil
+        modelAlert = .removeConfirm
+    }
+
     private func startPendingDownload() {
-        guard let choice = pendingDownload else { return }
-        pendingDownload = nil
+        guard let choice = pendingModel else { return }
+        pendingModel = nil
         Task { try? await llmService.downloadModel(modelId: choice.modelId) }
+    }
+
+    private func removePendingModel() {
+        guard let choice = pendingModel else { return }
+        pendingModel = nil
+        do {
+            try llmService.removeModel(modelId: choice.modelId)
+        } catch {
+            modelError = "Couldn't remove the model: \(error.localizedDescription)"
+        }
     }
 
     // MARK: - Provider Picker Section
@@ -243,6 +256,12 @@ struct ProfileSettingsView: View {
             )
         }
 
+        if let modelError {
+            Text(modelError)
+                .font(.caption)
+                .foregroundColor(.red)
+        }
+
         if let error = llmService.loadError {
             Text(error)
                 .font(.caption)
@@ -252,49 +271,148 @@ struct ProfileSettingsView: View {
 
     // MARK: - Model Row
 
+    /// One model, and the two decisions the user owns about it.
+    ///
+    /// Download and remove only. Whether the model is *running* is shown but not offered:
+    /// starting it belongs to opening a cooking session and stopping it to ending one, and a
+    /// button that stopped it mid-session would only make the next question slow.
     @ViewBuilder
     private func modelRow(for choice: CookingModelChoice, usage: String) -> some View {
         let isDownloading = llmService.currentlyLoadingModelId == choice.modelId
         let isDownloaded = llmService.downloadedModelIds.contains(choice.modelId)
+        let isRunning = llmService.runningModelIds.contains(choice.modelId)
 
-        HStack {
-            VStack(alignment: .leading, spacing: 2) {
-                Text(choice.displayName)
-                    .font(.subheadline)
-                Text(usage)
-                    .font(.caption2)
-                    .foregroundColor(.secondary)
-            }
-
-            Spacer()
-
-            if isDownloading {
-                HStack(spacing: 6) {
-                    ProgressView(value: llmService.loadProgress, total: 1.0)
-                        .frame(width: 60)
-                        .tint(.orange)
-                    Text("\(Int(llmService.loadProgress * 100))%")
+        VStack(alignment: .leading, spacing: 6) {
+            HStack {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(choice.displayName)
+                        .font(.subheadline)
+                    Text(usage)
                         .font(.caption2)
                         .foregroundColor(.secondary)
-                        .monospacedDigit()
                 }
-            } else if isDownloaded {
-                Label("Downloaded", systemImage: "checkmark.circle.fill")
-                    .font(.caption)
-                    .foregroundColor(.green)
-            } else {
-                Button {
-                    promptDownload(for: choice)
-                } label: {
-                    Text("Download")
-                        .font(.caption)
-                        .fontWeight(.medium)
+
+                Spacer()
+
+                if isDownloading {
+                    HStack(spacing: 6) {
+                        ProgressView(value: llmService.loadProgress, total: 1.0)
+                            .frame(width: 60)
+                            .tint(.orange)
+                        Text("\(Int(llmService.loadProgress * 100))%")
+                            .font(.caption2)
+                            .foregroundColor(.secondary)
+                            .monospacedDigit()
+                    }
+                } else if isDownloaded {
+                    Button(role: .destructive) {
+                        promptRemoval(of: choice)
+                    } label: {
+                        Text("Remove")
+                            .font(.caption)
+                            .fontWeight(.medium)
+                    }
+                    .buttonStyle(.bordered)
+                    .tint(.red)
+                } else {
+                    Button {
+                        promptDownload(for: choice)
+                    } label: {
+                        Text("Download")
+                            .font(.caption)
+                            .fontWeight(.medium)
+                    }
+                    .buttonStyle(.bordered)
+                    .tint(.orange)
+                    .disabled(llmService.isLoadingModel)
                 }
-                .buttonStyle(.bordered)
-                .tint(.orange)
-                .disabled(llmService.isLoadingModel)
+            }
+
+            statusLabel(downloading: isDownloading, downloaded: isDownloaded, running: isRunning, size: choice.approximateSize)
+        }
+    }
+
+    /// The three states a model can be in, said plainly.
+    ///
+    /// "Downloaded" and "Running" are different things and the difference is the whole point of
+    /// splitting them: one costs storage, the other costs memory, and the app only holds the
+    /// second while a session is open.
+    @ViewBuilder
+    private func statusLabel(downloading: Bool, downloaded: Bool, running: Bool, size: String) -> some View {
+        if downloading {
+            // The same call does both, so what it is busy with depends on whether the weights
+            // are already on disk — seconds of loading, or gigabytes of download.
+            Label(
+                downloaded ? "Starting — loading into memory" : "Downloading — keep the app open",
+                systemImage: downloaded ? "bolt.horizontal.circle" : "arrow.down.circle"
+            )
+                .font(.caption2)
+                .foregroundColor(.secondary)
+        } else if running {
+            Label("Running — in memory for this cooking session", systemImage: "bolt.circle.fill")
+                .font(.caption2)
+                .foregroundColor(.green)
+        } else if downloaded {
+            Label("Downloaded (\(size)) — starts when a cooking session opens", systemImage: "checkmark.circle.fill")
+                .font(.caption2)
+                .foregroundColor(.secondary)
+        } else {
+            Label("Not downloaded (\(size))", systemImage: "circle.dashed")
+                .font(.caption2)
+                .foregroundColor(.secondary)
+        }
+    }
+
+    // MARK: - Voice
+
+    /// The voice this phone speaks with — Apple's synthesizer, on device.
+    ///
+    /// Appears on both tabs, because it is the voice on both unless a connected Mac is doing
+    /// the talking. Confining it to the on-device tab would put it out of reach entirely on a
+    /// phone too small for on-device models, which is exactly the phone BigBro exists for.
+    @ViewBuilder
+    private var deviceVoiceSettings: some View {
+        Picker("Voice", selection: $voiceIdentifier) {
+            // A saved voice that is no longer installed would otherwise drop out of
+            // the picker and silently reset the selection on the next render.
+            if !availableVoices.contains(where: { $0.identifier == voiceIdentifier }) {
+                Text("System Default").tag(voiceIdentifier)
+                Divider()
+            }
+            ForEach(availableVoices, id: \.identifier) { voice in
+                Text(voiceLabel(voice)).tag(voice.identifier)
             }
         }
+
+        VStack(alignment: .leading, spacing: 4) {
+            HStack {
+                Text("Speech Rate")
+                Spacer()
+                Text("\(speechRateMultiplier.wrappedValue, specifier: "%.1f")x")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+                    .monospacedDigit()
+            }
+            Slider(value: speechRateMultiplier, in: 0.5...2.0, step: 0.1)
+                .tint(.orange)
+        }
+    }
+
+    @ViewBuilder
+    private var bigBroVoiceSettings: some View {
+        BigBroSpeechToggle(
+            client: llmService.bigBroClient,
+            useBigBroSpeech: $useBigBroSpeech
+        )
+
+        // Kept visible rather than hidden behind the toggle. This is the voice for every moment
+        // the Mac isn't speaking — switched off, asleep, off the network — and on a device too
+        // small for on-device models this tab is the only place these rows exist at all.
+        deviceVoiceSettings
+
+        Text("The device voice is used whenever the Mac isn't speaking.")
+            .font(.caption)
+            .foregroundColor(.secondary)
     }
 
     // MARK: - Data Operations

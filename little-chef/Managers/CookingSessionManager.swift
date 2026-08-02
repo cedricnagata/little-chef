@@ -82,14 +82,32 @@ class CookingSessionManager: ObservableObject, TimerManager {
     /// gigabytes over somebody's cellular connection, and it stays behind the prompt in
     /// Settings.
     private func prepareModelForSession() {
+        llmService.isModelHeldBySession = (llmService.currentProvider == .local)
         switch llmService.currentProvider {
         case .bigBro:
             llmService.runBigBroModel()
         case .local:
+            // The hold is set either way. A model that still has to download starts on the
+            // first question instead, and the session is what keeps it after that.
             guard let model = LLMService.supportedOnDeviceModel,
                   llmService.downloadedModelIds.contains(model.modelId) else { return }
             Task { [llmService] in try? await llmService.runModel(modelId: model.modelId) }
         }
+    }
+
+    /// Gives the RAM back when the cooking is done.
+    ///
+    /// The counterpart to `prepareModelForSession`, and the reason running is worth separating
+    /// from downloading at all: an 8B model holds gigabytes for as long as it is loaded, and
+    /// outside a session nothing is asking it anything. The download stays, so the next session
+    /// starts it again from disk in seconds.
+    ///
+    /// Only ever stops *this device's* model. The Mac's is shared with every device paired to
+    /// it, so ending a session here has no business taking it away from them.
+    private func releaseModelAfterSession() {
+        llmService.isModelHeldBySession = false
+        guard llmService.currentProvider == .local else { return }
+        llmService.stopModel()
     }
 
     private func loadLocalPreferences() async -> UserPreferencesDetailed {
@@ -106,6 +124,7 @@ class CookingSessionManager: ObservableObject, TimerManager {
 
     func endCookingSession() {
         stopHandsFreeVoice()
+        releaseModelAfterSession()
         currentSession = nil
         lastResponse = ""
         error = nil
@@ -260,11 +279,15 @@ class CookingSessionManager: ObservableObject, TimerManager {
 
     /// Whether the whole spoken loop can run on the paired Mac.
     ///
-    /// Needs the preference *and* a live connection. Without both, hands-free falls back to
-    /// the on-device path in `VoiceAssistant` — Apple's recognizer and `AVSpeechSynthesizer` —
-    /// which is also what keeps the loop working when the Mac goes away.
+    /// Same three conditions as `VoiceAssistant.shouldUseBigBro`: opted in, connected, and
+    /// BigBro answering — voice follows the provider, because that is the tab the setting lives
+    /// on. Falling short of any of them means hands-free runs the on-device path instead:
+    /// Apple's recognizer and `AVSpeechSynthesizer`, which is also what keeps it working when
+    /// the Mac goes away.
     func canUseBigBroVoice(_ settings: LocalVoiceSettings?) -> Bool {
-        (settings?.useBigBroSpeech ?? false) && llmService.bigBroClient.isConnected
+        (settings?.useBigBroSpeech ?? false)
+            && llmService.currentProvider == .bigBro
+            && llmService.bigBroClient.isConnected
     }
 
     /// Hands the whole spoken conversation to BigBroKit: listen, transcribe on the Mac, answer

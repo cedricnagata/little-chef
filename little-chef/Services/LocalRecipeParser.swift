@@ -42,6 +42,9 @@ class LocalRecipeParser: ObservableObject {
             isProcessing = false
             progress = 1.0
             statusMessage = ""
+            // An import is one-off work. Whatever it had to load stays loaded otherwise, and
+            // several gigabytes of it outlive a job that finished a minute ago.
+            llmService.releaseModelIfIdle()
         }
 
         dprint("📖 [PARSER] Parsing URL: \(url)")
@@ -101,7 +104,7 @@ class LocalRecipeParser: ObservableObject {
         isProcessing = true
         progress = 0.2
         statusMessage = "Analyzing recipe with AI..."
-        defer { isProcessing = false; progress = 1.0; statusMessage = "" }
+        defer { isProcessing = false; progress = 1.0; statusMessage = ""; llmService.releaseModelIfIdle() }
 
         let recipeData = try await parseWithLLM(text: text, sourceUrl: nil)
         progress = 1.0
@@ -115,7 +118,7 @@ class LocalRecipeParser: ObservableObject {
         isProcessing = true
         progress = 0.1
         statusMessage = "Reading text from images..."
-        defer { isProcessing = false; progress = 1.0; statusMessage = "" }
+        defer { isProcessing = false; progress = 1.0; statusMessage = ""; llmService.releaseModelIfIdle() }
 
         guard !images.isEmpty else { throw RecipeParserError.noImagesProvided }
 

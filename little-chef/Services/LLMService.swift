@@ -102,12 +102,15 @@ class LLMService: ObservableObject {
     }
 
     // MARK: - Published State
-    @Published var isLoaded = false
     @Published var isGenerating = false
     @Published var loadError: String?
     @Published var loadProgress: Double = 0.0
     @Published var isLoadingModel = false
+    /// Models whose weights are on disk. Downloaded is not running — see ``runningModelIds``.
     @Published var downloadedModelIds: Set<String> = []
+    /// Models whose weights are in memory right now, and therefore costing RAM. A cooking
+    /// session puts one here when it opens and takes it back out when it ends.
+    @Published private(set) var runningModelIds: Set<String> = []
     /// True while the Mac is materializing the model's weights ahead of the first message.
     @Published private(set) var isStartingBigBroModel = false
     @Published var currentProvider: LLMProvider = .local {
@@ -119,6 +122,13 @@ class LLMService: ObservableObject {
     private var modelContainers: [String: MLXLMCommon.ModelContainer] = [:]
     /// Which model ID is currently being loaded (to prevent double-loads)
     @Published var currentlyLoadingModelId: String?
+    /// Bumped by every `stopModel`, so a load already in flight can see that it was stopped.
+    private var stopGeneration = 0
+    /// Set while a cooking session has the on-device model in memory on purpose.
+    ///
+    /// Not a lock — just the answer to "is anyone still using this?", which one-off work needs
+    /// before putting the model away. See ``releaseModelIfIdle()``.
+    var isModelHeldBySession = false
 
     let bigBroClient = BigBroClient(appName: "LittleChef", requiredModels: [LLMService.bigBroModel])
 
@@ -236,6 +246,18 @@ class LLMService: ObservableObject {
     }
 
     // MARK: - On-Device Model Lifecycle
+    //
+    // Four states, the same four BigBro gives a Mac's models, and the distinctions matter for
+    // the same reasons:
+    //
+    //   download / remove — weights on disk. Gigabytes over somebody's connection to get back,
+    //                       so both are the user's decision, made in Settings.
+    //   run / stop        — weights in memory. Seconds to get back and gigabytes of RAM to
+    //                       hold, so the app decides: a cooking session runs the model when it
+    //                       opens and stops it when it ends.
+    //
+    // What the app must never do is conflate them. Stopping a model to reclaim RAM is free to
+    // undo; deleting one is not.
 
     private func loadModel(modelId: String? = nil) async throws -> MLXLMCommon.ModelContainer {
         let id = modelId ?? CookingModelChoice.bonsai8B.modelId
@@ -259,7 +281,14 @@ class LLMService: ObservableObject {
             dprint("🤖 [LLM] Unloading \(existingId) before loading \(id)")
             modelContainers.removeValue(forKey: existingId)
         }
+        refreshRunningModels()
         MLX.Memory.clearCache()
+
+        // A load cannot be cancelled once MLX is inside it, so a stop that lands while this is
+        // running is recorded rather than obeyed, and honoured on the way out. Without it,
+        // ending a cooking session during the few seconds its model takes to start leaves
+        // several gigabytes resident with nothing to ask.
+        let stopMark = stopGeneration
 
         dprint("🤖 [LLM] Starting model load for \(id)...")
         currentlyLoadingModelId = id
@@ -285,12 +314,19 @@ class LLMService: ObservableObject {
             }
 
             dprint("🤖 [LLM] ✅ Model \(id) loaded successfully")
-            self.modelContainers[id] = container
-            isLoaded = true
             loadProgress = 1.0
             isLoadingModel = false
             currentlyLoadingModelId = nil
             refreshDownloadedModels()
+            if stopMark == stopGeneration {
+                self.modelContainers[id] = container
+                refreshRunningModels()
+            } else {
+                // Stopped while this was loading. Whoever awaited it still gets the container
+                // and can finish the request it was for; nothing holds it afterwards.
+                dprint("🤖 [LLM] \(id) finished loading after a stop — not keeping it resident")
+                MLX.Memory.clearCache()
+            }
             return container
         } catch {
             dprint("🤖 [LLM] ❌ Model \(id) load failed: \(error)")
@@ -309,47 +345,85 @@ class LLMService: ObservableObject {
     /// second.
     func downloadModel(modelId: String) async throws {
         _ = try await loadModel(modelId: modelId)
-        // Unload from memory — the files stay cached on disk
-        modelContainers.removeValue(forKey: modelId)
-        isLoaded = !modelContainers.isEmpty
-        MLX.Memory.clearCache()
+        // Downloading is not running. Loading is how MLX fetches the weights, so this ends up
+        // holding them; drop them again rather than leaving several GB resident because
+        // somebody visited Settings.
+        stopModel(modelId: modelId)
         dprint("🤖 [LLM] Downloaded \(modelId) to cache, unloaded from memory")
+    }
+
+    /// Deletes a model's weights from disk.
+    ///
+    /// Destructive and irreversible over a multi-gigabyte re-download, which is why — exactly
+    /// as on the Mac, where a client can stop a model but only the Mac's owner can remove one —
+    /// this is reachable from Settings and from nowhere else. Stops the model first: freeing
+    /// the memory is meaningless once the files are gone, and MLX should not be left holding a
+    /// container whose weights no longer exist.
+    func removeModel(modelId: String) throws {
+        stopModel(modelId: modelId)
+        let location = Self.modelCacheURL(modelId)
+        if FileManager.default.fileExists(atPath: location.path) {
+            try FileManager.default.removeItem(at: location)
+        }
+        refreshDownloadedModels()
+        dprint("🤖 [LLM] Removed \(modelId) from disk")
     }
 
     /// Puts a downloaded model's weights in memory, ahead of the first message.
     ///
     /// The on-device counterpart of `BigBroClient.runModel`, and named to match it: safe to
-    /// skip, safe to call twice, and downloads the model first if it isn't on disk yet.
+    /// skip, safe to call twice. Unlike the Mac's, this one downloads the model if it isn't on
+    /// disk — which is why the session prewarm checks first, so nothing starts a multi-gigabyte
+    /// download on the user's behalf.
     func runModel(modelId: String? = nil) async throws {
         _ = try await loadModel(modelId: modelId)
     }
 
-    /// Frees the memory a model was holding, keeping its download.
+    /// Stops the on-device model unless a cooking session is holding it.
     ///
-    /// The opposite of `runModel`, not a delete — `nil` stops every loaded model.
-    func stopModel(modelId: String? = nil) {
-        if let modelId {
-            modelContainers.removeValue(forKey: modelId)
-        } else {
-            modelContainers.removeAll()
-        }
-        isLoaded = !modelContainers.isEmpty
-        isLoadingModel = false
-        loadProgress = 0.0
-        loadError = nil
-        MLX.Memory.clearCache()
+    /// Importing a recipe loads the model on demand and, without this, left several gigabytes
+    /// resident long after the import finished — the same leak that separating running from
+    /// downloading is meant to close. A session is the one thing that keeps it: it started the
+    /// model deliberately and stops it when it ends.
+    func releaseModelIfIdle() {
+        guard currentProvider == .local, !isModelHeldBySession else { return }
+        stopModel()
     }
 
-    func isModelLoaded(_ modelId: String) -> Bool {
-        return modelContainers[modelId] != nil
+    /// Frees the memory a model was holding, keeping its download.
+    ///
+    /// The opposite of `runModel`, not a delete — `nil` stops every loaded model. Unlike the
+    /// Mac's, nothing else is sharing this model, so stopping it costs no one else anything.
+    func stopModel(modelId: String? = nil) {
+        // Counted even when nothing is loaded: the case this exists for is a stop that arrives
+        // while a model is still on its way into memory.
+        stopGeneration &+= 1
+        if let modelId {
+            guard modelContainers.removeValue(forKey: modelId) != nil else { return }
+            dprint("🤖 [LLM] Stopped \(modelId)")
+        } else {
+            guard !modelContainers.isEmpty else { return }
+            dprint("🤖 [LLM] Stopped \(modelContainers.count) model(s)")
+            modelContainers.removeAll()
+        }
+        refreshRunningModels()
+        loadProgress = 0.0
+        MLX.Memory.clearCache()
     }
 
     /// Check if a model has been downloaded to the HuggingFace hub cache.
     func isModelDownloaded(_ modelId: String) -> Bool {
-        let cacheDir = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first!
-        // MLX Swift stores models at <CachesDirectory>/models/<org>/<repo>
-        let modelPath = cacheDir.appendingPathComponent("models/\(modelId)")
-        return FileManager.default.fileExists(atPath: modelPath.path)
+        FileManager.default.fileExists(atPath: Self.modelCacheURL(modelId).path)
+    }
+
+    /// MLX Swift stores models at `<CachesDirectory>/models/<org>/<repo>`.
+    private static func modelCacheURL(_ modelId: String) -> URL {
+        FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first!
+            .appendingPathComponent("models/\(modelId)")
+    }
+
+    private func refreshRunningModels() {
+        runningModelIds = Set(modelContainers.keys)
     }
 
     // MARK: - Chat

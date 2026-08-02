@@ -304,8 +304,8 @@ class VoiceAssistant: NSObject, ObservableObject {
         self.voiceSettings = settings
         // Kokoro and Parakeet load lazily on the Mac, on whichever request is first. Starting
         // them the moment the user opts in moves that wait somewhere it isn't the first thing
-        // they ask for. No-op unless a Mac is connected, and once per connection.
-        if settings.useBigBroSpeech {
+        // they ask for. Once per connection, and only when the Mac is the one that will speak.
+        if shouldUseBigBro {
             llmService.runBigBroSpeech()
         }
     }
@@ -344,10 +344,15 @@ class VoiceAssistant: NSObject, ObservableObject {
 
     /// Whether spoken output should go through the Mac right now.
     ///
-    /// Needs both the preference *and* a live connection: the toggle is a preference, and
-    /// falling back to the on-device voice beats going silent when the Mac disappears.
+    /// Three things, not one. The preference, because it is opt-in. A live connection, because
+    /// falling back to the on-device voice beats going silent when the Mac disappears. And
+    /// BigBro being the active provider, because the voice belongs to that mode: it is set on
+    /// that tab in Settings, and a preference still in force under a tab that no longer shows
+    /// it is a setting the user cannot find to change.
     private var shouldUseBigBro: Bool {
-        (voiceSettings?.useBigBroSpeech ?? false) && llmService.bigBroClient.isConnected
+        (voiceSettings?.useBigBroSpeech ?? false)
+            && llmService.currentProvider == .bigBro
+            && llmService.bigBroClient.isConnected
     }
 
     /// Speaks one utterance with whichever backend is active.

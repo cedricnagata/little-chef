@@ -36,6 +36,7 @@ Runs [PrismML Bonsai 8B (1-bit)](https://huggingface.co/prism-ml/Bonsai-8B-mlx-1
 - No internet required after initial model download
 - Full privacy — all inference runs on-device
 - ~44 tok/s generation on iPhone 16 Pro Max
+- Download and remove the model in Settings; it is loaded into memory when a cooking session starts and released when the session ends, so it costs RAM only while you are cooking
 
 ### BigBro (Mac Companion)
 Pairs with a Mac running the BigBro companion app over local network. The Mac runs `gpt-oss-20b` on MLX in-process and handles all inference, with tool use fully supported. Suitable for older devices that don't meet the RAM requirement.
