@@ -20,7 +20,6 @@ struct ProfileSettingsView: View {
     @State private var autoSpeakResponses = true
     @State private var useBigBroSpeech = false
     @State private var wakePhrase = "hey little chef"
-    @State private var followUpWindow: Double = 8
     @State private var bigBroVoice = BigBroClient.defaultVoice
     @State private var showingDeleteAlert = false
     @State private var isDeleting = false
@@ -137,16 +136,10 @@ struct ProfileSettingsView: View {
                     .foregroundColor(.orange)
                 }
 
-                Picker("Follow-up window", selection: $followUpWindow) {
-                    Text("Off").tag(0.0)
-                    Text("5s").tag(5.0)
-                    Text("8s").tag(8.0)
-                    Text("15s").tag(15.0)
-                }
             } header: {
                 Text("Hands-free")
             } footer: {
-                Text("The wake phrase is only used by the \"Wait for…\" hands-free mode. After answering, the assistant keeps taking questions for the follow-up window without needing the phrase again.")
+                Text("The wake phrase is only used by the \"Wait for…\" hands-free mode. Every question opens with it, including the one after an answer — so other conversations in the kitchen are not mistaken for questions.")
             }
 
             // MARK: - Data
@@ -182,7 +175,6 @@ struct ProfileSettingsView: View {
         .onChange(of: autoSpeakResponses) { _, _ in saveIfLoaded() }
         .onChange(of: useBigBroSpeech) { _, _ in saveIfLoaded() }
         .onChange(of: wakePhrase) { _, _ in saveIfLoaded() }
-        .onChange(of: followUpWindow) { _, _ in saveIfLoaded() }
         .onChange(of: bigBroVoice) { _, _ in saveIfLoaded() }
         .alert("Delete All Data", isPresented: $showingDeleteAlert) {
             Button("Cancel", role: .cancel) { }
@@ -363,7 +355,6 @@ struct ProfileSettingsView: View {
                     autoSpeakResponses = prefs.voiceSettings.autoSpeakResponses
                     useBigBroSpeech = prefs.voiceSettings.useBigBroSpeech
                     wakePhrase = prefs.voiceSettings.wakePhrase
-                    followUpWindow = prefs.voiceSettings.followUpWindow
                     bigBroVoice = prefs.voiceSettings.bigBroVoice
                     LLMService.shared.currentProvider = provider
                     hasLoaded = true
@@ -388,7 +379,6 @@ struct ProfileSettingsView: View {
                 autoSpeakResponses: autoSpeakResponses,
                 useBigBroSpeech: useBigBroSpeech,
                 wakePhrase: wakePhrase,
-                followUpWindow: followUpWindow,
                 bigBroVoice: bigBroVoice
             )
         )
@@ -401,7 +391,6 @@ struct ProfileSettingsView: View {
                     autoSpeakResponses: autoSpeakResponses,
                     useBigBroSpeech: useBigBroSpeech,
                     wakePhrase: wakePhrase,
-                    followUpWindow: followUpWindow,
                     bigBroVoice: bigBroVoice,
                     llmProvider: llmProvider
                 )

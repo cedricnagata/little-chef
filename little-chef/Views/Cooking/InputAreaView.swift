@@ -290,10 +290,11 @@ private struct VoiceStatusBar: View {
         case .idle:         return "Voice off"
         case .preparing:    return "Getting ready…"
         case .armed:        return "Say \"\(voiceAssistant.voiceSettings.wakePhrase)\""
-        // In wake-word mode this is the follow-up window, and saying so is the difference
-        // between the user knowing they can just talk and waiting for a prompt that is over.
+        // In wake-word mode this state is only reached by being called by name and asked
+        // nothing, and it lapses. Saying "go ahead" is the difference between the user asking
+        // their question now and waiting for a prompt that is already expiring.
         case .listening:    return voiceAssistant.usesWakeWord
-            ? "Listening — no need to say it again"
+            ? "Go ahead"
             : "Listening"
         case .transcribing: return "Heard you…"
         case .thinking:     return "Thinking"

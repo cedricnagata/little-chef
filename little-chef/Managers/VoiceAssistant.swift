@@ -155,11 +155,9 @@ final class VoiceAssistant: NSObject, ObservableObject {
         // ones until restarted.
         bigBroSession?.speaksReplies = settings.autoSpeakResponses
         bigBroSession?.voice = settings.bigBroVoice
-        bigBroSession?.followUpWindow = settings.followUpWindow
         if usesWakeWord { bigBroSession?.wakeWord = wakeWord }
         localSession?.voiceSettings = settings
         localSession?.speaksReplies = settings.autoSpeakResponses
-        localSession?.followUpWindow = settings.followUpWindow
         if usesWakeWord { localSession?.wakeWord = wakeWord }
         // Turning speech off mid-answer should stop the answer, not let it finish.
         if !settings.autoSpeakResponses { stopSpeaking() }
@@ -259,8 +257,7 @@ final class VoiceAssistant: NSObject, ObservableObject {
             voice: voiceSettings.bigBroVoice,
             systemPrompt: context.systemPrompt,
             speaksReplies: voiceSettings.autoSpeakResponses,
-            wakeWord: usesWakeWord ? wakeWord : nil,
-            followUpWindow: voiceSettings.followUpWindow
+            wakeWord: usesWakeWord ? wakeWord : nil
         )
         // Carry the typed conversation across, so switching to voice continues it.
         session.setHistory(context.priorTurns.map { turn in
@@ -276,7 +273,6 @@ final class VoiceAssistant: NSObject, ObservableObject {
             voiceSettings: voiceSettings,
             speaksReplies: voiceSettings.autoSpeakResponses,
             wakeWord: usesWakeWord ? wakeWord : nil,
-            followUpWindow: voiceSettings.followUpWindow,
             answer: context.answer
         )
         observe(session)

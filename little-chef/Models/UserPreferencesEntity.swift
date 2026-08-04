@@ -79,8 +79,6 @@ final class UserPreferencesEntity {
     var useBigBroSpeech: Bool = false
     /// What the assistant answers to in wake-word hands-free mode.
     var wakePhrase: String = "hey little chef"
-    /// Seconds after an answer during which a follow-up needs no wake phrase. 0 disables.
-    var followUpWindow: Double = 8
     /// Kokoro voice id used when speaking through the Mac. Ignored on the on-device voice,
     /// which is chosen by `voiceIdentifier` instead.
     var bigBroVoice: String = "af_heart"
@@ -97,7 +95,6 @@ final class UserPreferencesEntity {
         autoSpeakResponses: Bool = true,
         useBigBroSpeech: Bool = false,
         wakePhrase: String = "hey little chef",
-        followUpWindow: Double = 8,
         bigBroVoice: String = "af_heart",
         cookingModel: String = "bonsai8b",
         llmProvider: String = "local",
@@ -111,7 +108,6 @@ final class UserPreferencesEntity {
         self.autoSpeakResponses = autoSpeakResponses
         self.useBigBroSpeech = useBigBroSpeech
         self.wakePhrase = wakePhrase
-        self.followUpWindow = followUpWindow
         self.bigBroVoice = bigBroVoice
         self.cookingModel = cookingModel
         self.llmProvider = llmProvider
@@ -131,7 +127,6 @@ final class UserPreferencesEntity {
                 autoSpeakResponses: autoSpeakResponses,
                 useBigBroSpeech: useBigBroSpeech,
                 wakePhrase: wakePhrase,
-                followUpWindow: followUpWindow,
                 bigBroVoice: bigBroVoice
             ),
             cookingModel: CookingModelChoice(rawValue: cookingModel) ?? .bonsai8B,
@@ -153,7 +148,6 @@ final class UserPreferencesEntity {
         autoSpeakResponses: Bool? = nil,
         useBigBroSpeech: Bool? = nil,
         wakePhrase: String? = nil,
-        followUpWindow: Double? = nil,
         bigBroVoice: String? = nil,
         cookingModel: CookingModelChoice? = nil,
         llmProvider: LLMProvider? = nil
@@ -178,9 +172,6 @@ final class UserPreferencesEntity {
         }
         if let wakePhrase = wakePhrase {
             self.wakePhrase = wakePhrase
-        }
-        if let followUpWindow = followUpWindow {
-            self.followUpWindow = followUpWindow
         }
         if let bigBroVoice = bigBroVoice {
             self.bigBroVoice = bigBroVoice
@@ -212,8 +203,6 @@ struct LocalVoiceSettings: Codable, Equatable {
     /// whole point is that it is the user's name for it — but a phrase too short to gate on is
     /// refused by `WakeWord` rather than silently matching nothing.
     var wakePhrase: String = "hey little chef"
-    /// Seconds after an answer during which a follow-up needs no wake phrase. 0 disables it.
-    var followUpWindow: Double = 8
     /// Kokoro voice id for the Mac's synthesizer. Separate from `voiceIdentifier`, which names
     /// an `AVSpeechSynthesisVoice` — the two backends share no vocabulary of voices.
     var bigBroVoice: String = "af_heart"

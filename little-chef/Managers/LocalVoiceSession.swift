@@ -90,9 +90,12 @@ final class LocalVoiceSession: NSObject, ObservableObject {
     // MARK: Configuration
 
     /// When set, only utterances addressed by this phrase are answered.
+    ///
+    /// The phrase is the *only* way in. Every request opens with it, including the one after
+    /// an answer — the loop re-arms as soon as it stops speaking rather than staying open for
+    /// a follow-up. The single exception is being called by name with nothing after it, which
+    /// opens the microphone briefly for the request that was promised; see ``summonWindow``.
     var wakeWord: WakeWord?
-    /// How long after an answer a follow-up needs no wake phrase.
-    var followUpWindow: TimeInterval
     /// Whether answers are spoken aloud. Off still runs the loop — talk to it, read the reply.
     var speaksReplies: Bool
     /// Voice and rate for the synthesizer. Re-read per utterance, so a change in Settings
@@ -108,6 +111,14 @@ final class LocalVoiceSession: NSObject, ObservableObject {
     /// assistant a second, subtly different brain.
     private let generateAnswer: (_ question: String, _ onSentence: @escaping (String) -> Void) async -> String
 
+    /// How long a session called by name with nothing after it waits for the request.
+    ///
+    /// Deliberately not configurable, and short. This is the only state in wake-word mode
+    /// where speech is taken without the phrase, so how long it lasts is exactly how long the
+    /// wake word is not doing its job; a false wake nobody follows up costs this much open
+    /// microphone and no more.
+    private static let summonWindow: TimeInterval = 8
+
     // MARK: Machinery
 
     private let microphone: BigBroMicrophone
@@ -116,22 +127,36 @@ final class LocalVoiceSession: NSObject, ObservableObject {
 
     private var loopTask: Task<Void, Never>?
     private var rearmTask: Task<Void, Never>?
-    /// True while a follow-up may be spoken without the wake phrase.
-    private var followUpOpen = false
+    /// When an outstanding summons stops being honoured, or nil if there isn't one.
+    private var summonedUntil: ContinuousClock.Instant?
+    /// True once speech has begun inside the window, holding it open until that speech is
+    /// dealt with. See ``summoned``.
+    private var summonHeld = false
     private var cancellables: Set<AnyCancellable> = []
+
+    /// Whether the next utterance may be taken as a request without the wake phrase.
+    ///
+    /// Deliberately measured against when speech *started*, not when its transcript came back.
+    /// A request lands seconds after the summons that invited it — the endpointer waits out
+    /// `hangoverDuration` before closing the utterance and the recognizer then has to run — so
+    /// a deadline checked on arrival expires under exactly the request it was opened for, and
+    /// does it more the longer the sentence.
+    private var summoned: Bool {
+        if summonHeld { return true }
+        guard let summonedUntil else { return false }
+        return .now < summonedUntil
+    }
 
     init(
         voiceSettings: LocalVoiceSettings,
         speaksReplies: Bool,
         wakeWord: WakeWord?,
-        followUpWindow: TimeInterval,
         tuning: BigBroMicrophone.Tuning = BigBroMicrophone.Tuning(),
         answer: @escaping (_ question: String, _ onSentence: @escaping (String) -> Void) async -> String
     ) {
         self.voiceSettings = voiceSettings
         self.speaksReplies = speaksReplies
         self.wakeWord = wakeWord
-        self.followUpWindow = followUpWindow
         self.generateAnswer = answer
         // A private engine, and `configuresAudioSession: false` because this type owns the
         // session for both directions. Sharing an engine with playback is what `BigBroVoiceSession`
@@ -148,6 +173,15 @@ final class LocalVoiceSession: NSObject, ObservableObject {
         microphone.$threshold
             .receive(on: DispatchQueue.main)
             .sink { [weak self] in self?.threshold = $0 }
+            .store(in: &cancellables)
+
+        // The leading edge of speech. An utterance is only emitted once the user stops
+        // talking, which is too late for an open summons — that is about when they began
+        // answering, not when their sentence finally finished transcribing.
+        microphone.$isSpeaking
+            .receive(on: DispatchQueue.main)
+            .filter { $0 }
+            .sink { [weak self] _ in self?.holdSummon() }
             .store(in: &cancellables)
     }
 
@@ -194,7 +228,7 @@ final class LocalVoiceSession: NSObject, ObservableObject {
     func stop() {
         loopTask?.cancel()
         loopTask = nil
-        closeFollowUp()
+        clearSummon()
         microphone.stop()
         cancelSpeech()
         releaseAudioSession()
@@ -259,10 +293,10 @@ final class LocalVoiceSession: NSObject, ObservableObject {
 
     /// Handles one captured utterance. Returns true if capture was stopped and must be reopened.
     private func runTurn(_ audio: Data) async -> Bool {
-        // Read before the first await. The window can expire during transcription, and an
-        // utterance that began inside it was addressed to us whatever the timer does next.
-        let followingUp = followUpOpen
-        closeFollowUp()
+        // Read before the first await. `summoned` is held from the leading edge of this
+        // utterance's speech, so it stays true across a transcription that outlives the
+        // window — but a turn that clears the summons must not see its own stale copy.
+        let wasSummoned = summoned
 
         error = nil
         phase = .transcribing
@@ -274,17 +308,20 @@ final class LocalVoiceSession: NSObject, ObservableObject {
             // A single utterance failing to transcribe is the common case in a kitchen — a
             // pan, a tap, somebody laughing — not a session-ending fault.
             dprint("🎤 [local] transcription failed: \(error.localizedDescription)")
-            settle(followingUp: followingUp)
+            rest()
             return false
         }
         guard !Task.isCancelled else { return false }
 
+        // A cough, a pan, a passing conversation. Transcribing to nothing is the common case
+        // in a kitchen, not an error — and it does not spend a summons, since the request it
+        // was waiting for has still not been spoken.
         guard !heard.isEmpty else {
-            settle(followingUp: followingUp)
+            rest()
             return false
         }
 
-        switch address(heard, followingUp: followingUp) {
+        switch address(heard, summoned: wasSummoned) {
         case .notForUs:
             // Deliberately silent. Armed in an occupied kitchen, most of what this hears is
             // somebody else's conversation, and reporting each one would be the noise.
@@ -299,14 +336,17 @@ final class LocalVoiceSession: NSObject, ObservableObject {
             // caller mirrors it into the chat as a user message. Publishing the wake phrase
             // there posts "hey little chef" as a question and leaves a bubble waiting on an
             // answer nobody requested.
-            openFollowUp()
+            summon()
             return false
 
         case .request(let request):
+            clearSummon()
             transcript = request
             reply = ""
             let spoke = await answer(request)
-            openFollowUp()
+            // Straight back to waiting for its name, which is the whole point of the phrase:
+            // the loop stops speaking and immediately stops listening for anything else.
+            rest()
             return spoke
         }
     }
@@ -353,55 +393,64 @@ final class LocalVoiceSession: NSObject, ObservableObject {
         case notForUs
     }
 
-    private func address(_ heard: String, followingUp: Bool) -> Address {
+    private func address(_ heard: String, summoned: Bool) -> Address {
         guard let wakeWord, !wakeWord.isEmpty else { return .request(heard) }
         if let match = wakeWord.match(heard) {
             return match.request.isEmpty ? .summoned : .request(match.request)
         }
-        // No name in it. Inside the follow-up window that is fine — the conversation is
-        // already open and saying the name again would be strange. Outside it, not ours.
-        return followingUp ? .request(heard) : .notForUs
+        // No name in it. That is only a request if the session was called by name and asked
+        // nothing — the request it was promised. Otherwise it is somebody else's sentence.
+        return summoned ? .request(heard) : .notForUs
     }
 
-    // MARK: - Follow-up window
+    // MARK: - Summons
 
-    private func openFollowUp() {
-        rearmTask?.cancel()
-        rearmTask = nil
-
-        guard wakeWord != nil else {
-            followUpOpen = false
-            phase = .listening
-            return
-        }
-        guard followUpWindow > 0 else {
-            followUpOpen = false
-            phase = .armed
-            return
-        }
-
-        followUpOpen = true
+    /// Takes the next utterance as a request without the phrase, briefly.
+    private func summon() {
+        summonHeld = false
+        summonedUntil = .now.advanced(by: .seconds(Self.summonWindow))
         phase = .listening
-        let window = followUpWindow
+
+        // Drives the phase only — ``summoned`` is answered by the deadline itself, so this
+        // firing late, or being cancelled, cannot leave the microphone open a moment longer
+        // than the window says.
+        rearmTask?.cancel()
         rearmTask = Task { [weak self] in
-            try? await Task.sleep(for: .seconds(window))
-            guard !Task.isCancelled, let self else { return }
-            self.followUpOpen = false
+            try? await Task.sleep(for: .seconds(Self.summonWindow))
+            guard !Task.isCancelled, let self, !self.summonHeld else { return }
             // Only if nothing has moved on since. A turn that started inside the window owns
             // the phase, and stamping `.armed` over `.thinking` would misreport it.
             if self.phase == .listening { self.phase = .armed }
         }
     }
 
-    private func closeFollowUp() {
-        rearmTask?.cancel()
-        rearmTask = nil
-        followUpOpen = false
+    /// Holds an open summons until the speech now under way has been dealt with.
+    ///
+    /// The window governs when the user has to *start* answering, which is the only part of it
+    /// they can judge. How long they then talk for, and how long transcription takes, are not
+    /// theirs to control and must not decide whether they were heard.
+    private func holdSummon() {
+        guard summonedUntil != nil, summoned else { return }
+        summonHeld = true
     }
 
-    /// Returns to rest after an utterance that produced no turn, keeping an open window open.
-    private func settle(followingUp: Bool) {
-        if followingUp { openFollowUp() } else { phase = restingPhase }
+    private func clearSummon() {
+        rearmTask?.cancel()
+        rearmTask = nil
+        summonedUntil = nil
+        summonHeld = false
+    }
+
+    /// Returns to rest after an utterance that produced no turn.
+    ///
+    /// An outstanding summons survives an utterance that turned out to be nothing, because the
+    /// request it is waiting for has still not been spoken.
+    private func rest() {
+        // The hold, though, is spent: it belonged to the utterance just dealt with. Dropping
+        // it puts the original deadline back in charge, so a cough two seconds into the window
+        // cannot extend it, and a cough after the window has passed ends it.
+        summonHeld = false
+        phase = summoned ? .listening : restingPhase
     }
 
     // MARK: - Transcription
