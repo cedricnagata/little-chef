@@ -51,11 +51,19 @@ class LLMService: ObservableObject {
     static var deviceSupportsLocalModels: Bool { supportedOnDeviceModel != nil }
 
     /// What the active provider + model can do, in production. DEBUG = always full.
-    var capability: AICapability {
+    var capability: AICapability { capability(of: currentProvider) }
+
+    /// What a named provider can do, in production. DEBUG = always full.
+    ///
+    /// Takes the provider rather than reading ``currentProvider`` so a cooking session can ask
+    /// about the provider it pinned at start. A session that began on-device must keep
+    /// reporting on-device capabilities for its whole life, even if something changes the
+    /// app-wide provider underneath it.
+    func capability(of provider: LLMProvider) -> AICapability {
         #if DEBUG
         return .full
         #else
-        switch currentProvider {
+        switch provider {
         case .bigBro:
             return bigBroClient.isConnected ? .full : .none
         case .local:
@@ -96,7 +104,15 @@ class LLMService: ObservableObject {
     /// Which model ID is currently being loaded (to prevent double-loads)
     @Published var currentlyLoadingModelId: String?
 
-    let bigBroClient = BigBroClient(appName: "LittleChef", requiredModels: ["gpt-oss:20b"])
+    /// The model asked for on the Mac, by its id in BigBro's catalog.
+    ///
+    /// A catalog id, not an Ollama tag: BigBro runs models in-process through MLX and names
+    /// them `gpt-oss-20b`. The old `gpt-oss:20b` spelling is left over from its Ollama-proxy
+    /// days and matches nothing, which surfaces as a permanent missing-model warning and a
+    /// request the Mac cannot serve.
+    static let bigBroModel = "gpt-oss-20b"
+
+    let bigBroClient = BigBroClient(appName: "LittleChef", requiredModels: [LLMService.bigBroModel])
 
     private let defaultModelConfig = ModelConfiguration(
         id: "prism-ml/Bonsai-8B-mlx-1bit",
@@ -239,10 +255,15 @@ class LLMService: ObservableObject {
         temperature: Float? = nil,
         maxTokens: Int? = nil,
         tools: CookingTools? = nil,
-        modelId: String? = nil
+        modelId: String? = nil,
+        provider: LLMProvider? = nil,
+        responseFormat: ResponseFormat? = nil
     ) async throws -> String {
-        if currentProvider == .bigBro {
-            return try await generateBigBroChatCompletion(messages: messages, tools: tools, temperature: temperature, maxTokens: maxTokens)
+        if (provider ?? currentProvider) == .bigBro {
+            return try await generateBigBroChatCompletion(
+                messages: messages, tools: tools, temperature: temperature,
+                maxTokens: maxTokens, responseFormat: responseFormat
+            )
         }
 
         isGenerating = true
@@ -338,10 +359,15 @@ class LLMService: ObservableObject {
         maxTokens: Int? = nil,
         tools: CookingTools? = nil,
         modelId: String? = nil,
+        provider: LLMProvider? = nil,
+        responseFormat: ResponseFormat? = nil,
         onChunk: @escaping (String) -> Void
     ) async throws -> String {
-        if currentProvider == .bigBro {
-            return try await generateBigBroChatCompletionStreaming(messages: messages, tools: tools, temperature: temperature, maxTokens: maxTokens, onChunk: onChunk)
+        if (provider ?? currentProvider) == .bigBro {
+            return try await generateBigBroChatCompletionStreaming(
+                messages: messages, tools: tools, temperature: temperature,
+                maxTokens: maxTokens, responseFormat: responseFormat, onChunk: onChunk
+            )
         }
 
         isGenerating = true
@@ -430,7 +456,13 @@ class LLMService: ObservableObject {
 
     private struct SendableCookingBox: @unchecked Sendable { let tools: CookingTools }
 
-    private func bigBroTools(from cookingTools: CookingTools) -> [BigBroTool] {
+    /// The cooking tools as BigBroKit tool definitions, for anything that talks to the Mac
+    /// directly rather than through ``generateChatCompletion``.
+    ///
+    /// `BigBroVoiceSession` runs its own tool-calling loop against `converse`, so the
+    /// hands-free path needs the same four timer tools this service hands to `chat`. Built
+    /// here rather than duplicated there so the two can't drift.
+    func bigBroTools(from cookingTools: CookingTools) -> [BigBroTool] {
         let box = SendableCookingBox(tools: cookingTools)
         return [
             BigBroTool(
@@ -483,8 +515,6 @@ class LLMService: ObservableObject {
         ]
     }
 
-    private static let bigBroModel = "gpt-oss:20b"
-
     /// Block until the Mac finishes pulling `model`. Calls `onProgress` with a
     /// short human-readable status string each time progress changes (suitable for
     /// streaming back through `onChunk`).
@@ -519,17 +549,21 @@ class LLMService: ObservableObject {
         messages: [ChatMessage],
         tools: CookingTools? = nil,
         temperature: Float? = nil,
-        maxTokens: Int? = nil
+        maxTokens: Int? = nil,
+        responseFormat: ResponseFormat? = nil
     ) async throws -> String {
         isGenerating = true
         defer { isGenerating = false }
 
         let toolList = tools.map { bigBroTools(from: $0) } ?? []
-        let options = OllamaOptions(
+        let options = GenerationOptions(
             temperature: temperature.map { Double($0) },
             numPredict: maxTokens
         )
-        let format: OllamaFormat? = toolList.isEmpty ? .json : nil
+        // Named by the caller, not inferred from `tools`. Deducing "no tools ⇒ wants JSON" was
+        // right for the recipe parser and wrong for everything else: a cooking answer asked for
+        // in JSON mode comes back as a JSON blob and is shown to the user verbatim.
+        let format = responseFormat
 
         let started = Date()
         dprint("🌐 [BigBro] chat → model=\(Self.bigBroModel) msgs=\(messages.count) tools=\(toolList.count) format=\(format == nil ? "free" : "json") temp=\(temperature ?? -1) maxTokens=\(maxTokens ?? -1) connected=\(bigBroClient.isConnected)")
@@ -584,17 +618,18 @@ class LLMService: ObservableObject {
         tools: CookingTools? = nil,
         temperature: Float? = nil,
         maxTokens: Int? = nil,
+        responseFormat: ResponseFormat? = nil,
         onChunk: @escaping (String) -> Void
     ) async throws -> String {
         isGenerating = true
         defer { isGenerating = false }
 
         let toolList = tools.map { bigBroTools(from: $0) } ?? []
-        let options = OllamaOptions(
+        let options = GenerationOptions(
             temperature: temperature.map { Double($0) },
             numPredict: maxTokens
         )
-        let format: OllamaFormat? = toolList.isEmpty ? .json : nil
+        let format = responseFormat
 
         var output = ""
         var attemptedDownloadWait = false

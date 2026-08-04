@@ -13,6 +13,10 @@ class LocalCookingAgent: ObservableObject {
     // MARK: - Dependencies
     private let llmService: LLMService
     private let timerManager: TimerManager
+    /// The provider this agent was built for, pinned by the cooking session that owns it.
+    /// Passed to every request so a mid-flight change to the app-wide provider can't reroute
+    /// one turn of a conversation to a different backend than the rest.
+    let provider: LLMProvider
 
     // MARK: - State
     @Published var isProcessing = false
@@ -21,13 +25,32 @@ class LocalCookingAgent: ObservableObject {
 
     // MARK: - Initialization
 
-    convenience init(timerManager: TimerManager) {
-        self.init(llmService: .shared, timerManager: timerManager)
+    convenience init(timerManager: TimerManager, provider: LLMProvider) {
+        self.init(llmService: .shared, timerManager: timerManager, provider: provider)
     }
 
-    init(llmService: LLMService, timerManager: TimerManager) {
+    init(llmService: LLMService, timerManager: TimerManager, provider: LLMProvider) {
         self.llmService = llmService
         self.timerManager = timerManager
+        self.provider = provider
+    }
+
+    // MARK: - Voice support
+
+    /// The cooking system prompt for `recipe`, as plain text.
+    ///
+    /// `BigBroVoiceSession` runs its own conversation against the Mac rather than going through
+    /// this agent, and takes a system prompt as a string. Exposed so the spoken assistant is
+    /// briefed identically to the typed one instead of carrying a second copy of the prompt.
+    func systemPrompt(for recipe: Recipe?) -> String {
+        buildSystemMessage(recipe: recipe).content
+    }
+
+    /// The timer tools this agent would offer, or none if the pinned provider can't call them.
+    func cookingTools() -> CookingTools? {
+        llmService.capability(of: provider).toolCallingEnabled
+            ? CookingTools(timerManager: timerManager)
+            : nil
     }
 
     // MARK: - Public Methods
@@ -49,14 +72,11 @@ class LocalCookingAgent: ObservableObject {
             messages = [systemMessage] + Array(messages.suffix(maxHistoryLength - 1))
         }
 
-        let cookingTools: CookingTools? = llmService.capability.toolCallingEnabled
-            ? CookingTools(timerManager: timerManager)
-            : nil
-
         let response = try await llmService.generateChatCompletion(
             messages: messages,
-            tools: cookingTools,
-            modelId: llmService.currentProvider == .local ? LLMService.supportedOnDeviceModel?.modelId : nil
+            tools: cookingTools(),
+            modelId: provider == .local ? LLMService.supportedOnDeviceModel?.modelId : nil,
+            provider: provider
         )
 
         conversationHistory.append(ChatMessage(role: .user, content: userMessage))
@@ -88,14 +108,11 @@ class LocalCookingAgent: ObservableObject {
             messages = [systemMessage] + Array(messages.suffix(maxHistoryLength - 1))
         }
 
-        let cookingTools: CookingTools? = llmService.capability.toolCallingEnabled
-            ? CookingTools(timerManager: timerManager)
-            : nil
-
         let response = try await llmService.generateChatCompletionStreaming(
             messages: messages,
-            tools: cookingTools,
-            modelId: llmService.currentProvider == .local ? LLMService.supportedOnDeviceModel?.modelId : nil,
+            tools: cookingTools(),
+            modelId: provider == .local ? LLMService.supportedOnDeviceModel?.modelId : nil,
+            provider: provider,
             onChunk: onChunk
         )
 

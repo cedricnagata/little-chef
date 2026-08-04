@@ -10,21 +10,14 @@
 		8B112FF92FAD2A8400C9C796 /* WidgetKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 8B112FF82FAD2A8400C9C796 /* WidgetKit.framework */; };
 		8B112FFB2FAD2A8400C9C796 /* SwiftUI.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 8B112FFA2FAD2A8400C9C796 /* SwiftUI.framework */; };
 		8B28BF352F981150001DD2B5 /* BigBroKit in Frameworks */ = {isa = PBXBuildFile; productRef = 8B28BF342F981150001DD2B5 /* BigBroKit */; };
+		8BAC10000000000000A1 /* TimerWidgetExtension.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = 8B112FF62FAD2A8400C9C796 /* TimerWidgetExtension.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
+		8BAC10000000000000B2 /* TimerActivityAttributes.swift (shared with TimerWidgetExtension) in Sources */ = {isa = PBXBuildFile; fileRef = 8BAC10000000000000B1 /* TimerActivityAttributes.swift (shared with TimerWidgetExtension) */; };
 		8BD0A0012EBF000000BB0001 /* MLX in Frameworks */ = {isa = PBXBuildFile; productRef = 8BD0A0002EBF000000BB0001 /* MLX */; };
 		8BD0A0032EBF000000BB0001 /* MLXLLM in Frameworks */ = {isa = PBXBuildFile; productRef = 8BD0A0022EBF000000BB0001 /* MLXLLM */; };
 		8BD0A0052EBF000000BB0001 /* MLXLMCommon in Frameworks */ = {isa = PBXBuildFile; productRef = 8BD0A0042EBF000000BB0001 /* MLXLMCommon */; };
-		8BAC10000000000000A1 /* TimerWidgetExtension.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = 8B112FF62FAD2A8400C9C796 /* TimerWidgetExtension.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
-		8BAC10000000000000B2 /* TimerActivityAttributes.swift in Sources (TimerWidgetExtension) */ = {isa = PBXBuildFile; fileRef = 8BAC10000000000000B1 /* TimerActivityAttributes.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
-		8BAC10000000000000A2 /* PBXContainerItemProxy */ = {
-			isa = PBXContainerItemProxy;
-			containerPortal = 8B8928102E6B467600A3BADD /* Project object */;
-			proxyType = 1;
-			remoteGlobalIDString = 8B112FF52FAD2A8400C9C796;
-			remoteInfo = TimerWidgetExtension;
-		};
 		8B8928262E6B467700A3BADD /* PBXContainerItemProxy */ = {
 			isa = PBXContainerItemProxy;
 			containerPortal = 8B8928102E6B467600A3BADD /* Project object */;
@@ -38,6 +31,13 @@
 			proxyType = 1;
 			remoteGlobalIDString = 8B8928172E6B467600A3BADD;
 			remoteInfo = "little-chef";
+		};
+		8BAC10000000000000A2 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 8B8928102E6B467600A3BADD /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 8B112FF52FAD2A8400C9C796;
+			remoteInfo = TimerWidgetExtension;
 		};
 /* End PBXContainerItemProxy section */
 
@@ -56,13 +56,13 @@
 /* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
-		8BAC10000000000000B1 /* TimerActivityAttributes.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = "TimerActivityAttributes.swift (shared with TimerWidgetExtension)"; path = "little-chef/Models/TimerActivityAttributes.swift"; sourceTree = "<group>"; };
 		8B112FF62FAD2A8400C9C796 /* TimerWidgetExtension.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = TimerWidgetExtension.appex; sourceTree = BUILT_PRODUCTS_DIR; };
 		8B112FF82FAD2A8400C9C796 /* WidgetKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = WidgetKit.framework; path = System/Library/Frameworks/WidgetKit.framework; sourceTree = SDKROOT; };
 		8B112FFA2FAD2A8400C9C796 /* SwiftUI.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = SwiftUI.framework; path = System/Library/Frameworks/SwiftUI.framework; sourceTree = SDKROOT; };
 		8B8928182E6B467600A3BADD /* little-chef.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "little-chef.app"; sourceTree = BUILT_PRODUCTS_DIR; };
 		8B8928252E6B467700A3BADD /* little-chefTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = "little-chefTests.xctest"; sourceTree = BUILT_PRODUCTS_DIR; };
 		8B89282F2E6B467700A3BADD /* little-chefUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = "little-chefUITests.xctest"; sourceTree = BUILT_PRODUCTS_DIR; };
+		8BAC10000000000000B1 /* TimerActivityAttributes.swift (shared with TimerWidgetExtension) */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = "TimerActivityAttributes.swift (shared with TimerWidgetExtension)"; path = "little-chef/Models/TimerActivityAttributes.swift"; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
@@ -165,7 +165,7 @@
 				8B8928282E6B467700A3BADD /* little-chefTests */,
 				8B8928322E6B467700A3BADD /* little-chefUITests */,
 				8B112FFC2FAD2A8400C9C796 /* TimerWidget */,
-				8BAC10000000000000B1 /* TimerActivityAttributes.swift */,
+				8BAC10000000000000B1 /* TimerActivityAttributes.swift (shared with TimerWidgetExtension) */,
 				8B112FF72FAD2A8400C9C796 /* Frameworks */,
 				8B8928192E6B467600A3BADD /* Products */,
 			);
@@ -370,7 +370,7 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				8BAC10000000000000B2 /* TimerActivityAttributes.swift in Sources (TimerWidgetExtension) */,
+				8BAC10000000000000B2 /* TimerActivityAttributes.swift (shared with TimerWidgetExtension) in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -398,11 +398,6 @@
 /* End PBXSourcesBuildPhase section */
 
 /* Begin PBXTargetDependency section */
-		8BAC10000000000000A4 /* PBXTargetDependency */ = {
-			isa = PBXTargetDependency;
-			target = 8B112FF52FAD2A8400C9C796 /* TimerWidgetExtension */;
-			targetProxy = 8BAC10000000000000A2 /* PBXContainerItemProxy */;
-		};
 		8B8928272E6B467700A3BADD /* PBXTargetDependency */ = {
 			isa = PBXTargetDependency;
 			target = 8B8928172E6B467600A3BADD /* little-chef */;
@@ -412,6 +407,11 @@
 			isa = PBXTargetDependency;
 			target = 8B8928172E6B467600A3BADD /* little-chef */;
 			targetProxy = 8B8928302E6B467700A3BADD /* PBXContainerItemProxy */;
+		};
+		8BAC10000000000000A4 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 8B112FF52FAD2A8400C9C796 /* TimerWidgetExtension */;
+			targetProxy = 8BAC10000000000000A2 /* PBXContainerItemProxy */;
 		};
 /* End PBXTargetDependency section */
 

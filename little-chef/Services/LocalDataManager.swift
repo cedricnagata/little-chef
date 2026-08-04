@@ -229,6 +229,9 @@ class LocalDataManager: ObservableObject {
         voiceIdentifier: String? = nil,
         autoSpeakResponses: Bool? = nil,
         useBigBroSpeech: Bool? = nil,
+        wakePhrase: String? = nil,
+        followUpWindow: Double? = nil,
+        bigBroVoice: String? = nil,
         cookingModel: CookingModelChoice? = nil,
         llmProvider: LLMProvider? = nil
     ) throws {
@@ -241,6 +244,9 @@ class LocalDataManager: ObservableObject {
             voiceIdentifier: voiceIdentifier,
             autoSpeakResponses: autoSpeakResponses,
             useBigBroSpeech: useBigBroSpeech,
+            wakePhrase: wakePhrase,
+            followUpWindow: followUpWindow,
+            bigBroVoice: bigBroVoice,
             cookingModel: cookingModel,
             llmProvider: llmProvider
         )

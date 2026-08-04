@@ -19,6 +19,9 @@ struct ProfileSettingsView: View {
     @State private var voiceIdentifier = "com.apple.ttsbundle.Samantha-compact"
     @State private var autoSpeakResponses = true
     @State private var useBigBroSpeech = false
+    @State private var wakePhrase = "hey little chef"
+    @State private var followUpWindow: Double = 8
+    @State private var bigBroVoice = BigBroClient.defaultVoice
     @State private var showingDeleteAlert = false
     @State private var isDeleting = false
     @State private var hasLoaded = false
@@ -64,6 +67,10 @@ struct ProfileSettingsView: View {
         )
     }
 
+    /// Whether the typed phrase is long enough for `WakeWord` to gate on. Checked here so the
+    /// mode can be refused up front rather than starting a loop that answers nothing.
+    private var wakePhraseIsUsable: Bool { !WakeWord(wakePhrase).isEmpty }
+
     var body: some View {
         Form {
             // MARK: - AI Provider
@@ -107,11 +114,39 @@ struct ProfileSettingsView: View {
 
                     BigBroSpeechToggle(
                         client: llmService.bigBroClient,
-                        useBigBroSpeech: $useBigBroSpeech
+                        useBigBroSpeech: $useBigBroSpeech,
+                        bigBroVoice: $bigBroVoice
                     )
                 }
             } header: {
                 Text("Voice")
+            }
+
+            // MARK: - Hands-free
+            Section {
+                TextField("Wake phrase", text: $wakePhrase)
+                    .autocorrectionDisabled()
+                    .textInputAutocapitalization(.never)
+
+                if !wakePhraseIsUsable {
+                    Label(
+                        "Too short to gate on — a phrase this brief matches too much ordinary speech.",
+                        systemImage: "exclamationmark.triangle"
+                    )
+                    .font(.caption)
+                    .foregroundColor(.orange)
+                }
+
+                Picker("Follow-up window", selection: $followUpWindow) {
+                    Text("Off").tag(0.0)
+                    Text("5s").tag(5.0)
+                    Text("8s").tag(8.0)
+                    Text("15s").tag(15.0)
+                }
+            } header: {
+                Text("Hands-free")
+            } footer: {
+                Text("The wake phrase is only used by the \"Wait for…\" hands-free mode. After answering, the assistant keeps taking questions for the follow-up window without needing the phrase again.")
             }
 
             // MARK: - Data
@@ -146,6 +181,9 @@ struct ProfileSettingsView: View {
         .onChange(of: voiceIdentifier) { _, _ in saveIfLoaded() }
         .onChange(of: autoSpeakResponses) { _, _ in saveIfLoaded() }
         .onChange(of: useBigBroSpeech) { _, _ in saveIfLoaded() }
+        .onChange(of: wakePhrase) { _, _ in saveIfLoaded() }
+        .onChange(of: followUpWindow) { _, _ in saveIfLoaded() }
+        .onChange(of: bigBroVoice) { _, _ in saveIfLoaded() }
         .alert("Delete All Data", isPresented: $showingDeleteAlert) {
             Button("Cancel", role: .cancel) { }
             Button("Delete", role: .destructive) { deleteAllData() }
@@ -309,12 +347,24 @@ struct ProfileSettingsView: View {
             do {
                 let prefs = try LocalDataManager.shared.fetchPreferences().toUserPreferences()
                 await MainActor.run {
-                    let provider: LLMProvider = LLMService.deviceSupportsLocalModels ? .local : .bigBro
+                    // Restore what was saved, rather than resetting to `.local` on every
+                    // appearance. Forcing the default here meant a user who chose BigBro was
+                    // switched back to on-device inference the next time they opened Settings,
+                    // silently and without the picker appearing to change.
+                    //
+                    // A device with no on-device model can only be `.bigBro`, whatever is
+                    // stored.
+                    let provider: LLMProvider = LLMService.deviceSupportsLocalModels
+                        ? prefs.llmProvider
+                        : .bigBro
                     llmProvider = provider
                     speechRate = prefs.voiceSettings.speechRate
                     voiceIdentifier = prefs.voiceSettings.voiceIdentifier
                     autoSpeakResponses = prefs.voiceSettings.autoSpeakResponses
                     useBigBroSpeech = prefs.voiceSettings.useBigBroSpeech
+                    wakePhrase = prefs.voiceSettings.wakePhrase
+                    followUpWindow = prefs.voiceSettings.followUpWindow
+                    bigBroVoice = prefs.voiceSettings.bigBroVoice
                     LLMService.shared.currentProvider = provider
                     hasLoaded = true
                 }
@@ -336,7 +386,10 @@ struct ProfileSettingsView: View {
                 speechRate: speechRate,
                 voiceIdentifier: voiceIdentifier,
                 autoSpeakResponses: autoSpeakResponses,
-                useBigBroSpeech: useBigBroSpeech
+                useBigBroSpeech: useBigBroSpeech,
+                wakePhrase: wakePhrase,
+                followUpWindow: followUpWindow,
+                bigBroVoice: bigBroVoice
             )
         )
 
@@ -347,6 +400,9 @@ struct ProfileSettingsView: View {
                     voiceIdentifier: voiceIdentifier,
                     autoSpeakResponses: autoSpeakResponses,
                     useBigBroSpeech: useBigBroSpeech,
+                    wakePhrase: wakePhrase,
+                    followUpWindow: followUpWindow,
+                    bigBroVoice: bigBroVoice,
                     llmProvider: llmProvider
                 )
             } catch {
@@ -382,17 +438,37 @@ struct ProfileSettingsView: View {
 private struct BigBroSpeechToggle: View {
     @ObservedObject var client: BigBroClient
     @Binding var useBigBroSpeech: Bool
+    @Binding var bigBroVoice: String
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
             Toggle("Use BigBro voice", isOn: $useBigBroSpeech)
                 .disabled(!client.isConnected)
 
+            // A closed list, not free text: the Mac fails synthesis on an unrecognized voice
+            // id with no clue why, and the app has no dependency on Kokoro to enumerate them.
+            if useBigBroSpeech && client.isConnected {
+                Picker("BigBro voice", selection: $bigBroVoice) {
+                    ForEach(Self.availableVoices, id: \.self) { voice in
+                        Text(voice).tag(voice)
+                    }
+                }
+            }
+
             Text(footnote)
                 .font(.caption)
                 .foregroundColor(.secondary)
         }
     }
+
+    /// Kokoro voices the Mac's speech backend ships, American English only — the rest are
+    /// present in the model but unverified, and a cooking assistant has no use for a voice
+    /// that might mispronounce every ingredient.
+    private static let availableVoices: [String] = [
+        "af_alloy", "af_aoede", "af_bella", "af_heart", "af_jessica", "af_kore", "af_nicole",
+        "af_nova", "af_river", "af_sarah", "af_sky", "am_adam", "am_echo", "am_eric",
+        "am_fenrir", "am_liam", "am_michael", "am_onyx", "am_puck", "am_santa",
+    ]
 
     private var footnote: String {
         if !client.isConnected {

@@ -16,6 +16,20 @@ class CookingSessionManager: ObservableObject, TimerManager {
     @Published var lastResponse: String = ""
     @Published var localTimers: [LocalTimer] = []
 
+    /// The provider this session answers on, captured when it started.
+    ///
+    /// Settings are already unreachable mid-session — `MainView` swaps the whole tab bar out
+    /// for the cooking view — so this cannot drift in practice. Pinning it makes that
+    /// structural guarantee an enforced one rather than a coincidence of navigation: a session
+    /// that began on-device keeps its on-device agent, its on-device voice loop, and its
+    /// on-device capabilities for its whole life, whatever else changes the app-wide provider.
+    /// Switching backends mid-session would otherwise swap the inference and the speech stack
+    /// out from under a running hands-free loop.
+    @Published private(set) var sessionProvider: LLMProvider = .local
+
+    /// What the pinned provider can do — the capability the cooking UI should gate on.
+    var capability: AICapability { llmService.capability(of: sessionProvider) }
+
     private let dataManager = LocalDataManager.shared
     private var cookingAgent: LocalCookingAgent?
     private let llmService: LLMService
@@ -35,13 +49,17 @@ class CookingSessionManager: ObservableObject, TimerManager {
         let recipeBase = RecipeBase(from: recipe)
 
         currentSession = CookingSession(recipe: recipeBase, userPreferences: preferences)
+        // Read once, here. Everything downstream — the agent, the voice loop, the capability
+        // gate — asks this session rather than the service, so the backend is fixed for the
+        // duration of the cook.
+        sessionProvider = llmService.currentProvider
 
         error = nil
-        dprint("🔵 Started new cooking session locally (model will load on page)")
+        dprint("🔵 Started new cooking session on \(sessionProvider.rawValue) (model will load on page)")
     }
 
     func initAgentForSession() {
-        cookingAgent = LocalCookingAgent(timerManager: self)
+        cookingAgent = LocalCookingAgent(timerManager: self, provider: sessionProvider)
         error = nil
     }
 
@@ -206,6 +224,62 @@ class CookingSessionManager: ObservableObject, TimerManager {
         }
 
         isLoading = false
+    }
+
+    // MARK: - Hands-free support
+
+    /// Everything a hands-free loop needs to answer as this cooking session would.
+    ///
+    /// Built here rather than in the view so the spoken assistant and the typed one are briefed
+    /// from the same place — same system prompt, same timer tools, same conversation — instead
+    /// of drifting into two assistants that happen to share a screen.
+    func voiceContext() -> VoiceSessionContext? {
+        guard let session = currentSession, let agent = cookingAgent else { return nil }
+        let recipe = createRecipeFromSession(session)
+        return VoiceSessionContext(
+            systemPrompt: agent.systemPrompt(for: recipe),
+            tools: agent.cookingTools(),
+            priorTurns: session.conversationHistory.map { ($0.role, $0.content) },
+            answer: { [weak self] question, onSentence in
+                guard let self else { return "" }
+                await self.sendQueryStreaming(question, onSentence: onSentence)
+                return self.lastResponse
+            },
+            beginTurn: { [weak self] question in
+                self?.beginSpokenTurn(question: question) ?? UUID()
+            },
+            updateReply: { [weak self] id, text in
+                self?.updateSpokenReply(id: id, text: text)
+            }
+        )
+    }
+
+    /// Records a spoken question and the empty answer that will stream into it.
+    ///
+    /// Only the Mac path needs this: `BigBroVoiceSession` runs its own conversation against the
+    /// Mac, so its turns have to be mirrored in rather than arriving through `sendQueryStreaming`.
+    func beginSpokenTurn(question: String) -> UUID {
+        currentSession?.conversationHistory.append(
+            Message(id: UUID(), role: "user", content: question, timestamp: Date())
+        )
+        let replyID = UUID()
+        currentSession?.conversationHistory.append(
+            Message(id: replyID, role: "assistant", content: "", timestamp: Date())
+        )
+        return replyID
+    }
+
+    /// Updates a spoken answer by identity.
+    ///
+    /// By id, not index: the history changes underneath a streaming reply — a new turn, a
+    /// cleared session — and an index captured when the turn started would land the text on the
+    /// wrong message or on none at all.
+    func updateSpokenReply(id: UUID, text: String) {
+        guard let index = currentSession?.conversationHistory.firstIndex(where: { $0.id == id }) else { return }
+        currentSession?.conversationHistory[index] = Message(
+            id: id, role: "assistant", content: text, timestamp: Date()
+        )
+        lastResponse = text
     }
 
     private func createRecipeFromSession(_ session: CookingSession) -> Recipe {
