@@ -7,6 +7,7 @@
 
 import Foundation
 import UIKit
+import BigBroKit
 
 @MainActor
 class LocalRecipeParser: ObservableObject {
@@ -168,7 +169,8 @@ class LocalRecipeParser: ObservableObject {
                 ChatMessage(role: .user, content: prompt)
             ],
             temperature: 0.2,
-            maxTokens: maxTokens
+            maxTokens: maxTokens,
+            responseFormat: .json
         )
 
         dprint("📖 [PARSER] LLM raw response (\(response.count) chars):\n\(response.prefix(1000))")
@@ -334,7 +336,8 @@ class LocalRecipeParser: ObservableObject {
                 ChatMessage(role: .user, content: prompt)
             ],
             temperature: 0.2,
-            maxTokens: 4096
+            maxTokens: 4096,
+            responseFormat: .json
         )
 
         dprint("📖 [PARSER] LLM cleanup response (\(response.count) chars):\n\(response.prefix(500))")

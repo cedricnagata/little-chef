@@ -94,7 +94,6 @@ struct StartCookingView: View {
 struct ActiveCookingView: View {
     @EnvironmentObject var cookingSessionManager: CookingSessionManager
     @EnvironmentObject var voiceAssistant: VoiceAssistant
-    @EnvironmentObject var llmService: LLMService
     @ObservedObject private var bigBroClient = LLMService.shared.bigBroClient
     @State private var textInput = ""
     @State private var showingEndSessionAlert = false
@@ -103,7 +102,10 @@ struct ActiveCookingView: View {
 
     /// When no LLM is available (no on-device model + BigBro not connected), the cooking
     /// assistant chat is hidden; manual timers remain available.
-    private var chatEnabled: Bool { llmService.capability.llmChatEnabled }
+    ///
+    /// Asks the session, not the service: the provider is pinned when a cook starts, so this
+    /// has to describe the backend this session is actually running on.
+    private var chatEnabled: Bool { cookingSessionManager.capability.llmChatEnabled }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -146,7 +148,8 @@ struct ActiveCookingView: View {
         .alert("End Cooking Session", isPresented: $showingEndSessionAlert) {
             Button("Cancel", role: .cancel) { }
             Button("End", role: .destructive) {
-                voiceAssistant.stopHandsFreeMode()
+                voiceAssistant.stopHandsFree()
+                voiceAssistant.stopSpeaking()
                 cookingSessionManager.endCookingSession()
             }
         } message: {
@@ -154,7 +157,19 @@ struct ActiveCookingView: View {
         }
         .onAppear {
             cookingSessionManager.initAgentForSession()
+            // The voice stack answers on the same backend the session pinned, for the same
+            // reason the agent does: switching mid-cook would swap the speech and inference
+            // stack out from under a running hands-free loop.
+            voiceAssistant.configure(provider: cookingSessionManager.sessionProvider)
             updateVoiceAssistantSettings()
+        }
+        .onDisappear {
+            // Leaving the cooking screen has to give the audio route back. A loop left running
+            // holds an open microphone and a `.playAndRecord` category for the rest of the
+            // app's life, and the next thing that wants the speaker gets an engine that starts
+            // but never renders.
+            voiceAssistant.stopHandsFree()
+            voiceAssistant.stopSpeaking()
         }
         .onChange(of: cookingSessionManager.currentSession?.userPreferences.voiceSettings) {
             updateVoiceAssistantSettings()

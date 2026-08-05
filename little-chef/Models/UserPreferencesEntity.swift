@@ -77,6 +77,11 @@ final class UserPreferencesEntity {
     /// Route spoken output through a paired BigBro Mac instead of AVSpeechSynthesizer.
     /// Ignored unless a Mac is actually connected.
     var useBigBroSpeech: Bool = false
+    /// What the assistant answers to in wake-word hands-free mode.
+    var wakePhrase: String = "hey little chef"
+    /// Kokoro voice id used when speaking through the Mac. Ignored on the on-device voice,
+    /// which is chosen by `voiceIdentifier` instead.
+    var bigBroVoice: String = "af_heart"
     var cookingModel: String = "bonsai8b"
     var llmProvider: String = "local"
     var updatedAt: Date = Date()
@@ -89,6 +94,8 @@ final class UserPreferencesEntity {
         voiceIdentifier: String = "com.apple.ttsbundle.Samantha-compact",
         autoSpeakResponses: Bool = true,
         useBigBroSpeech: Bool = false,
+        wakePhrase: String = "hey little chef",
+        bigBroVoice: String = "af_heart",
         cookingModel: String = "bonsai8b",
         llmProvider: String = "local",
         updatedAt: Date = Date()
@@ -100,6 +107,8 @@ final class UserPreferencesEntity {
         self.voiceIdentifier = voiceIdentifier
         self.autoSpeakResponses = autoSpeakResponses
         self.useBigBroSpeech = useBigBroSpeech
+        self.wakePhrase = wakePhrase
+        self.bigBroVoice = bigBroVoice
         self.cookingModel = cookingModel
         self.llmProvider = llmProvider
         self.updatedAt = updatedAt
@@ -116,7 +125,9 @@ final class UserPreferencesEntity {
                 speechRate: speechRate,
                 voiceIdentifier: voiceIdentifier,
                 autoSpeakResponses: autoSpeakResponses,
-                useBigBroSpeech: useBigBroSpeech
+                useBigBroSpeech: useBigBroSpeech,
+                wakePhrase: wakePhrase,
+                bigBroVoice: bigBroVoice
             ),
             cookingModel: CookingModelChoice(rawValue: cookingModel) ?? .bonsai8B,
             llmProvider: LLMProvider(rawValue: llmProvider) ?? .local
@@ -136,6 +147,8 @@ final class UserPreferencesEntity {
         voiceIdentifier: String? = nil,
         autoSpeakResponses: Bool? = nil,
         useBigBroSpeech: Bool? = nil,
+        wakePhrase: String? = nil,
+        bigBroVoice: String? = nil,
         cookingModel: CookingModelChoice? = nil,
         llmProvider: LLMProvider? = nil
     ) {
@@ -156,6 +169,12 @@ final class UserPreferencesEntity {
         }
         if let useBigBroSpeech = useBigBroSpeech {
             self.useBigBroSpeech = useBigBroSpeech
+        }
+        if let wakePhrase = wakePhrase {
+            self.wakePhrase = wakePhrase
+        }
+        if let bigBroVoice = bigBroVoice {
+            self.bigBroVoice = bigBroVoice
         }
         if let cookingModel = cookingModel {
             self.cookingModel = cookingModel.rawValue
@@ -180,6 +199,13 @@ struct LocalVoiceSettings: Codable, Equatable {
     /// Route spoken output through a paired BigBro Mac. Falls back to `AVSpeechSynthesizer`
     /// whenever no Mac is connected, so this is a preference rather than a hard switch.
     var useBigBroSpeech: Bool = false
+    /// What the assistant answers to in wake-word hands-free mode. Free text, because the
+    /// whole point is that it is the user's name for it — but a phrase too short to gate on is
+    /// refused by `WakeWord` rather than silently matching nothing.
+    var wakePhrase: String = "hey little chef"
+    /// Kokoro voice id for the Mac's synthesizer. Separate from `voiceIdentifier`, which names
+    /// an `AVSpeechSynthesisVoice` — the two backends share no vocabulary of voices.
+    var bigBroVoice: String = "af_heart"
 
     static let defaultSettings = LocalVoiceSettings(
         speechRate: 0.5,
