@@ -18,7 +18,6 @@ struct ProfileSettingsView: View {
     @State private var speechRate: Float = AVSpeechUtteranceDefaultSpeechRate
     @State private var voiceIdentifier = "com.apple.ttsbundle.Samantha-compact"
     @State private var autoSpeakResponses = true
-    @State private var useBigBroSpeech = false
     @State private var wakePhrase = "hey little chef"
     @State private var bigBroVoice = BigBroClient.defaultVoice
     @State private var showingDeleteAlert = false
@@ -70,6 +69,14 @@ struct ProfileSettingsView: View {
     /// mode can be refused up front rather than starting a loop that answers nothing.
     private var wakePhraseIsUsable: Bool { !WakeWord(wakePhrase).isEmpty }
 
+    /// Speaking through the Mac is not a separate opt-in — it follows the provider.
+    ///
+    /// Kokoro lives on the Mac, so the on-device provider cannot reach it whatever the user
+    /// picked, and a user who deliberately routed inference through BigBro has no reason to
+    /// want the system voice back. The stored preference is still written so older sessions
+    /// and `VoiceAssistant` keep reading a consistent value.
+    private var useBigBroSpeech: Bool { llmProvider == .bigBro }
+
     var body: some View {
         Form {
             // MARK: - AI Provider
@@ -85,37 +92,41 @@ struct ProfileSettingsView: View {
             Section {
                 Toggle("Auto-speak responses", isOn: $autoSpeakResponses)
 
+                // The two providers speak through different engines, so the controls that apply
+                // are disjoint: Kokoro on the Mac exposes named voices and no rate, AVSpeech on
+                // the device exposes installed voices and a rate.
                 if autoSpeakResponses {
-                    Picker("Voice", selection: $voiceIdentifier) {
-                        // A saved voice that is no longer installed would otherwise drop out of
-                        // the picker and silently reset the selection on the next render.
-                        if !availableVoices.contains(where: { $0.identifier == voiceIdentifier }) {
-                            Text("System Default").tag(voiceIdentifier)
-                            Divider()
+                    if llmProvider == .bigBro {
+                        BigBroVoicePicker(
+                            client: llmService.bigBroClient,
+                            bigBroVoice: $bigBroVoice
+                        )
+                    } else {
+                        Picker("Voice", selection: $voiceIdentifier) {
+                            // A saved voice that is no longer installed would otherwise drop out
+                            // of the picker and silently reset the selection on the next render.
+                            if !availableVoices.contains(where: { $0.identifier == voiceIdentifier }) {
+                                Text("System Default").tag(voiceIdentifier)
+                                Divider()
+                            }
+                            ForEach(availableVoices, id: \.identifier) { voice in
+                                Text(voiceLabel(voice)).tag(voice.identifier)
+                            }
                         }
-                        ForEach(availableVoices, id: \.identifier) { voice in
-                            Text(voiceLabel(voice)).tag(voice.identifier)
+
+                        VStack(alignment: .leading, spacing: 4) {
+                            HStack {
+                                Text("Speech Rate")
+                                Spacer()
+                                Text("\(speechRateMultiplier.wrappedValue, specifier: "%.1f")x")
+                                    .font(.caption)
+                                    .foregroundColor(.secondary)
+                                    .monospacedDigit()
+                            }
+                            Slider(value: speechRateMultiplier, in: 0.5...2.0, step: 0.1)
+                                .tint(.orange)
                         }
                     }
-
-                    VStack(alignment: .leading, spacing: 4) {
-                        HStack {
-                            Text("Speech Rate")
-                            Spacer()
-                            Text("\(speechRateMultiplier.wrappedValue, specifier: "%.1f")x")
-                                .font(.caption)
-                                .foregroundColor(.secondary)
-                                .monospacedDigit()
-                        }
-                        Slider(value: speechRateMultiplier, in: 0.5...2.0, step: 0.1)
-                            .tint(.orange)
-                    }
-
-                    BigBroSpeechToggle(
-                        client: llmService.bigBroClient,
-                        useBigBroSpeech: $useBigBroSpeech,
-                        bigBroVoice: $bigBroVoice
-                    )
                 }
             } header: {
                 Text("Voice")
@@ -123,7 +134,7 @@ struct ProfileSettingsView: View {
 
             // MARK: - Hands-free
             Section {
-                TextField("Wake phrase", text: $wakePhrase)
+                TextField("Wake word", text: $wakePhrase)
                     .autocorrectionDisabled()
                     .textInputAutocapitalization(.never)
 
@@ -138,8 +149,6 @@ struct ProfileSettingsView: View {
 
             } header: {
                 Text("Hands-free")
-            } footer: {
-                Text("The wake phrase is only used by the \"Wait for…\" hands-free mode. Every question opens with it, including the one after an answer — so other conversations in the kitchen are not mistaken for questions.")
             }
 
             // MARK: - Data
@@ -173,7 +182,6 @@ struct ProfileSettingsView: View {
         .onChange(of: speechRate) { _, _ in saveIfLoaded() }
         .onChange(of: voiceIdentifier) { _, _ in saveIfLoaded() }
         .onChange(of: autoSpeakResponses) { _, _ in saveIfLoaded() }
-        .onChange(of: useBigBroSpeech) { _, _ in saveIfLoaded() }
         .onChange(of: wakePhrase) { _, _ in saveIfLoaded() }
         .onChange(of: bigBroVoice) { _, _ in saveIfLoaded() }
         .alert("Delete All Data", isPresented: $showingDeleteAlert) {
@@ -353,7 +361,6 @@ struct ProfileSettingsView: View {
                     speechRate = prefs.voiceSettings.speechRate
                     voiceIdentifier = prefs.voiceSettings.voiceIdentifier
                     autoSpeakResponses = prefs.voiceSettings.autoSpeakResponses
-                    useBigBroSpeech = prefs.voiceSettings.useBigBroSpeech
                     wakePhrase = prefs.voiceSettings.wakePhrase
                     bigBroVoice = prefs.voiceSettings.bigBroVoice
                     LLMService.shared.currentProvider = provider
@@ -419,28 +426,23 @@ struct ProfileSettingsView: View {
     }
 }
 
-/// Opt-in to speaking through a paired Mac.
+/// Picks which Kokoro voice the paired Mac speaks with.
 ///
 /// Observes the client directly: `ProfileSettingsView` watches `LLMService`, which does not
-/// republish when its `BigBroClient` connects, so the row would otherwise stay greyed out until
-/// something else forced a redraw.
-private struct BigBroSpeechToggle: View {
+/// republish when its `BigBroClient` connects, so the status line would otherwise stay stale
+/// until something else forced a redraw.
+private struct BigBroVoicePicker: View {
     @ObservedObject var client: BigBroClient
-    @Binding var useBigBroSpeech: Bool
     @Binding var bigBroVoice: String
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
-            Toggle("Use BigBro voice", isOn: $useBigBroSpeech)
-                .disabled(!client.isConnected)
-
             // A closed list, not free text: the Mac fails synthesis on an unrecognized voice
             // id with no clue why, and the app has no dependency on Kokoro to enumerate them.
-            if useBigBroSpeech && client.isConnected {
-                Picker("BigBro voice", selection: $bigBroVoice) {
-                    ForEach(Self.availableVoices, id: \.self) { voice in
-                        Text(voice).tag(voice)
-                    }
+            // Offered even while disconnected so the choice can be made before pairing.
+            Picker("Voice", selection: $bigBroVoice) {
+                ForEach(Self.availableVoices, id: \.self) { voice in
+                    Text(voice).tag(voice)
                 }
             }
 
@@ -460,12 +462,10 @@ private struct BigBroSpeechToggle: View {
     ]
 
     private var footnote: String {
-        if !client.isConnected {
-            return "Connect to a BigBro Mac to use its voice."
+        guard client.isConnected else {
+            return "Connect to a BigBro Mac to use its voice. Until then responses are spoken with the on-device voice."
         }
-        return useBigBroSpeech
-            ? "Speaking through \(client.connectedDevice?.name ?? "BigBro"). Falls back to the on-device voice if the Mac goes away."
-            : "Speaking with the on-device voice."
+        return "Speaking through \(client.connectedDevice?.name ?? "BigBro"). Falls back to the on-device voice if the Mac goes away."
     }
 }
 

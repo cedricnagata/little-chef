@@ -170,10 +170,11 @@ final class VoiceAssistant: NSObject, ObservableObject {
 
     /// Whether spoken output should go through the Mac right now.
     ///
-    /// Needs the pinned provider, the preference, *and* a live connection: falling back to the
-    /// on-device voice beats going silent when the Mac disappears mid-cook.
+    /// Follows the pinned provider rather than a separate preference — routing inference through
+    /// the Mac means speaking through it too — but still needs a live connection: falling back to
+    /// the on-device voice beats going silent when the Mac disappears mid-cook.
     private var speaksThroughMac: Bool {
-        provider == .bigBro && voiceSettings.useBigBroSpeech && llmService.bigBroClient.isConnected
+        provider == .bigBro && llmService.bigBroClient.isConnected
     }
 
     // MARK: - Permissions
