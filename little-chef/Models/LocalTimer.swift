@@ -9,9 +9,12 @@ import ActivityKit
 
 class LocalTimer: ObservableObject, Identifiable {
     let id: String
-    let label: String
-    let durationSeconds: Int
     let createdAt: Date
+
+    /// Both are settable so `update()` can re-target a timer in place — the identity a card,
+    /// a notification and a Live Activity are all keyed on is ``id``, not the label.
+    @Published var label: String
+    @Published private(set) var durationSeconds: Int
 
     @Published var remainingSeconds: Int
     @Published var status: TimerStatusType
@@ -91,16 +94,58 @@ class LocalTimer: ObservableObject, Identifiable {
         Task { await liveActivity?.update(.init(state: state, staleDate: nil)) }
     }
 
+    /// Re-target an existing timer: a new label, a new duration, or both.
+    ///
+    /// A running timer keeps running, restarted against the new duration — the alternative is
+    /// silently leaving it counting down to the old one. An ended timer becomes startable again,
+    /// since "make that fifteen minutes instead" after the bell means run it for fifteen.
+    func update(label newLabel: String? = nil, durationSeconds newDuration: Int? = nil) {
+        guard newLabel != nil || newDuration != nil else { return }
+
+        let wasRunning = status == .running
+        if wasRunning { pause() }
+
+        if let newLabel { label = newLabel }
+        if let newDuration {
+            durationSeconds = newDuration
+            remainingSeconds = newDuration
+            if status == .ended {
+                status = .new
+                startedAt = nil
+                completedAt = nil
+            }
+        }
+
+        // The label and the total live in the Live Activity's *attributes*, which ActivityKit
+        // will not let us change — only the content state. So the old one is ended and `start()`
+        // requests a fresh one rather than updating a card that still says "pasta, 10:00".
+        endLiveActivity()
+
+        if wasRunning { start() }
+    }
+
+    /// Tears the timer down — it is being deleted, or the session that owned it ended.
     func stopLiveActivity() {
         timer?.invalidate()
         timer = nil
         TimerNotificationManager.shared.cancelNotification(for: id)
-        Task {
-            let state = TimerActivityAttributes.ContentState(
-                endDate: nil, isPaused: false, pausedRemaining: 0)
-            await liveActivity?.end(.init(state: state, staleDate: nil), dismissalPolicy: .immediate)
-            liveActivity = nil
-        }
+        // Dismissing a timer that is mid-chime silences it.
+        Task { @MainActor in TimerAlertPlayer.shared.stop() }
+        endLiveActivity()
+    }
+
+    /// Ends the Live Activity and drops it synchronously.
+    ///
+    /// Clearing `liveActivity` before awaiting matters: `end()` is async, and anything that
+    /// starts the timer again in the meantime would find the property still populated and
+    /// update the dying activity instead of requesting a new one.
+    private func endLiveActivity(dismissAfter: Date? = nil) {
+        guard let activity = liveActivity else { return }
+        liveActivity = nil
+        let state = TimerActivityAttributes.ContentState(
+            endDate: nil, isPaused: false, pausedRemaining: 0)
+        let policy: ActivityUIDismissalPolicy = dismissAfter.map { .after($0) } ?? .immediate
+        Task { await activity.end(.init(state: state, staleDate: nil), dismissalPolicy: policy) }
     }
 
     private func tick() {
@@ -121,16 +166,18 @@ class LocalTimer: ObservableObject, Identifiable {
         remainingSeconds = 0
         endDate = nil
 
-        TimerNotificationManager.shared.cancelNotification(for: id)
+        // Deliberately *not* cancelling the completion notification here. This runs the moment
+        // the countdown reaches zero — the same moment the notification is due — so cancelling
+        // it raced with its own delivery and, in the foreground, pulled the banner back off the
+        // screen right after it appeared. That race is why a finished timer went by in silence.
+        //
+        // The audible alert is ours to play while the app is open, because a notification sound
+        // over the hands-free audio session usually never reaches the speaker.
+        Task { @MainActor in TimerAlertPlayer.shared.fire() }
 
-        let finalState = TimerActivityAttributes.ContentState(
-            endDate: nil, isPaused: false, pausedRemaining: 0)
-        Task {
-            await liveActivity?.end(
-                .init(state: finalState, staleDate: nil),
-                dismissalPolicy: .after(Date().addingTimeInterval(30)))
-            liveActivity = nil
-        }
+        // Left on screen for a moment — a finished timer that vanishes instantly is one you
+        // can miss entirely if you were looking at the pan.
+        endLiveActivity(dismissAfter: Date().addingTimeInterval(30))
     }
 
     deinit {

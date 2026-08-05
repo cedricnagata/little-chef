@@ -19,12 +19,17 @@ final class TimerNotificationManager {
         let content = UNMutableNotificationContent()
         content.title = "Timer Complete"
         content.body = "\(label) is done!"
-        content.sound = .defaultCritical
+        // `.default`, not `.defaultCritical`: a critical sound needs the Critical Alerts
+        // entitlement, which this app does not have and which Apple grants by request only.
+        // Asking for one without it is not louder — it is silent.
+        content.sound = .default
         content.userInfo = ["timerId": timerId]
 
-        let components = Calendar.current.dateComponents(
-            [.year, .month, .day, .hour, .minute, .second], from: fireDate)
-        let trigger = UNCalendarNotificationTrigger(dateMatching: components, repeats: false)
+        // Interval rather than calendar components: the countdown is an interval, and matching
+        // on second-granularity date components means a timer scheduled a hair past its second
+        // waits for the next match — or, for a duration under a second, never fires at all.
+        let interval = max(1, fireDate.timeIntervalSinceNow)
+        let trigger = UNTimeIntervalNotificationTrigger(timeInterval: interval, repeats: false)
         let request = UNNotificationRequest(identifier: timerId, content: content, trigger: trigger)
 
         UNUserNotificationCenter.current().removePendingNotificationRequests(withIdentifiers: [timerId])

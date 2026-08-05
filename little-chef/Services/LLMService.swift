@@ -460,29 +460,30 @@ class LLMService: ObservableObject {
     /// directly rather than through ``generateChatCompletion``.
     ///
     /// `BigBroVoiceSession` runs its own tool-calling loop against `converse`, so the
-    /// hands-free path needs the same four timer tools this service hands to `chat`. Built
+    /// hands-free path needs the same five timer tools this service hands to `chat`. Built
     /// here rather than duplicated there so the two can't drift.
     func bigBroTools(from cookingTools: CookingTools) -> [BigBroTool] {
         let box = SendableCookingBox(tools: cookingTools)
         return [
             BigBroTool(
                 definition: BigBroTool.Definition(
-                    name: "set_timer",
-                    description: "Set a new cooking timer with a name and duration in minutes",
+                    name: "create_timer",
+                    description: "Create a new cooking timer, stopped. This does NOT start it — the user must ask separately before you call start_timer.",
                     parameters: BigBroTool.Definition.Parameters(
                         properties: [
                             "name": .init(type: "string", description: "Timer label e.g. pasta, chicken"),
-                            "minutes": .init(type: "integer", description: "Duration in minutes")
+                            "minutes": .init(type: "integer", description: "Whole minutes (omit or 0 if under a minute)"),
+                            "seconds": .init(type: "integer", description: "Additional seconds 0-59")
                         ],
-                        required: ["name", "minutes"]
+                        required: ["name"]
                     )
                 ),
-                handler: { args in await MainActor.run { box.tools.execute(toolName: "set_timer", arguments: args) } }
+                handler: { args in await MainActor.run { box.tools.execute(toolName: "create_timer", arguments: args) } }
             ),
             BigBroTool(
                 definition: BigBroTool.Definition(
                     name: "start_timer",
-                    description: "Start or resume an existing timer by name",
+                    description: "Start or resume an existing timer by name. Only when the user asks to start it, never in the same reply that created it.",
                     parameters: BigBroTool.Definition.Parameters(
                         properties: ["name": .init(type: "string", description: "Timer name to start")],
                         required: ["name"]
@@ -492,14 +493,30 @@ class LLMService: ObservableObject {
             ),
             BigBroTool(
                 definition: BigBroTool.Definition(
-                    name: "pause_timer",
-                    description: "Pause a running timer by name",
+                    name: "stop_timer",
+                    description: "Stop a running timer by name, keeping the time left so it can be resumed",
                     parameters: BigBroTool.Definition.Parameters(
-                        properties: ["name": .init(type: "string", description: "Timer name to pause")],
+                        properties: ["name": .init(type: "string", description: "Timer name to stop")],
                         required: ["name"]
                     )
                 ),
-                handler: { args in await MainActor.run { box.tools.execute(toolName: "pause_timer", arguments: args) } }
+                handler: { args in await MainActor.run { box.tools.execute(toolName: "stop_timer", arguments: args) } }
+            ),
+            BigBroTool(
+                definition: BigBroTool.Definition(
+                    name: "update_timer",
+                    description: "Change an existing timer's duration, its name, or both",
+                    parameters: BigBroTool.Definition.Parameters(
+                        properties: [
+                            "name": .init(type: "string", description: "The timer's current name"),
+                            "new_name": .init(type: "string", description: "New label, if renaming"),
+                            "minutes": .init(type: "integer", description: "New duration, whole minutes"),
+                            "seconds": .init(type: "integer", description: "New duration, additional seconds 0-59")
+                        ],
+                        required: ["name"]
+                    )
+                ),
+                handler: { args in await MainActor.run { box.tools.execute(toolName: "update_timer", arguments: args) } }
             ),
             BigBroTool(
                 definition: BigBroTool.Definition(
@@ -745,8 +762,13 @@ class LLMService: ObservableObject {
 
         let name = timerName ?? "timer"
 
+        // A reply that announces a new timer is describing something already done, and it very
+        // often mentions starting in the same breath ("…say start when you're ready"). Inferring
+        // from that is how a freshly created timer began counting down on its own.
+        if lower.contains("creat") || lower.contains("set for") { return }
+
         if lower.contains("stop") || lower.contains("paus") {
-            _ = tools.execute(toolName: "pause_timer", arguments: ["name": name])
+            _ = tools.execute(toolName: "stop_timer", arguments: ["name": name])
         } else if lower.contains("delet") || lower.contains("remov") || lower.contains("cancel") {
             _ = tools.execute(toolName: "delete_timer", arguments: ["name": name])
         } else if lower.contains("start") || lower.contains("resum") {

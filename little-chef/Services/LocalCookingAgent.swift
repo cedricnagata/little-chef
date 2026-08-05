@@ -140,12 +140,43 @@ class LocalCookingAgent: ObservableObject {
     private func buildSystemMessage(recipe: Recipe?) -> ChatMessage {
         var prompt = "You are LittleChef, a concise and helpful cooking assistant. Answer cooking questions directly. Be brief."
 
+        // Everything here is read aloud by a speech model that pronounces abbreviations as
+        // letters — "tsp" comes out "tee ess pee" — so they have to be spelled out in the text
+        // before they ever reach it.
+        prompt += """
+
+
+            Your replies are spoken out loud. Never abbreviate; write every word out in full so \
+            it can be read aloud:
+            - teaspoon / tablespoon, not tsp / tbsp
+            - cup, ounce, pound, gram, kilogram, millilitre, litre, not c / oz / lb / g / kg / ml / l
+            - minutes, hours, seconds, not min / hr / sec
+            - degrees Fahrenheit or degrees Celsius, not F / C / °F / °C
+            - approximately, about, for example, and so on, not approx / ca. / e.g. / etc.
+            Write numbers as digits ("350 degrees Fahrenheit", "2 tablespoons"), and fractions as \
+            words ("one and a half cups", not "1 1/2 cups"). Use no markdown, symbols or emoji.
+            """
+
+        if cookingTools() != nil {
+            // Creating and starting are two separate messages, not two calls in one turn — a
+            // timer that starts the moment it is named leaves no room to correct the duration.
+            prompt += """
+
+
+                Timers: creating a timer and starting it are separate actions in separate replies. \
+                When asked to set a timer, call create_timer only, then tell the user it is ready \
+                and wait. Start it with start_timer only when they ask in a later message. Never \
+                call create_timer and start_timer in the same reply. Use update_timer to change a \
+                timer's duration or name, stop_timer to stop one, delete_timer to remove one.
+                """
+        }
+
         if let recipe = recipe {
             prompt += "\n\nRecipe: \(recipe.title)"
             if let desc = recipe.description { prompt += "\n\(desc)" }
             prompt += "\nServings: \(recipe.servings)"
-            if let prep = recipe.prepTime { prompt += " | Prep: \(prep)min" }
-            if let cook = recipe.cookTime { prompt += " | Cook: \(cook)min" }
+            if let prep = recipe.prepTime { prompt += " | Prep: \(prep) minutes" }
+            if let cook = recipe.cookTime { prompt += " | Cook: \(cook) minutes" }
 
             prompt += "\n\nIngredients: \(recipe.ingredients.joined(separator: ", "))"
 
@@ -159,7 +190,8 @@ class LocalCookingAgent: ObservableObject {
         if !activeTimers.isEmpty {
             prompt += "\n\nActive timers:"
             for timer in activeTimers {
-                prompt += "\n- \(timer.name): \(timer.status.rawValue), \(timer.remainingMinutes)min left"
+                let state = timer.status == .new ? "created, not started yet" : timer.status.rawValue
+                prompt += "\n- \(timer.name): \(state), \(timer.remainingMinutes) minutes left"
             }
         }
 
