@@ -323,6 +323,11 @@ final class VoiceAssistant: NSObject, ObservableObject {
                 // being new. Deduplicating on the text looked equivalent and was not: asking
                 // the same thing twice suppressed the second turn entirely.
                 guard self.spokenReplyID == nil else { return }
+                // A heard question is where a tool loop begins on this path. The Mac runs its
+                // own loop against one long-lived `CookingTools`, so without this the
+                // create-then-start hold set in one turn would still be blocking starts several
+                // turns later.
+                context.tools?.beginToolLoop()
                 self.spokenReplyID = context.beginTurn(heard)
             }
             .store(in: &sessionCancellables)

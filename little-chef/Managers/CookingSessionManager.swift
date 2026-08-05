@@ -437,10 +437,19 @@ class CookingSessionManager: ObservableObject, TimerManager {
 
     // MARK: - TimerManager Protocol Implementation
 
-    func setTimer(name: String, durationSeconds: Int) {
-        if findTimer(named: name) != nil {
+    /// Creates a timer and leaves it stopped.
+    ///
+    /// Deliberately does not start it: the assistant creates and starts timers with two separate
+    /// tools, and a create that quietly started would make the second one meaningless.
+    @discardableResult
+    func createTimer(name: String, durationSeconds: Int) -> Bool {
+        // Exact match, not `findTimer` — its fuzzy fallbacks are there to *resolve* a name the
+        // model half-remembered, and one of them answers "the only timer" to any query at all.
+        // Reused for the duplicate check, that made the first timer of a cook block every one
+        // after it as a duplicate of itself.
+        if localTimers.contains(where: { $0.label.caseInsensitiveCompare(name) == .orderedSame }) {
             dprint("Timer '\(name)' already exists, not creating duplicate")
-            return
+            return false
         }
         let timerId = UUID().uuidString
         let timer = LocalTimer(
@@ -452,37 +461,56 @@ class CookingSessionManager: ObservableObject, TimerManager {
             createdAt: Date()
         )
         localTimers.append(timer)
-        dprint("Set timer: \(name) (\(durationSeconds)s)")
-        timer.start()
+        dprint("Created timer: \(name) (\(durationSeconds)s), stopped")
+        return true
     }
 
-    func startTimer(name: String) {
-        if let index = findTimerIndex(named: name) {
-            localTimers[index].start()
-        } else {
+    @discardableResult
+    func startTimer(name: String) -> Bool {
+        guard let index = findTimerIndex(named: name) else {
             dprint("Timer '\(name)' not found")
+            return false
         }
+        guard localTimers[index].status != .running else { return false }
+        localTimers[index].start()
+        return true
     }
 
-    func pauseTimer(name: String) {
-        if let index = findTimerIndex(named: name) {
-            localTimers[index].pause()
-        } else {
+    @discardableResult
+    func stopTimer(name: String) -> Bool {
+        guard let index = findTimerIndex(named: name) else {
             dprint("Timer '\(name)' not found")
+            return false
         }
+        guard localTimers[index].status == .running else { return false }
+        localTimers[index].pause()
+        return true
     }
 
-    func deleteTimer(name: String) {
+    @discardableResult
+    func updateTimer(name: String, newName: String?, durationSeconds: Int?) -> Bool {
+        guard let index = findTimerIndex(named: name) else {
+            dprint("Timer '\(name)' not found")
+            return false
+        }
+        localTimers[index].update(label: newName, durationSeconds: durationSeconds)
+        return true
+    }
+
+    @discardableResult
+    func deleteTimer(name: String) -> Bool {
         if let index = findTimerIndex(named: name) {
             localTimers[index].stopLiveActivity()
             localTimers.remove(at: index)
-        } else {
-            // Fallback: if only one timer exists, delete it
-            if localTimers.count == 1 {
-                localTimers[0].stopLiveActivity()
-                localTimers.removeAll()
-            }
+            return true
         }
+        // Fallback: if only one timer exists, delete it
+        if localTimers.count == 1 {
+            localTimers[0].stopLiveActivity()
+            localTimers.removeAll()
+            return true
+        }
+        return false
     }
 
     func getTimer(name: String) -> LocalTimer? {
@@ -521,17 +549,13 @@ class CookingSessionManager: ObservableObject, TimerManager {
 
     // MARK: - Manual Timer Management (for UI)
 
+    /// Adds a timer from the UI, stopped — the card's play button starts it.
+    ///
+    /// Same rule as the assistant's `create_timer`: creating a timer and running it are two
+    /// decisions, and a timer that starts the moment it is added gives no chance to fix a
+    /// mistyped duration.
     func addManualTimer(label: String, durationSeconds: Int) {
-        if findTimer(named: label) != nil {
-            dprint("Timer '\(label)' already exists, not creating duplicate")
-            return
-        }
-        let timerId = UUID().uuidString
-        let timer = LocalTimer(
-            id: timerId, label: label, durationSeconds: durationSeconds,
-            remainingSeconds: durationSeconds, status: .new, createdAt: Date())
-        localTimers.append(timer)
-        timer.start()
+        createTimer(name: label, durationSeconds: durationSeconds)
     }
 
     func deleteManualTimer(id: String) {

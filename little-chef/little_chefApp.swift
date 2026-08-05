@@ -35,13 +35,17 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
         completionHandler()
     }
 
-    // Show banner + play sound even when app is in foreground
+    // Show the banner in the foreground, but let the app make the noise.
+    //
+    // No `.sound` on purpose: a foreground timer is announced by `TimerAlertPlayer`, which
+    // chimes repeatedly and gets heard over the hands-free audio session — asking for the
+    // notification sound as well would either double it up or, more often, add nothing.
     func userNotificationCenter(
         _ center: UNUserNotificationCenter,
         willPresent notification: UNNotification,
         withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void
     ) {
-        completionHandler([.banner, .sound])
+        completionHandler([.banner, .list])
     }
 }
 
