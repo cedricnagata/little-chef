@@ -34,6 +34,9 @@ struct ChatAreaView: View {
                 }
                 .padding()
             }
+            // Dragging the transcript is the other natural "I'm done typing" gesture, and
+            // interactive dismissal follows the finger instead of snapping.
+            .scrollDismissesKeyboard(.interactively)
             .onChange(of: cookingSessionManager.getConversationHistory().count) {
                 if let lastMessage = cookingSessionManager.getConversationHistory().last {
                     withAnimation(.easeOut(duration: 0.3)) {

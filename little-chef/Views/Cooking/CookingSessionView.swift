@@ -113,18 +113,26 @@ struct ActiveCookingView: View {
                 isExpanded: $isRecipeExpanded,
                 onEndSession: { showingEndSessionAlert = true }
             )
-            .onTapGesture { isTextFieldFocused = false }
 
+            // Belt and braces, because no single mechanism covers every way out: a tap on the
+            // pane handles the empty spaces the scroll view hit-tests for itself, the
+            // whole-screen catcher below handles everything outside the panes, dragging the
+            // list dismisses interactively, and the input bar carries a Done key for when all
+            // of that is behind the keyboard.
             if isRecipeExpanded {
                 RecipeDetailsView()
                     .transition(.move(edge: .top))
                     .contentShape(Rectangle())
-                    .onTapGesture { isTextFieldFocused = false }
+                    .onTapGesture { dismissKeyboard() }
             } else {
                 ChatAreaView()
                     .transition(.move(edge: .bottom))
                     .contentShape(Rectangle())
-                    .onTapGesture { isTextFieldFocused = false }
+                    .onTapGesture { dismissKeyboard() }
+            }
+
+            if chatEnabled, cookingSessionManager.isPreparingModel, !cookingSessionManager.isLoading {
+                warmUpBanner
             }
 
             if chatEnabled {
@@ -140,8 +148,10 @@ struct ActiveCookingView: View {
                 }
             }
         }
+        .dismissesKeyboardOnTap()
         .ignoresSafeArea(.container, edges: .bottom)
         .animation(.easeInOut(duration: 0.3), value: isRecipeExpanded)
+        .animation(.easeInOut(duration: 0.2), value: cookingSessionManager.isPreparingModel)
         .onReceive(NotificationCenter.default.publisher(for: .timerNotificationTapped)) { _ in
             isRecipeExpanded = true
         }
@@ -174,6 +184,29 @@ struct ActiveCookingView: View {
         .onChange(of: cookingSessionManager.currentSession?.userPreferences.voiceSettings) {
             updateVoiceAssistantSettings()
         }
+    }
+
+    /// Shown while the backend is being brought up, so the wait has a name.
+    ///
+    /// The cost was always there — it just used to be spent inside the first reply, where a
+    /// model loading its weights is indistinguishable from an assistant that has stopped
+    /// working.
+    private var warmUpBanner: some View {
+        VStack(spacing: 0) {
+            Divider()
+            HStack(spacing: 8) {
+                ProgressView().controlSize(.small)
+                Text(cookingSessionManager.sessionProvider == .bigBro
+                     ? "Waking your Mac's model…"
+                     : "Getting the on-device model ready…")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+                Spacer()
+            }
+            .padding(.horizontal)
+            .padding(.vertical, 8)
+        }
+        .transition(.opacity)
     }
 
     private func updateVoiceAssistantSettings() {
@@ -382,6 +415,7 @@ struct RecipeDetailsView: View {
                 }
                 .padding()
             }
+            .scrollDismissesKeyboard(.interactively)
             .sheet(isPresented: $showingAddTimer) {
                 AddTimerView { label, seconds in
                     cookingSessionManager.addManualTimer(label: label, durationSeconds: seconds)

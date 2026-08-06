@@ -37,6 +37,7 @@ struct InputAreaView: View {
                     .submitLabel(.send)
                     .disabled(cookingSessionManager.isLoading || voiceBusy)
                     .onSubmit { sendTextQuery() }
+                    .keyboardDoneButton()
 
                 Button(action: sendTextQuery) {
                     Image(systemName: "arrow.up.circle.fill")
@@ -97,6 +98,7 @@ struct InputAreaView: View {
         voiceAssistant.stopSpeaking()
         textInput = ""
         isTextFieldFocused = false
+        dismissKeyboard()
 
         let shouldSpeak = voiceAssistant.voiceSettings.autoSpeakResponses
 
@@ -172,6 +174,7 @@ private struct HandsFreeButton: View {
 
     private func start(usesWakeWord: Bool) {
         textInputFocused = false
+        dismissKeyboard()
         guard let context = cookingSessionManager.voiceContext() else { return }
         Task {
             await voiceAssistant.startHandsFree(usesWakeWord: usesWakeWord, context: context)
@@ -225,6 +228,7 @@ private struct MicButton: View {
 
     private func tapped() {
         textInputFocused = false
+        dismissKeyboard()
         if voiceAssistant.isSpeaking && !voiceAssistant.isRecording {
             // Stop the answer rather than record over it. There is no echo cancellation on
             // this path — it is push-to-talk, not the hands-free loop.

@@ -188,6 +188,10 @@ struct AddTimerView: View {
                 Spacer()
             }
             .padding()
+            // The duration pickers sit right under the label field, and a keyboard covering
+            // them is a sheet with no visible way forward.
+            .dismissesKeyboardOnTap()
+            .keyboardDoneButton()
             .navigationTitle("Add Timer")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -227,6 +231,7 @@ struct AddTimerView: View {
     }
 
     private func addTimer() {
+        dismissKeyboard()
         let label = timerLabel.trimmingCharacters(in: .whitespacesAndNewlines)
         onAdd(label, totalSeconds)
         dismiss()
