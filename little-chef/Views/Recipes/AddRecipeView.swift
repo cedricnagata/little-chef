@@ -129,9 +129,10 @@ struct AddRecipeView: View {
                 }
             }
             .scrollDismissesKeyboard(.interactively)
-            .onTapGesture {
-                UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
-            }
+            // A simultaneous gesture, not `onTapGesture`: the plain version sat on top of the
+            // source-type cards and the parse button and ate the taps meant for them.
+            .dismissesKeyboardOnTap()
+            .keyboardDoneButton()
             .navigationTitle("Add Recipe")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -208,7 +209,7 @@ struct AddRecipeView: View {
     }
     
     private func parseRecipe() {
-        UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
+        dismissKeyboard()
         Task {
             isParsingRecipe = true
             

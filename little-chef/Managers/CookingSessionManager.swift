@@ -27,12 +27,27 @@ class CookingSessionManager: ObservableObject, TimerManager {
     /// out from under a running hands-free loop.
     @Published private(set) var sessionProvider: LLMProvider = .local
 
+    /// True while the backend is being brought up for this session, before any question is asked.
+    ///
+    /// Drives the "getting ready" line in the cooking view. Purely informational — the input bar
+    /// stays live, because a question typed during warm-up simply waits on the same load.
+    @Published private(set) var isPreparingModel = false
+
     /// What the pinned provider can do — the capability the cooking UI should gate on.
     var capability: AICapability { llmService.capability(of: sessionProvider) }
 
     private let dataManager = LocalDataManager.shared
     private var cookingAgent: LocalCookingAgent?
     private let llmService: LLMService
+
+    /// The in-flight warm-up, held so ending the session can cancel it. Without this, leaving a
+    /// cook immediately after starting one leaves a multi-second model load running against a
+    /// session that no longer exists.
+    private var warmUpTask: Task<Void, Never>?
+
+    /// Whether this session has already asked for a warm-up — tracked separately from
+    /// `warmUpTask`, which is nil both before a warm-up and when there was nothing to warm.
+    private var hasWarmedUp = false
 
     convenience init() {
         self.init(llmService: .shared)
@@ -55,12 +70,42 @@ class CookingSessionManager: ObservableObject, TimerManager {
         sessionProvider = llmService.currentProvider
 
         error = nil
-        dprint("🔵 Started new cooking session on \(sessionProvider.rawValue) (model will load on page)")
+        startWarmUp()
+        dprint("🔵 Started new cooking session on \(sessionProvider.rawValue)")
+    }
+
+    /// Brings the pinned backend up now rather than on the first question.
+    ///
+    /// Starting a cook is the last moment before the assistant is expected to answer, and it is
+    /// a moment the user is already waiting through — so the cold start belongs here, labelled,
+    /// rather than hiding inside the first reply and looking like a model that never responded.
+    private func startWarmUp() {
+        warmUpTask?.cancel()
+        warmUpTask = nil
+        hasWarmedUp = true
+        let provider = sessionProvider
+        guard llmService.needsWarmUp(for: provider) else {
+            isPreparingModel = false
+            return
+        }
+        isPreparingModel = true
+        warmUpTask = Task { [weak self] in
+            guard let self else { return }
+            await self.llmService.prepareForSession(provider: provider)
+            // Speech is loaded lazily on the Mac too, and hands-free is one tap away from here.
+            await self.llmService.prepareSpeechForSession(provider: provider)
+            guard !Task.isCancelled else { return }
+            self.isPreparingModel = false
+        }
     }
 
     func initAgentForSession() {
         cookingAgent = LocalCookingAgent(timerManager: self, provider: sessionProvider)
         error = nil
+        // The cook can be resumed onto this screen without going back through
+        // `startCookingSession` — a warm-up that already finished is a no-op, one that never
+        // ran gets its chance here.
+        if !hasWarmedUp { startWarmUp() }
     }
 
     private func loadLocalPreferences() async -> UserPreferencesDetailed {
@@ -76,6 +121,10 @@ class CookingSessionManager: ObservableObject, TimerManager {
     }
 
     func endCookingSession() {
+        warmUpTask?.cancel()
+        warmUpTask = nil
+        hasWarmedUp = false
+        isPreparingModel = false
         currentSession = nil
         lastResponse = ""
         error = nil

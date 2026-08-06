@@ -240,24 +240,28 @@ class LocalRecipeParser: ObservableObject {
         do {
             var recipe = try decoder.decode(RecipeData.self, from: jsonData)
             dprint("📖 [PARSER] ✅ Decoded RecipeData: title='\(recipe.title)', ingr=\(recipe.ingredients.count), steps=\(recipe.instructions.count)")
-            // Strip numbered prefixes like "1. ", "Step 1: ", "1: " from instructions
+            // Strip numbered prefixes like "1. ", "Step 1: ", "1: " from instructions.
+            //
+            // Cleaned here as well as on the schema.org path: the model is fed page text that
+            // still carries the page's escaping, and it copies fields verbatim when asked to —
+            // faithfully reproducing `&#x27;` along with them.
             recipe = RecipeData(
-                title: recipe.title,
-                description: recipe.description,
+                title: HTMLText.clean(recipe.title),
+                description: recipe.description.map { HTMLText.clean($0) },
                 servings: recipe.servings,
                 prepTime: recipe.prepTime,
                 cookTime: recipe.cookTime,
-                ingredients: recipe.ingredients,
-                instructions: recipe.instructions.map { step in
+                ingredients: HTMLText.clean(recipe.ingredients),
+                instructions: HTMLText.clean(recipe.instructions).map { step in
                     step.replacingOccurrences(
                         of: "^\\s*(?:step\\s*)?\\d+[.:)\\-]\\s*",
                         with: "",
                         options: [.regularExpression, .caseInsensitive]
                     )
                 }.filter { !$0.isEmpty },
-                tags: recipe.tags,
+                tags: HTMLText.clean(recipe.tags),
                 sourceUrl: recipe.sourceUrl,
-                cuisineType: recipe.cuisineType,
+                cuisineType: recipe.cuisineType.map { HTMLText.clean($0) },
                 difficulty: recipe.difficulty
             )
             return recipe
@@ -376,8 +380,11 @@ class LocalRecipeParser: ObservableObject {
             throw RecipeParserError.invalidJSONResponse
         }
 
-        let title = json["name"] as? String ?? ""
-        let description = json["description"] as? String
+        // Every string below goes through `HTMLText.clean`. A JSON-LD block is HTML-escaped
+        // source embedded in a JSON string, and nothing between the page and here un-escapes
+        // it: `JSONSerialization` decodes JSON escapes, not HTML ones.
+        let title = HTMLText.clean(json["name"] as? String ?? "")
+        let description = (json["description"] as? String).map { HTMLText.clean($0) }
 
         // Servings — can be string like "10" or array like ["10"]
         let servings: Int
@@ -394,26 +401,26 @@ class LocalRecipeParser: ObservableObject {
         let cookTime = parseISO8601Duration(json["cookTime"] as? String)
 
         // Ingredients — simple string array
-        let ingredients = json["recipeIngredient"] as? [String] ?? []
+        let ingredients = HTMLText.clean(json["recipeIngredient"] as? [String] ?? [])
 
         // Instructions — can be HowToStep, HowToSection (with nested steps), or plain strings
-        let instructions: [String] = extractInstructions(from: json["recipeInstructions"])
+        let instructions: [String] = HTMLText.clean(extractInstructions(from: json["recipeInstructions"]))
 
         // Tags / category
         let tags: [String]
         if let category = json["recipeCategory"] as? [String] {
-            tags = category.map { $0.lowercased() }
+            tags = HTMLText.clean(category).map { $0.lowercased() }
         } else if let category = json["recipeCategory"] as? String {
-            tags = [category.lowercased()]
+            tags = [HTMLText.clean(category).lowercased()]
         } else {
             tags = []
         }
 
         let cuisineType: String?
         if let cuisine = json["recipeCuisine"] as? [String] {
-            cuisineType = cuisine.first
+            cuisineType = cuisine.first.map { HTMLText.clean($0) }
         } else {
-            cuisineType = json["recipeCuisine"] as? String
+            cuisineType = (json["recipeCuisine"] as? String).map { HTMLText.clean($0) }
         }
 
         return RecipeData(

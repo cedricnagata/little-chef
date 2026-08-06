@@ -8,6 +8,7 @@
 //
 
 import Foundation
+import UIKit
 import MLX
 import MLXLLM
 import MLXLMCommon
@@ -94,6 +95,13 @@ class LLMService: ObservableObject {
     @Published var loadProgress: Double = 0.0
     @Published var isLoadingModel = false
     @Published var downloadedModelIds: Set<String> = []
+    /// Which model ids currently hold weights in memory.
+    ///
+    /// Mirrors `modelContainers`, which is private and not observable. Settings needs to show
+    /// whether a model is merely on disk or actually resident — those cost the user very
+    /// different amounts of RAM, and until this existed there was no way to tell them apart,
+    /// let alone act on the difference.
+    @Published private(set) var loadedModelIds: Set<String> = []
     @Published var currentProvider: LLMProvider = .local {
         didSet { UserDefaults.standard.set(currentProvider.rawValue, forKey: "little-chef.llm-provider") }
     }
@@ -128,6 +136,26 @@ class LLMService: ObservableObject {
         refreshDownloadedModels()
         // Restore BigBro auto-reconnect from previous launches.
         bigBroClient.resumeAutoReconnectIfEnabled()
+
+        // A resident 8B model is several gigabytes the system can't reclaim on its own, and iOS
+        // kills the app rather than asking twice. Dropping the weights on the warning turns an
+        // out-of-memory termination into a reload on the next question. Mid-generation is the
+        // one time to hold on: unloading there fails the answer the user is waiting for.
+        //
+        // The observer is never removed because the service is a process-lifetime singleton —
+        // there is no point at which it should stop listening.
+        _ = NotificationCenter.default.addObserver(
+            forName: UIApplication.didReceiveMemoryWarningNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor in
+                guard let self, !self.loadedModelIds.isEmpty,
+                      !self.isGenerating, self.currentlyLoadingModelId == nil else { return }
+                dprint("🤖 [LLM] ⚠️ Memory warning — unloading resident models")
+                self.unloadModel()
+            }
+        }
     }
 
     /// Refresh which models are cached on disk.
@@ -153,8 +181,13 @@ class LLMService: ObservableObject {
 
         guard currentlyLoadingModelId != id else {
             dprint("🤖 [LLM] Model \(id) already loading, waiting...")
-            while currentlyLoadingModelId == id {
+            // Bounded, because the alternative is unbounded: a loader that dies without
+            // clearing `currentlyLoadingModelId` — cancelled, or killed mid-download — would
+            // otherwise leave every later caller spinning here for the life of the process.
+            let deadline = Date().addingTimeInterval(600)
+            while currentlyLoadingModelId == id, Date() < deadline {
                 try await Task.sleep(nanoseconds: 100_000_000)
+                try Task.checkCancellation()
             }
             if let container = modelContainers[id] { return container }
             throw LLMError.loadFailed("Model failed to load")
@@ -165,6 +198,7 @@ class LLMService: ObservableObject {
             dprint("🤖 [LLM] Unloading \(existingId) before loading \(id)")
             modelContainers.removeValue(forKey: existingId)
         }
+        loadedModelIds = Set(modelContainers.keys)
         MLX.Memory.clearCache()
 
         dprint("🤖 [LLM] Starting model load for \(id)...")
@@ -192,6 +226,7 @@ class LLMService: ObservableObject {
 
             dprint("🤖 [LLM] ✅ Model \(id) loaded successfully")
             self.modelContainers[id] = container
+            loadedModelIds = Set(modelContainers.keys)
             isLoaded = true
             loadProgress = 1.0
             isLoadingModel = false
@@ -213,8 +248,10 @@ class LLMService: ObservableObject {
         _ = try await loadModel(modelId: modelId)
         // Unload from memory — the files stay cached on disk
         modelContainers.removeValue(forKey: modelId)
+        loadedModelIds = Set(modelContainers.keys)
         isLoaded = !modelContainers.isEmpty
         MLX.Memory.clearCache()
+        refreshDownloadedModels()
         dprint("🤖 [LLM] Downloaded \(modelId) to cache, unloaded from memory")
     }
 
@@ -229,23 +266,193 @@ class LLMService: ObservableObject {
         } else {
             modelContainers.removeAll()
         }
+        loadedModelIds = Set(modelContainers.keys)
         isLoaded = !modelContainers.isEmpty
-        isLoadingModel = false
-        loadProgress = 0.0
-        loadError = nil
+        // Only if nothing is mid-load. Unloading one model while another is downloading used to
+        // clear the download's own progress state, leaving Settings showing an idle row over a
+        // transfer that was still running.
+        if currentlyLoadingModelId == nil {
+            isLoadingModel = false
+            loadProgress = 0.0
+            loadError = nil
+        }
         MLX.Memory.clearCache()
+        dprint("🤖 [LLM] Unloaded \(modelId ?? "all models"); resident: \(loadedModelIds)")
     }
 
     func isModelLoaded(_ modelId: String) -> Bool {
         return modelContainers[modelId] != nil
     }
 
+    // MARK: - On-Disk Model Cache
+
+    /// Where a downloaded model's files could be sitting.
+    ///
+    /// More than one candidate on purpose. The weights are written by `HubApi`, whose
+    /// `downloadBase` has moved between releases of swift-transformers and can be overridden by
+    /// whatever constructs it — so hard-coding one path is how "Downloaded" stayed unticked
+    /// under a model that was fully on disk, and how a delete could silently free nothing.
+    /// Every layout the hub has used is checked, and a delete removes all of them.
+    private static func candidateModelDirectories(for modelId: String) -> [URL] {
+        let fm = FileManager.default
+        let searchPaths: [FileManager.SearchPathDirectory] = [
+            .documentDirectory, .cachesDirectory, .applicationSupportDirectory,
+        ]
+        let bases: [URL] = searchPaths.compactMap { fm.urls(for: $0, in: .userDomainMask).first }
+
+        return bases.flatMap { base in
+            ["huggingface/models", "models"].map { base.appendingPathComponent("\($0)/\(modelId)") }
+        }
+    }
+
+    /// The directories that actually exist for `modelId` and hold a usable download.
+    private static func existingModelDirectories(for modelId: String) -> [URL] {
+        candidateModelDirectories(for: modelId).filter { url in
+            // A bare directory isn't a download: an interrupted fetch leaves the folder behind
+            // with nothing in it, and reporting that as "Downloaded" sends the next request
+            // straight into a load that has to re-fetch everything anyway.
+            guard let contents = try? FileManager.default.contentsOfDirectory(atPath: url.path) else {
+                return false
+            }
+            return !contents.isEmpty
+        }
+    }
+
     /// Check if a model has been downloaded to the HuggingFace hub cache.
     func isModelDownloaded(_ modelId: String) -> Bool {
-        let cacheDir = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first!
-        // MLX Swift stores models at <CachesDirectory>/models/<org>/<repo>
-        let modelPath = cacheDir.appendingPathComponent("models/\(modelId)")
-        return FileManager.default.fileExists(atPath: modelPath.path)
+        !Self.existingModelDirectories(for: modelId).isEmpty
+    }
+
+    /// Total bytes `modelId` occupies on disk, or nil if it isn't downloaded.
+    func downloadedSize(of modelId: String) -> Int64? {
+        let directories = Self.existingModelDirectories(for: modelId)
+        guard !directories.isEmpty else { return nil }
+
+        var total: Int64 = 0
+        for directory in directories {
+            guard let enumerator = FileManager.default.enumerator(
+                at: directory,
+                includingPropertiesForKeys: [.fileSizeKey, .isRegularFileKey]
+            ) else { continue }
+            for case let url as URL in enumerator {
+                let values = try? url.resourceValues(forKeys: [.fileSizeKey, .isRegularFileKey])
+                guard values?.isRegularFile == true, let size = values?.fileSize else { continue }
+                total += Int64(size)
+            }
+        }
+        return total
+    }
+
+    /// Evicts `modelId` from memory *and* removes its files from disk.
+    ///
+    /// The unload has to happen first and has to be unconditional: deleting the weights out
+    /// from under a live `ModelContainer` frees no memory at all — the container still holds
+    /// every array it mapped in — so a "delete" that skipped it would report gigabytes
+    /// reclaimed while the app's footprint didn't move.
+    ///
+    /// - Throws: ``LLMError/generationFailed`` if a generation is in flight, and whatever
+    ///   `FileManager` throws if the files can't be removed.
+    func deleteModel(modelId: String) throws {
+        guard !isGenerating else {
+            throw LLMError.generationFailed("Can't remove a model while it's answering. Try again in a moment.")
+        }
+        guard currentlyLoadingModelId != modelId else {
+            throw LLMError.generationFailed("Can't remove a model while it's downloading.")
+        }
+
+        unloadModel(modelId: modelId)
+
+        let directories = Self.existingModelDirectories(for: modelId)
+        for directory in directories {
+            try FileManager.default.removeItem(at: directory)
+            dprint("🤖 [LLM] 🗑️ Removed \(directory.path)")
+        }
+
+        refreshDownloadedModels()
+
+        // Belt and braces: if the files are somehow still there, say so rather than let the UI
+        // show freed space that wasn't freed.
+        if isModelDownloaded(modelId) {
+            throw LLMError.loadFailed("The model files are still on disk. Try again after restarting the app.")
+        }
+        dprint("🤖 [LLM] ✅ Deleted \(modelId) (\(directories.count) director\(directories.count == 1 ? "y" : "ies"))")
+    }
+
+    // MARK: - Session Warm-Up
+
+    /// Whether ``prepareForSession(provider:)`` has anything to do.
+    ///
+    /// Asked before the warm-up starts so the cooking view doesn't flash a "getting ready" line
+    /// over work that finishes in a millisecond — a model already resident, or a Mac that isn't
+    /// connected and has nothing to warm.
+    func needsWarmUp(for provider: LLMProvider) -> Bool {
+        switch provider {
+        case .local:
+            guard let model = LLMService.supportedOnDeviceModel else { return false }
+            return isModelDownloaded(model.modelId) && !isModelLoaded(model.modelId)
+        case .bigBro:
+            // No way to ask the Mac what it already has running, and `runModel` on a running
+            // model is a fast no-op, so this is always worth doing when there's a Mac to do it on.
+            return bigBroClient.isConnected
+        }
+    }
+
+    /// Gets the backend ready to answer *before* the user asks anything.
+    ///
+    /// Both providers load lazily on whichever request happens to be first, which put the whole
+    /// cold-start cost — several seconds of weight loading on-device, a 20B model starting on
+    /// the Mac — on the user's first question, where it reads as a hung assistant rather than a
+    /// model warming up. Starting it when the cook starts moves that wait to a moment the UI
+    /// can label.
+    ///
+    /// Best-effort by design: it never downloads anything, and a failure here costs nothing
+    /// beyond the cold start it was trying to avoid, so it is logged rather than surfaced.
+    /// Safe to call more than once, and cancellable — ending the session drops it.
+    func prepareForSession(provider: LLMProvider) async {
+        switch provider {
+        case .local:
+            guard let model = LLMService.supportedOnDeviceModel else { return }
+            // Downloading is a multi-gigabyte, user-consented decision made in Settings. Warming
+            // up must not turn starting a cook into one.
+            guard isModelDownloaded(model.modelId) else {
+                dprint("🤖 [LLM] Warm-up skipped: \(model.modelId) isn't downloaded")
+                return
+            }
+            guard !isModelLoaded(model.modelId) else { return }
+            do {
+                dprint("🤖 [LLM] Warming up \(model.modelId)…")
+                _ = try await loadModel(modelId: model.modelId)
+                dprint("🤖 [LLM] ✅ Warm-up complete")
+            } catch is CancellationError {
+                dprint("🤖 [LLM] Warm-up cancelled")
+            } catch {
+                dprint("🤖 [LLM] ⚠️ Warm-up failed: \(error.localizedDescription)")
+            }
+
+        case .bigBro:
+            guard bigBroClient.isConnected else { return }
+            do {
+                dprint("🌐 [BigBro] Warming up \(Self.bigBroModel)…")
+                try await bigBroClient.runModel(Self.bigBroModel)
+                dprint("🌐 [BigBro] ✅ Warm-up complete")
+            } catch {
+                // Includes `modelDownloading`, which the chat path already knows how to wait
+                // out. Nothing useful to do here but let the first message handle it.
+                dprint("🌐 [BigBro] ⚠️ Warm-up failed: \(error.localizedDescription)")
+            }
+        }
+    }
+
+    /// Starts the Mac's speech models, so a hands-free loop's first spoken turn isn't the thing
+    /// that pays for loading them. Same best-effort contract as ``prepareForSession(provider:)``.
+    func prepareSpeechForSession(provider: LLMProvider) async {
+        guard provider == .bigBro, bigBroClient.isConnected else { return }
+        do {
+            try await bigBroClient.runSpeech()
+            dprint("🌐 [BigBro] ✅ Speech models ready")
+        } catch {
+            dprint("🌐 [BigBro] ⚠️ Speech warm-up failed: \(error.localizedDescription)")
+        }
     }
 
     // MARK: - Chat Completion

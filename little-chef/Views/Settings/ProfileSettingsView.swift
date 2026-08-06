@@ -25,6 +25,11 @@ struct ProfileSettingsView: View {
     @State private var hasLoaded = false
     @State private var pendingDownload: CookingModelChoice?
     @State private var downloadAlertKind: DownloadAlertKind?
+    @State private var pendingDeletion: CookingModelChoice?
+    @State private var modelError: String?
+    /// On-disk sizes, sampled rather than read live. Measuring one means walking the model's
+    /// directory, and a SwiftUI body runs far too often to put a filesystem crawl inside it.
+    @State private var modelSizes: [String: Int64] = [:]
 
     private enum DownloadAlertKind: Identifiable {
         case wifiConfirm
@@ -172,9 +177,17 @@ struct ProfileSettingsView: View {
                 Text("About")
             }
         }
+        .scrollDismissesKeyboard(.interactively)
         .navigationTitle("Settings")
         .navigationBarTitleDisplayMode(.large)
-        .onAppear { loadPreferences() }
+        .onAppear {
+            loadPreferences()
+            // Cheap, and the only thing that notices a model deleted from the Files app or
+            // evicted by the system since this screen was last open.
+            llmService.refreshDownloadedModels()
+            refreshModelSizes()
+        }
+        .onChange(of: llmService.downloadedModelIds) { _, _ in refreshModelSizes() }
         .onChange(of: llmProvider) { _, new in
             LLMService.shared.currentProvider = new
             saveIfLoaded()
@@ -193,6 +206,23 @@ struct ProfileSettingsView: View {
         .alert(item: $downloadAlertKind) { kind in
             downloadAlert(for: kind)
         }
+        .alert(
+            "Remove \(pendingDeletion?.displayName ?? "Model")?",
+            isPresented: Binding(get: { pendingDeletion != nil }, set: { if !$0 { pendingDeletion = nil } })
+        ) {
+            Button("Cancel", role: .cancel) { pendingDeletion = nil }
+            Button("Remove", role: .destructive) {
+                if let choice = pendingDeletion { deleteModel(choice) }
+                pendingDeletion = nil
+            }
+        } message: {
+            let freed = pendingDeletion
+                .flatMap { modelSizes[$0.modelId] }
+                .map { "Frees \(Self.byteFormatter.string(fromByteCount: $0)) of storage" }
+                ?? "Frees the storage it's using"
+            Text("\(freed) and unloads it from memory. The cooking assistant won't work on-device until you download it again.")
+        }
+        .keyboardDoneButton()
     }
 
     private func downloadAlert(for kind: DownloadAlertKind) -> Alert {
@@ -286,52 +316,143 @@ struct ProfileSettingsView: View {
                 .font(.caption)
                 .foregroundColor(.red)
         }
+
+        if let modelError {
+            Text(modelError)
+                .font(.caption)
+                .foregroundColor(.red)
+        }
     }
 
     // MARK: - Model Row
 
+    /// One on-device model, with everything that can be done to it.
+    ///
+    /// Three states, not two. A model can be on disk without being in memory, and those cost the
+    /// user different things — several gigabytes of storage versus several gigabytes of RAM. The
+    /// row used to stop at "Downloaded", which left no way to hand the memory back short of
+    /// killing the app, and no way to reclaim the disk at all.
     @ViewBuilder
     private func modelRow(for choice: CookingModelChoice, usage: String) -> some View {
         let isDownloading = llmService.currentlyLoadingModelId == choice.modelId
         let isDownloaded = llmService.downloadedModelIds.contains(choice.modelId)
+        let isLoaded = llmService.loadedModelIds.contains(choice.modelId)
 
-        HStack {
-            VStack(alignment: .leading, spacing: 2) {
-                Text(choice.displayName)
-                    .font(.subheadline)
-                Text(usage)
-                    .font(.caption2)
-                    .foregroundColor(.secondary)
-            }
-
-            Spacer()
-
-            if isDownloading {
-                HStack(spacing: 6) {
-                    ProgressView(value: llmService.loadProgress, total: 1.0)
-                        .frame(width: 60)
-                        .tint(.orange)
-                    Text("\(Int(llmService.loadProgress * 100))%")
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(choice.displayName)
+                        .font(.subheadline)
+                    Text(usage)
                         .font(.caption2)
                         .foregroundColor(.secondary)
-                        .monospacedDigit()
                 }
-            } else if isDownloaded {
-                Label("Downloaded", systemImage: "checkmark.circle.fill")
-                    .font(.caption)
-                    .foregroundColor(.green)
-            } else {
-                Button {
-                    promptDownload(for: choice)
-                } label: {
-                    Text("Download")
-                        .font(.caption)
-                        .fontWeight(.medium)
+
+                Spacer()
+
+                if isDownloading {
+                    HStack(spacing: 6) {
+                        ProgressView(value: llmService.loadProgress, total: 1.0)
+                            .frame(width: 60)
+                            .tint(.orange)
+                        Text("\(Int(llmService.loadProgress * 100))%")
+                            .font(.caption2)
+                            .foregroundColor(.secondary)
+                            .monospacedDigit()
+                    }
+                } else if !isDownloaded {
+                    Button {
+                        promptDownload(for: choice)
+                    } label: {
+                        Text("Download")
+                            .font(.caption)
+                            .fontWeight(.medium)
+                    }
+                    .buttonStyle(.bordered)
+                    .tint(.orange)
+                    .disabled(llmService.isLoadingModel)
                 }
-                .buttonStyle(.bordered)
-                .tint(.orange)
-                .disabled(llmService.isLoadingModel)
             }
+
+            if isDownloaded && !isDownloading {
+                HStack(spacing: 8) {
+                    Label(
+                        isLoaded ? "In memory" : "On disk",
+                        systemImage: isLoaded ? "memorychip.fill" : "internaldrive"
+                    )
+                    .font(.caption2)
+                    .foregroundColor(isLoaded ? .green : .secondary)
+
+                    if let bytes = modelSizes[choice.modelId] {
+                        Text(Self.byteFormatter.string(fromByteCount: bytes))
+                            .font(.caption2)
+                            .foregroundColor(.secondary)
+                    }
+
+                    Spacer()
+
+                    if isLoaded {
+                        Button("Unload") { llmService.unloadModel(modelId: choice.modelId) }
+                            .font(.caption)
+                            .buttonStyle(.bordered)
+                            .disabled(llmService.isGenerating)
+                    } else {
+                        Button("Load") { loadIntoMemory(choice) }
+                            .font(.caption)
+                            .buttonStyle(.bordered)
+                            .tint(.orange)
+                            .disabled(llmService.isLoadingModel)
+                    }
+
+                    Button(role: .destructive) {
+                        pendingDeletion = choice
+                    } label: {
+                        Image(systemName: "trash")
+                    }
+                    .font(.caption)
+                    .buttonStyle(.bordered)
+                    .tint(.red)
+                    .disabled(llmService.isGenerating || llmService.isLoadingModel)
+                }
+            }
+        }
+    }
+
+    private static let byteFormatter: ByteCountFormatter = {
+        let formatter = ByteCountFormatter()
+        formatter.allowedUnits = [.useGB, .useMB]
+        formatter.countStyle = .file
+        return formatter
+    }()
+
+    private func refreshModelSizes() {
+        var sizes: [String: Int64] = [:]
+        for choice in CookingModelChoice.allCases {
+            if let bytes = llmService.downloadedSize(of: choice.modelId) {
+                sizes[choice.modelId] = bytes
+            }
+        }
+        modelSizes = sizes
+    }
+
+    private func loadIntoMemory(_ choice: CookingModelChoice) {
+        modelError = nil
+        Task {
+            do {
+                try await llmService.preloadModel(modelId: choice.modelId)
+            } catch {
+                modelError = error.localizedDescription
+            }
+        }
+    }
+
+    private func deleteModel(_ choice: CookingModelChoice) {
+        modelError = nil
+        do {
+            try llmService.deleteModel(modelId: choice.modelId)
+            refreshModelSizes()
+        } catch {
+            modelError = error.localizedDescription
         }
     }
 
