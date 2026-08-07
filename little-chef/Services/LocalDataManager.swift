@@ -6,7 +6,24 @@
 //
 
 import Foundation
+import OSLog
 import SwiftData
+
+/// Whether the store backing this session is mirroring to CloudKit.
+enum CloudSyncStatus: Equatable {
+    /// The store is backed by CloudKit. Whether records have actually landed also depends on
+    /// network reachability and the signed-in iCloud account, but the mirroring is wired up.
+    case syncing
+
+    /// CloudKit mirroring could not be set up, so this device is on a local-only store:
+    /// nothing written here reaches iCloud, and nothing survives deleting the app.
+    case localOnly(reason: String)
+
+    var isSyncing: Bool {
+        if case .syncing = self { return true }
+        return false
+    }
+}
 
 /// Manages local data persistence for recipes and user preferences.
 /// Both sync to the user's private iCloud database via SwiftData + CloudKit.
@@ -20,8 +37,18 @@ class LocalDataManager: ObservableObject {
         }
     }()
 
+    /// Release builds need this. `dprint` compiles to nothing outside DEBUG, which is precisely
+    /// why a silent fall back to a local-only store went unnoticed through TestFlight.
+    private static let log = Logger(subsystem: "NagataInc.little-chef", category: "persistence")
+
     private let modelContainer: ModelContainer
     private let modelContext: ModelContext
+
+    /// Whether this session is mirroring to CloudKit, and why not when it isn't.
+    ///
+    /// Decided once at launch: the container is built with either a CloudKit-backed
+    /// configuration or a local-only one, and it cannot change store mid-session.
+    @Published private(set) var cloudSyncStatus: CloudSyncStatus = .syncing
 
     /// Called when remote CloudKit changes arrive (e.g. from another device)
     var onRemoteChange: (() -> Void)?
@@ -40,21 +67,43 @@ class LocalDataManager: ObservableObject {
             cloudKitDatabase: .private("iCloud.com.littlechef.app")
         )
 
+        // Built into locals and assigned in one go at the end: `cloudSyncStatus` is `@Published`,
+        // and touching a property wrapper mid-init is `self` used before every stored property
+        // has a value.
+        let container: ModelContainer
+        let status: CloudSyncStatus
+
         do {
-            modelContainer = try ModelContainer(for: schema, configurations: [cloudConfiguration])
+            container = try ModelContainer(for: schema, configurations: [cloudConfiguration])
+            status = .syncing
+            Self.log.notice("Store opened with CloudKit mirroring (iCloud.com.littlechef.app)")
         } catch {
             // CloudKit can be unavailable at runtime (no iCloud account signed in,
             // restricted iCloud, provisioning/entitlement issues during review, etc.).
             // Fall back to a local-only store so the app still launches and works
             // rather than crashing on first run.
-            dprint("CloudKit-backed ModelContainer failed (\(error)); falling back to local-only store")
+            //
+            // This branch is a silent data-loss trap — writes look like they worked and then
+            // die with the app — so it is recorded rather than shrugged off, and surfaced in
+            // Settings. Log at `error` so it shows up in a device console without a debugger.
+            Self.log.error(
+                "CloudKit-backed ModelContainer failed; falling back to a LOCAL-ONLY store. Recipes saved on this device will not reach iCloud and will not survive reinstalling. Error: \(error.localizedDescription, privacy: .public)")
+            status = .localOnly(reason: error.localizedDescription)
             let localConfiguration = ModelConfiguration(
                 schema: schema,
                 isStoredInMemoryOnly: false
             )
-            modelContainer = try ModelContainer(for: schema, configurations: [localConfiguration])
+            container = try ModelContainer(for: schema, configurations: [localConfiguration])
         }
-        modelContext = ModelContext(modelContainer)
+
+        modelContainer = container
+        // `mainContext`, not a freshly built `ModelContext`. Tidy-up, not part of the sync fix —
+        // mirroring happens below the context — but a hand-rolled context is a second context
+        // over the same container with autosave off, and this manager is `@MainActor` anyway.
+        // Using the container's own main context means one context and a save-on-tick backstop
+        // behind the explicit `save()` calls.
+        modelContext = container.mainContext
+        cloudSyncStatus = status
 
         // Reload when a remote CloudKit change arrives from another device
         NotificationCenter.default.addObserver(

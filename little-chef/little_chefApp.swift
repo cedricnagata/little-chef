@@ -17,6 +17,13 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
         didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil
     ) -> Bool {
         UNUserNotificationCenter.current().delegate = self
+
+        // CloudKit's mirroring learns about changes from other devices through silent pushes on
+        // its database subscription, and those only arrive for an app that has asked for a
+        // device token. This is not the timer-alert permission prompt — registering for remote
+        // notifications shows the user nothing.
+        application.registerForRemoteNotifications()
+
         return true
     }
 

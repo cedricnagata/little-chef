@@ -12,6 +12,10 @@ struct ProfileSettingsView: View {
     @EnvironmentObject var llmService: LLMService
     @EnvironmentObject var voiceAssistant: VoiceAssistant
 
+    /// The shared store, for `cloudSyncStatus`. Not a `@StateObject` — this view doesn't own the
+    /// singleton, it just needs to redraw if the status is ever published again.
+    @ObservedObject private var dataManager = LocalDataManager.shared
+
     @State private var llmProvider: LLMProvider = .local
     /// Absolute `AVSpeechUtterance.rate`, where `AVSpeechUtteranceDefaultSpeechRate` is normal
     /// speed. Shown to the user as a multiple of that via `speechRateMultiplier`.
@@ -156,6 +160,29 @@ struct ProfileSettingsView: View {
                 Text("Hands-free")
             }
 
+            // MARK: - iCloud
+            Section {
+                switch dataManager.cloudSyncStatus {
+                case .syncing:
+                    Label("Recipes sync to iCloud", systemImage: "checkmark.icloud")
+                        .foregroundColor(.primary)
+                case .localOnly(let reason):
+                    VStack(alignment: .leading, spacing: 6) {
+                        Label("Not syncing — this device only", systemImage: "exclamationmark.icloud")
+                            .foregroundColor(.orange)
+                        Text(reason)
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                    }
+                }
+            } header: {
+                Text("iCloud")
+            } footer: {
+                if !dataManager.cloudSyncStatus.isSyncing {
+                    Text("Recipes saved now stay on this device and will be lost if you delete the app. Check that you're signed in to iCloud with iCloud Drive turned on.")
+                }
+            }
+
             // MARK: - Data
             Section {
                 Button(role: .destructive) {
@@ -222,7 +249,6 @@ struct ProfileSettingsView: View {
                 ?? "Frees the storage it's using"
             Text("\(freed) and unloads it from memory. The cooking assistant won't work on-device until you download it again.")
         }
-        .keyboardDoneButton()
     }
 
     private func downloadAlert(for kind: DownloadAlertKind) -> Alert {

@@ -155,7 +155,6 @@ struct RecipeEditorForm: View {
         }
         .environment(\.editMode, $editMode)
         .scrollDismissesKeyboard(.interactively)
-        .keyboardDoneButton()
         .toolbar {
             ToolbarItem(placement: .navigationBarTrailing) {
                 Button(editMode.isEditing ? "Done" : "Reorder") {

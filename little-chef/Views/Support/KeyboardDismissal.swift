@@ -30,26 +30,10 @@ extension View {
     /// them tappable at all — without it there is nothing to hit.
     ///
     /// Best-effort rather than the whole answer: a tap inside a scroll view can be claimed by
-    /// the scroll view instead. `scrollDismissesKeyboard` and ``keyboardDoneButton()`` cover
-    /// what this can't.
+    /// the scroll view instead. `scrollDismissesKeyboard(.interactively)` — swipe down over the
+    /// content to push the keyboard away — covers what this can't.
     func dismissesKeyboardOnTap() -> some View {
         contentShape(Rectangle())
             .onTapGesture { dismissKeyboard() }
-    }
-
-    /// Adds a "Done" button above the keyboard.
-    ///
-    /// The guaranteed exit. Tapping outside a field is a convention, not a promise — inside a
-    /// `Form`, a scroll view, or a wheel picker the tap may land on something that consumes it —
-    /// and a numeric keypad has no return key to fall back on, which left the number fields in
-    /// the recipe editor with no way out at all.
-    func keyboardDoneButton() -> some View {
-        toolbar {
-            ToolbarItemGroup(placement: .keyboard) {
-                Spacer()
-                Button("Done") { dismissKeyboard() }
-                    .fontWeight(.semibold)
-            }
-        }
     }
 }
