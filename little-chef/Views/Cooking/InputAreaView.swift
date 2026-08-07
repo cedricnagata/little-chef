@@ -37,7 +37,6 @@ struct InputAreaView: View {
                     .submitLabel(.send)
                     .disabled(cookingSessionManager.isLoading || voiceBusy)
                     .onSubmit { sendTextQuery() }
-                    .keyboardDoneButton()
 
                 Button(action: sendTextQuery) {
                     Image(systemName: "arrow.up.circle.fill")

@@ -132,7 +132,6 @@ struct AddRecipeView: View {
             // A simultaneous gesture, not `onTapGesture`: the plain version sat on top of the
             // source-type cards and the parse button and ate the taps meant for them.
             .dismissesKeyboardOnTap()
-            .keyboardDoneButton()
             .navigationTitle("Add Recipe")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {

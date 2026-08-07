@@ -191,7 +191,6 @@ struct AddTimerView: View {
             // The duration pickers sit right under the label field, and a keyboard covering
             // them is a sheet with no visible way forward.
             .dismissesKeyboardOnTap()
-            .keyboardDoneButton()
             .navigationTitle("Add Timer")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {

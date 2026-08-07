@@ -131,6 +131,7 @@ Read the error before changing anything; these look alike and aren't.
 | `Cloud signing permission error` + `No profiles for '<id>' were found` at **Export** | Export fell back to cloud signing. Check `signingStyle` is `manual` and that no `-allowProvisioningUpdates`/`-authenticationKey*` reached `-exportArchive`. **Not** a missing-profile problem — the lookup was denied, not empty |
 | `Invalid authentication key credential … invalidPEMDocument` at **Archive** | `ASC_KEY_P8_BASE64` decodes to something that isn't a PEM — usually the base64 body saved without its `-----BEGIN PRIVATE KEY-----` delimiters. **Not** an auth failure. Validate with `openssl pkey -noout -in key.p8` (not `openssl pkcs8 … -noout`, which has no such flag in LibreSSL or OpenSSL 3 and rejects every key) |
 | Profile name mismatch at **Export** | `IOS_PROFILE_*_NAME` must be the profile's **Name** field, not its filename or UUID |
+| `doesn't support the Push Notifications capability` / `entitlement 'aps-environment' … not present in profile` | The App ID or the stored profile predates the Push Notifications capability CloudKit needs. See **CloudKit sync** below |
 
 Inspect a run:
 
@@ -138,3 +139,59 @@ Inspect a run:
 gh run view <id> --json jobs -q '.jobs[].steps[] | "\(.conclusion)\t\(.name)"'
 gh run view <id> --log-failed
 ```
+
+## CloudKit sync
+
+Recipes and preferences live in SwiftData, mirrored to the user's **private** database in
+the `iCloud.com.littlechef.app` container by `LocalDataManager`.
+
+### Three capabilities, not one
+
+SwiftData's CloudKit mirroring is `NSPersistentCloudKitContainer` underneath, and it
+refuses to set up unless **all three** of these are present. iCloud alone is not enough:
+
+| Capability | Where it lives |
+| --- | --- |
+| iCloud → CloudKit | `com.apple.developer.icloud-container-identifiers` + `…icloud-services` in `little-chef.entitlements` |
+| Push Notifications | `aps-environment` in `little-chef.entitlements` |
+| Background Modes → Remote notifications | `UIBackgroundModes` = `remote-notification` in `Info.plist` |
+
+Mirroring tracks the other devices' writes through **silent pushes** on a CloudKit
+database subscription, which is why a sync feature needs push at all. Those pushes only
+reach an app that asked for a device token, so `AppDelegate` calls
+`registerForRemoteNotifications()` at launch — it prompts the user for nothing and is
+unrelated to the timer-alert authorization request.
+
+`aps-environment` is checked in as `development`. Do not change it: `xcodebuild
+-exportArchive` rewrites it to `production` for the `app-store` method, and hardcoding
+`production` breaks every local debug build instead.
+
+Both App Store profiles in `IOS_PROFILE_*_BASE64` must therefore be minted from an App ID
+with **Push Notifications enabled**. Enabling a capability does not update profiles that
+already exist — regenerate them in the portal and re-store the secrets, or export fails
+with the `aps-environment` row in the table above.
+
+### The Production schema is a separate, manual deploy
+
+TestFlight and App Store builds talk to the **Production** CloudKit environment; debug
+builds from Xcode talk to Development. Record types created by mirroring appear in
+Development automatically as you run the app, and **never cross to Production on their
+own** — push them with *Deploy Schema to Production* in the CloudKit Console. A schema
+that exists only in Development makes production saves fail per-record while the app
+itself looks perfectly healthy.
+
+### The local-only fallback
+
+A container that can't set up mirroring is a launch crash, so `LocalDataManager` catches
+that and reopens the store local-only. It is the right call and a data-loss trap in equal
+measure: writes look like they worked, never reach iCloud, and die with the app on
+delete. So it is never silent.
+
+- It logs through `Logger`, **not `dprint`** — `dprint` compiles to nothing outside DEBUG,
+  which is exactly how a local-only TestFlight build went unnoticed.
+- It publishes `cloudSyncStatus`, surfaced as an iCloud row in Settings.
+
+Reach for that row first when told "my recipes aren't syncing". It separates *mirroring
+never started* — entitlements, no iCloud account, iCloud Drive off — from *mirroring
+started and records aren't landing*, which is the Production schema above or plain
+network. The two look identical from the recipe list and have nothing in common.
