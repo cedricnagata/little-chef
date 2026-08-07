@@ -20,6 +20,7 @@ class RecipeManager: ObservableObject {
     private let dataManager = LocalDataManager.shared
     private let recipeParser: LocalRecipeParser
     private let llmService: LLMService
+    private var cancellables = Set<AnyCancellable>()
 
     convenience init() {
         self.init(llmService: .shared)
@@ -29,12 +30,21 @@ class RecipeManager: ObservableObject {
         self.llmService = llmService
         self.recipeParser = LocalRecipeParser(llmService: llmService)
 
-        // Reload recipes when remote CloudKit changes arrive
-        dataManager.onRemoteChange = { [weak self] in
-            Task { @MainActor in
-                await self?.loadRecipes()
+        // Refetch when the store changes under us — a CloudKit import from another device, or a
+        // bulk delete from Settings.
+        //
+        // A subscription, not the old `dataManager.onRemoteChange = …` assignment. This class is
+        // built twice (`MainView` and `RecipeListView` each hold their own), and assigning to a
+        // single closure property meant the second one to be constructed silently replaced the
+        // first: one of the two lists stopped hearing about remote creates, edits and deletes
+        // entirely, and which one lost depended on view construction order.
+        dataManager.storeDidChange
+            .sink { [weak self] _ in
+                Task { @MainActor in
+                    await self?.loadRecipes()
+                }
             }
-        }
+            .store(in: &cancellables)
     }
 
     // MARK: - Recipe Management
@@ -48,7 +58,10 @@ class RecipeManager: ObservableObject {
     func createRecipe(_ recipeData: RecipeData) async -> Bool {
         let result = await withLoading {
             let recipeEntity = try self.dataManager.createRecipe(recipeData)
-            self.recipes.append(recipeEntity.toRecipe())
+            // Front, not `append`. `fetchAllRecipes` sorts newest-first, so appending put a
+            // just-saved recipe at the bottom of the list — below every older one — until the
+            // next full reload moved it to the top.
+            self.recipes.insert(recipeEntity.toRecipe(), at: 0)
         }
         return result != nil
     }

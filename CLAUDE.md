@@ -180,6 +180,38 @@ own** — push them with *Deploy Schema to Production* in the CloudKit Console. 
 that exists only in Development makes production saves fail per-record while the app
 itself looks perfectly healthy.
 
+### CRUD across two devices
+
+Mirroring being wired up is not the same as the CRUD paths being correct on top of it. These
+are the shapes that only break once a second device exists.
+
+**Preferences are a singleton row that CloudKit cannot enforce.** `@Attribute(.unique)` is
+rejected outright on a mirrored model, and every fresh device calls `fetchPreferences()`
+before its first import lands, finds nothing, and inserts its own defaults — so two devices
+means two rows. `fetchPreferences()` therefore resolves duplicates rather than trusting
+`.first` on an unsorted fetch: newest `updatedAt` wins, ties broken on `id`, losers deleted.
+Every device computes the same winner from the same set, so it converges. Left unresolved
+this reads as settings that revert on their own.
+
+**Deleting something already deleted is not an error.** `deleteRecipe(id:)` is idempotent.
+The other device deleting it first, with the import landing before the user confirms, is
+ordinary — surfacing `recipeNotFound` for it just puts "Recipe with ID <uuid> not found" in
+front of someone whose recipe is, in fact, gone.
+
+**`storeDidChange` is how anything holding a cached copy finds out.** Subscribers are refetch
+triggers for the two cases a caller can't see for itself: a CloudKit import, and a bulk local
+write (`deleteAllRecipes`) made from a screen that doesn't own the list.
+
+It is a `PassthroughSubject`, not a closure property, because there is more than one
+subscriber and a single `var onRemoteChange: (() -> Void)?` silently let the last assignment
+win. Do not send it for ordinary single-record writes: the caller already updated its own
+state, and `ProfileSettingsView` writes a preference on every `onChange`, so echoing those
+back puts it in a save/load loop with itself.
+
+**One `RecipeManager`.** `MainView` owns it and passes it down; `RecipeListView` takes it from
+the environment. It used to hold its own `@StateObject` as well, which is two managers and two
+`recipes` arrays over one store — adding a recipe on one tab left the other's list stale.
+
 ### The local-only fallback
 
 A container that can't set up mirroring is a launch crash, so `LocalDataManager` catches

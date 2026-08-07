@@ -8,7 +8,13 @@
 import SwiftUI
 
 struct RecipeListView: View {
-    @StateObject private var recipeManager = RecipeManager()
+    /// `MainView`'s manager, not one of its own.
+    ///
+    /// This used to be a `@StateObject`, which meant two `RecipeManager`s over one store: this
+    /// one, and the one `MainView` hands to the cooking tab. Two independent `recipes` arrays,
+    /// so adding a recipe here left the cooking tab's recipe picker showing the old list until
+    /// it happened to refetch. One store, one manager.
+    @EnvironmentObject var recipeManager: RecipeManager
     @State private var showingAddRecipe = false
     @State private var searchText = ""
 
@@ -194,4 +200,5 @@ struct DifficultyBadge: View {
 
 #Preview {
     RecipeListView()
+        .environmentObject(RecipeManager())
 }

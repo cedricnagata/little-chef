@@ -5,6 +5,7 @@
 //  Manages local data persistence using SwiftData
 //
 
+import Combine
 import Foundation
 import OSLog
 import SwiftData
@@ -50,8 +51,19 @@ class LocalDataManager: ObservableObject {
     /// configuration or a local-only one, and it cannot change store mid-session.
     @Published private(set) var cloudSyncStatus: CloudSyncStatus = .syncing
 
-    /// Called when remote CloudKit changes arrive (e.g. from another device)
-    var onRemoteChange: (() -> Void)?
+    /// Fires when the store changed underneath whatever you last read out of it: a CloudKit
+    /// import from another device, or a bulk local write that no per-screen cache saw.
+    ///
+    /// A subject rather than the `onRemoteChange` closure this replaces. That was a single
+    /// property, and `RecipeManager` — which is instantiated twice, once in `MainView` and once
+    /// in `RecipeListView` — assigned it in `init`. The second one to be built silently
+    /// overwrote the first, so exactly one of the two ever heard about a remote change and the
+    /// other showed a recipe list that no longer matched the store. Every subscriber gets this.
+    ///
+    /// Deliberately not sent for ordinary single-record writes: the caller that made the change
+    /// already updated its own state, and `ProfileSettingsView` writes a preference on every
+    /// `onChange`, so echoing those back would put it in a save/load loop with itself.
+    let storeDidChange = PassthroughSubject<Void, Never>()
 
     // MARK: - Initialization
 
@@ -112,7 +124,7 @@ class LocalDataManager: ObservableObject {
             queue: .main
         ) { [weak self] _ in
             Task { @MainActor [weak self] in
-                self?.onRemoteChange?()
+                self?.storeDidChange.send()
             }
         }
     }
@@ -223,11 +235,15 @@ class LocalDataManager: ObservableObject {
         try modelContext.save()
     }
 
-    /// Delete a recipe
+    /// Delete a recipe.
+    ///
+    /// Idempotent, because with two devices "it isn't there" is a normal outcome rather than an
+    /// error: the other device deleted it and the import landed between this screen rendering
+    /// and the user confirming. The caller wanted it gone and it is gone — raising
+    /// `recipeNotFound` here only put "Recipe with ID <uuid> not found" in front of someone who
+    /// had just successfully deleted a recipe.
     func deleteRecipe(id: UUID) throws {
-        guard let recipe = try fetchRecipe(id: id) else {
-            throw LocalDataError.recipeNotFound(id)
-        }
+        guard let recipe = try fetchRecipe(id: id) else { return }
 
         modelContext.delete(recipe)
         try modelContext.save()
@@ -239,8 +255,10 @@ class LocalDataManager: ObservableObject {
             predicate: #Predicate { ids.contains($0.id) }
         )
         let recipes = try modelContext.fetch(descriptor)
+        guard !recipes.isEmpty else { return }
         recipes.forEach { modelContext.delete($0) }
         try modelContext.save()
+        storeDidChange.send()
     }
 
     /// Delete all recipes
@@ -250,24 +268,51 @@ class LocalDataManager: ObservableObject {
             modelContext.delete(recipe)
         }
         try modelContext.save()
+        // Bulk writes are the ones nothing else knows about. A caller deleting one recipe drops
+        // it from its own list; "Delete All Data" is invoked from Settings and left every open
+        // recipe list showing rows that no longer exist until something forced a refetch.
+        storeDidChange.send()
     }
 
     // MARK: - User Preferences Operations
 
     /// Fetch user preferences (creates default if none exist)
+    ///
+    /// Preferences are meant to be a single row, and CloudKit gives no way to say so —
+    /// `@Attribute(.unique)` is rejected outright on a mirrored model. So duplicates are a
+    /// question of when, not if: every fresh device calls this before its first import lands,
+    /// finds nothing, and inserts its own defaults. Two devices, two rows, both synced.
+    ///
+    /// The old `preferences.first` on an unsorted fetch then picked between them arbitrarily,
+    /// which reads as settings that revert on their own — a saved speech rate showing up as the
+    /// default on the next launch, and back again after that.
+    ///
+    /// So collapse them here instead. The winner is the most recently updated row, ties broken
+    /// on `id` so the choice is total rather than merely mostly-ordered; every device sees the
+    /// same set once synced, computes the same winner, and deletes the same losers, so this
+    /// converges rather than each device fighting for its own copy.
     func fetchPreferences() throws -> UserPreferencesEntity {
-        let descriptor = FetchDescriptor<UserPreferencesEntity>()
-        let preferences = try modelContext.fetch(descriptor)
+        let preferences = try modelContext.fetch(FetchDescriptor<UserPreferencesEntity>())
+            // Sorted here rather than in the descriptor: the tie-break is `UUID`, which isn't
+            // `Comparable` and so can't be a `SortDescriptor` key path.
+            .sorted { ($0.updatedAt, $0.id.uuidString) > ($1.updatedAt, $1.id.uuidString) }
 
-        if let existing = preferences.first {
-            return existing
-        } else {
-            // Create default preferences
+        guard let winner = preferences.first else {
             let defaultPrefs = UserPreferencesEntity.createDefault()
             modelContext.insert(defaultPrefs)
             try modelContext.save()
             return defaultPrefs
         }
+
+        if preferences.count > 1 {
+            Self.log.notice("Collapsing \(preferences.count - 1) duplicate preference rows merged in from another device")
+            for duplicate in preferences.dropFirst() {
+                modelContext.delete(duplicate)
+            }
+            try modelContext.save()
+        }
+
+        return winner
     }
 
     /// Update user preferences
