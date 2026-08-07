@@ -38,6 +38,13 @@ struct CookingSessionView: View {
 struct StartCookingView: View {
     @Binding var showingRecipeSelector: Bool
     @EnvironmentObject var recipeManager: RecipeManager
+    @EnvironmentObject var cookingSessionManager: CookingSessionManager
+    @EnvironmentObject var llmService: LLMService
+
+    /// Cooking without a recipe means the assistant writes it down as you go, so it needs an
+    /// assistant to write it. Without one this would be a cook that records nothing and offers
+    /// to save an empty recipe at the end.
+    private var canCookWithoutRecipe: Bool { llmService.capability.llmChatEnabled }
 
     var body: some View {
         VStack(spacing: 32) {
@@ -52,7 +59,7 @@ struct StartCookingView: View {
                     .font(.title)
                     .fontWeight(.bold)
 
-                Text("Select a recipe to begin cooking with AI assistance")
+                Text("Follow one of your recipes, or cook from scratch and let LittleChef write it down as you go")
                     .foregroundColor(.secondary)
                     .multilineTextAlignment(.center)
                     .padding(.horizontal)
@@ -77,8 +84,28 @@ struct StartCookingView: View {
                 }
                 .disabled(recipeManager.recipes.isEmpty)
 
-                if recipeManager.recipes.isEmpty {
-                    Text("Add recipes first to start cooking")
+                Button(action: {
+                    Task { await cookingSessionManager.startFreestyleSession() }
+                }) {
+                    HStack {
+                        Image(systemName: "square.and.pencil")
+                        Text("Cook Without a Recipe")
+                            .fontWeight(.semibold)
+                    }
+                    .frame(maxWidth: .infinity)
+                    .padding()
+                    .background(Color.orange.opacity(0.12))
+                    .foregroundColor(.orange)
+                    .cornerRadius(12)
+                }
+                .disabled(!canCookWithoutRecipe)
+
+                if !canCookWithoutRecipe {
+                    Text("Cooking without a recipe needs the AI assistant")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                } else if recipeManager.recipes.isEmpty {
+                    Text("No recipes yet — add one, or just start cooking")
                         .font(.caption)
                         .foregroundColor(.secondary)
                 }
@@ -97,6 +124,7 @@ struct ActiveCookingView: View {
     @ObservedObject private var bigBroClient = LLMService.shared.bigBroClient
     @State private var textInput = ""
     @State private var showingEndSessionAlert = false
+    @State private var showingSessionChanges = false
     @State private var isRecipeExpanded = true
     @FocusState private var isTextFieldFocused: Bool
 
@@ -111,7 +139,7 @@ struct ActiveCookingView: View {
         VStack(spacing: 0) {
             CollapsibleRecipeHeader(
                 isExpanded: $isRecipeExpanded,
-                onEndSession: { showingEndSessionAlert = true }
+                onEndSession: endSession
             )
 
             // Belt and braces, because no single mechanism covers every way out: a tap on the
@@ -157,13 +185,15 @@ struct ActiveCookingView: View {
         }
         .alert("End Cooking Session", isPresented: $showingEndSessionAlert) {
             Button("Cancel", role: .cancel) { }
-            Button("End", role: .destructive) {
-                voiceAssistant.stopHandsFree()
-                voiceAssistant.stopSpeaking()
-                cookingSessionManager.endCookingSession()
-            }
+            Button("End", role: .destructive) { finishSession() }
         } message: {
             Text("Are you sure you want to end this cooking session?")
+        }
+        .sheet(isPresented: $showingSessionChanges) {
+            SessionChangesView(
+                initialTitle: cookingSessionManager.currentSession?.recipe.title ?? "",
+                onEnd: finishSession
+            )
         }
         .onAppear {
             cookingSessionManager.initAgentForSession()
@@ -209,6 +239,25 @@ struct ActiveCookingView: View {
         .transition(.opacity)
     }
 
+    /// Leaving a cook asks one question or the other, never both.
+    ///
+    /// With unsaved recipe work there is nothing to confirm — the review sheet already offers
+    /// ending as one of its answers, and a plain "are you sure?" in front of it would be a
+    /// confirmation for a thing the next screen is about to ask properly.
+    private func endSession() {
+        if cookingSessionManager.hasPendingRecipeWork {
+            showingSessionChanges = true
+        } else {
+            showingEndSessionAlert = true
+        }
+    }
+
+    private func finishSession() {
+        voiceAssistant.stopHandsFree()
+        voiceAssistant.stopSpeaking()
+        cookingSessionManager.endCookingSession()
+    }
+
     private func updateVoiceAssistantSettings() {
         if let session = cookingSessionManager.currentSession {
             voiceAssistant.updateVoiceSettings(session.userPreferences.voiceSettings)
@@ -239,11 +288,24 @@ struct CollapsibleRecipeHeader: View {
                         Spacer()
 
                         VStack(alignment: .center, spacing: 4) {
-                            Text(session.recipe.title)
-                                .font(.headline)
-                                .fontWeight(.semibold)
-                                .foregroundColor(.primary)
-                                .lineLimit(1)
+                            HStack(spacing: 5) {
+                                Text(session.recipe.displayTitle)
+                                    .font(.headline)
+                                    .fontWeight(.semibold)
+                                    .foregroundColor(.primary)
+                                    .lineLimit(1)
+
+                                // The recipe on screen has drifted from the one that is stored.
+                                // Worth a mark of its own: the assistant edits quietly while you
+                                // are looking at the chat, and finding out only at the exit
+                                // prompt is finding out too late to remember what you agreed to.
+                                if cookingSessionManager.hasPendingRecipeWork {
+                                    Image(systemName: "pencil.circle.fill")
+                                        .font(.caption)
+                                        .foregroundColor(.orange)
+                                        .accessibilityLabel("Unsaved recipe changes")
+                                }
+                            }
 
                             if !isExpanded {
                                 HStack(spacing: 12) {
@@ -359,6 +421,13 @@ struct RecipeDetailsView: View {
                                 .foregroundColor(.secondary)
                         }
 
+                        if session.recipe.ingredients.isEmpty {
+                            Text(emptyListHint("Tell LittleChef what you're using and it will list it here."))
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                                .italic()
+                        }
+
                         LazyVStack(alignment: .leading, spacing: 6) {
                             ForEach(session.recipe.ingredients.indices, id: \.self) { idx in
                                 let ingredient = session.recipe.ingredients[idx]
@@ -388,6 +457,13 @@ struct RecipeDetailsView: View {
                             Text("\(session.recipe.instructions.count) steps")
                                 .font(.caption)
                                 .foregroundColor(.secondary)
+                        }
+
+                        if session.recipe.instructions.isEmpty {
+                            Text(emptyListHint("Say what you did and LittleChef will write the method down as you go."))
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                                .italic()
                         }
 
                         LazyVStack(alignment: .leading, spacing: 12) {
@@ -422,6 +498,13 @@ struct RecipeDetailsView: View {
                 }
             }
         }
+    }
+
+    /// An empty ingredient or step list means two different things and needs two different lines.
+    /// Writing a recipe down, it is the starting state and says how to fill it. Following one, it
+    /// is a recipe that was saved incomplete, and pointing at the assistant would be a non sequitur.
+    private func emptyListHint(_ whileWriting: String) -> String {
+        cookingSessionManager.isBuildingNewRecipe ? whileWriting : "Nothing listed for this recipe."
     }
 }
 
@@ -636,4 +719,5 @@ struct RecipeSelectorView: View {
         .environmentObject(CookingSessionManager())
         .environmentObject(VoiceAssistant())
         .environmentObject(RecipeManager())
+        .environmentObject(LLMService.shared)
 }

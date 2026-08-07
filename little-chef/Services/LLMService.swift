@@ -667,76 +667,33 @@ class LLMService: ObservableObject {
     /// directly rather than through ``generateChatCompletion``.
     ///
     /// `BigBroVoiceSession` runs its own tool-calling loop against `converse`, so the
-    /// hands-free path needs the same five timer tools this service hands to `chat`. Built
-    /// here rather than duplicated there so the two can't drift.
+    /// hands-free path needs the same tools this service hands to `chat`. Both are now projected
+    /// from ``CookingTools/toolSpecs`` rather than written out twice: the two lists had to be
+    /// kept in step by hand, and a tool added to one and forgotten in the other is a capability
+    /// that silently exists on-device and not over BigBro.
     func bigBroTools(from cookingTools: CookingTools) -> [BigBroTool] {
         let box = SendableCookingBox(tools: cookingTools)
-        return [
-            BigBroTool(
+        return cookingTools.toolSpecs.map { spec in
+            // Captured as a plain `String` rather than reaching into `spec` from the handler,
+            // which has to be sendable.
+            let toolName = spec.name
+            return BigBroTool(
                 definition: BigBroTool.Definition(
-                    name: "create_timer",
-                    description: "Create a new cooking timer, stopped. This does NOT start it — the user must ask separately before you call start_timer.",
+                    name: spec.name,
+                    description: spec.description,
                     parameters: BigBroTool.Definition.Parameters(
-                        properties: [
-                            "name": .init(type: "string", description: "Timer label e.g. pasta, chicken"),
-                            "minutes": .init(type: "integer", description: "Whole minutes (omit or 0 if under a minute)"),
-                            "seconds": .init(type: "integer", description: "Additional seconds 0-59")
-                        ],
-                        required: ["name"]
+                        properties: spec.parameters.reduce(into: [:]) { properties, parameter in
+                            properties[parameter.name] = .init(
+                                type: parameter.type,
+                                description: parameter.description
+                            )
+                        },
+                        required: spec.requiredParameterNames
                     )
                 ),
-                handler: { args in await MainActor.run { box.tools.execute(toolName: "create_timer", arguments: args) } }
-            ),
-            BigBroTool(
-                definition: BigBroTool.Definition(
-                    name: "start_timer",
-                    description: "Start or resume an existing timer by name. Only when the user asks to start it, never in the same reply that created it.",
-                    parameters: BigBroTool.Definition.Parameters(
-                        properties: ["name": .init(type: "string", description: "Timer name to start")],
-                        required: ["name"]
-                    )
-                ),
-                handler: { args in await MainActor.run { box.tools.execute(toolName: "start_timer", arguments: args) } }
-            ),
-            BigBroTool(
-                definition: BigBroTool.Definition(
-                    name: "stop_timer",
-                    description: "Stop a running timer by name, keeping the time left so it can be resumed",
-                    parameters: BigBroTool.Definition.Parameters(
-                        properties: ["name": .init(type: "string", description: "Timer name to stop")],
-                        required: ["name"]
-                    )
-                ),
-                handler: { args in await MainActor.run { box.tools.execute(toolName: "stop_timer", arguments: args) } }
-            ),
-            BigBroTool(
-                definition: BigBroTool.Definition(
-                    name: "update_timer",
-                    description: "Change an existing timer's duration, its name, or both",
-                    parameters: BigBroTool.Definition.Parameters(
-                        properties: [
-                            "name": .init(type: "string", description: "The timer's current name"),
-                            "new_name": .init(type: "string", description: "New label, if renaming"),
-                            "minutes": .init(type: "integer", description: "New duration, whole minutes"),
-                            "seconds": .init(type: "integer", description: "New duration, additional seconds 0-59")
-                        ],
-                        required: ["name"]
-                    )
-                ),
-                handler: { args in await MainActor.run { box.tools.execute(toolName: "update_timer", arguments: args) } }
-            ),
-            BigBroTool(
-                definition: BigBroTool.Definition(
-                    name: "delete_timer",
-                    description: "Delete a timer by name",
-                    parameters: BigBroTool.Definition.Parameters(
-                        properties: ["name": .init(type: "string", description: "Timer name to delete")],
-                        required: ["name"]
-                    )
-                ),
-                handler: { args in await MainActor.run { box.tools.execute(toolName: "delete_timer", arguments: args) } }
-            ),
-        ]
+                handler: { args in await MainActor.run { box.tools.execute(toolName: toolName, arguments: args) } }
+            )
+        }
     }
 
     /// Block until the Mac finishes pulling `model`. Calls `onProgress` with a
@@ -961,6 +918,12 @@ class LLMService: ObservableObject {
     /// infer the action and execute it.
     private func inferTimerAction(from text: String, tools: CookingTools) {
         let lower = text.lowercased()
+
+        // Only guess at a timer when the reply is talking about one. This reads verbs out of
+        // ordinary prose and acts on them, and `deleteTimer` falls back to "the only timer" when
+        // the name doesn't match — so with the recipe tools in play, "Removed 'garlic' from the
+        // ingredients" was one sentence away from cancelling the timer on the oven.
+        guard lower.contains("timer") else { return }
 
         let nameRange = NSRange(text.startIndex..., in: text)
         let timerName = Self.timerNameRegex?.firstMatch(in: text, range: nameRange)

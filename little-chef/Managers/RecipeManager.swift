@@ -74,6 +74,29 @@ class RecipeManager: ObservableObject {
         return result != nil
     }
 
+    /// Writes back what a cooking session changed, either onto the recipe it started from or as
+    /// a new one.
+    ///
+    /// Lives here rather than on `CookingSessionManager` because this is the object that owns
+    /// recipe writes *and* the list they have to show up in. A cook can run for an hour, so the
+    /// list is reloaded outright rather than patched — plenty can have arrived from another
+    /// device in the meantime.
+    func saveSessionRecipe(_ recipeData: RecipeData, replacing id: UUID?) async -> Bool {
+        let result = await withLoading {
+            // Falls back to creating when the target has gone: the only way a recipe disappears
+            // mid-cook is another device deleting it, and answering an hour of edits with
+            // "recipe not found" loses them to a race the user never saw.
+            let existing = try id.flatMap { try self.dataManager.fetchRecipe(id: $0) }
+            if let id, existing != nil {
+                try self.dataManager.updateRecipe(id: id, with: recipeData)
+            } else {
+                try self.dataManager.createRecipe(recipeData)
+            }
+            await self.loadRecipes()
+        }
+        return result != nil
+    }
+
     func deleteRecipe(_ recipe: Recipe) async -> Bool {
         let result = await withLoading {
             try self.dataManager.deleteRecipe(id: recipe.id)
