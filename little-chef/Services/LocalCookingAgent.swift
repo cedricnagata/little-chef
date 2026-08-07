@@ -13,6 +13,8 @@ class LocalCookingAgent: ObservableObject {
     // MARK: - Dependencies
     private let llmService: LLMService
     private let timerManager: TimerManager
+    /// The session's recipe, for the tools that edit it. Nil for a session with nothing to edit.
+    private let recipeEditor: RecipeEditing?
     /// The provider this agent was built for, pinned by the cooking session that owns it.
     /// Passed to every request so a mid-flight change to the app-wide provider can't reroute
     /// one turn of a conversation to a different backend than the rest.
@@ -25,13 +27,14 @@ class LocalCookingAgent: ObservableObject {
 
     // MARK: - Initialization
 
-    convenience init(timerManager: TimerManager, provider: LLMProvider) {
-        self.init(llmService: .shared, timerManager: timerManager, provider: provider)
+    convenience init(timerManager: TimerManager, recipeEditor: RecipeEditing?, provider: LLMProvider) {
+        self.init(llmService: .shared, timerManager: timerManager, recipeEditor: recipeEditor, provider: provider)
     }
 
-    init(llmService: LLMService, timerManager: TimerManager, provider: LLMProvider) {
+    init(llmService: LLMService, timerManager: TimerManager, recipeEditor: RecipeEditing?, provider: LLMProvider) {
         self.llmService = llmService
         self.timerManager = timerManager
+        self.recipeEditor = recipeEditor
         self.provider = provider
     }
 
@@ -46,10 +49,10 @@ class LocalCookingAgent: ObservableObject {
         buildSystemMessage(recipe: recipe).content
     }
 
-    /// The timer tools this agent would offer, or none if the pinned provider can't call them.
+    /// The tools this agent would offer, or none if the pinned provider can't call them.
     func cookingTools() -> CookingTools? {
         llmService.capability(of: provider).toolCallingEnabled
-            ? CookingTools(timerManager: timerManager)
+            ? CookingTools(timerManager: timerManager, recipeEditor: recipeEditor)
             : nil
     }
 
@@ -171,18 +174,28 @@ class LocalCookingAgent: ObservableObject {
                 """
         }
 
+        if cookingTools()?.recipeEditor != nil {
+            prompt += recipeEditingInstructions
+        }
+
         if let recipe = recipe {
-            prompt += "\n\nRecipe: \(recipe.title)"
+            prompt += "\n\nRecipe: \(recipe.title.isEmpty ? "not named yet" : recipe.title)"
             if let desc = recipe.description { prompt += "\n\(desc)" }
             prompt += "\nServings: \(recipe.servings)"
             if let prep = recipe.prepTime { prompt += " | Prep: \(prep) minutes" }
             if let cook = recipe.cookTime { prompt += " | Cook: \(cook) minutes" }
 
-            prompt += "\n\nIngredients: \(recipe.ingredients.joined(separator: ", "))"
+            prompt += recipe.ingredients.isEmpty
+                ? "\n\nIngredients: none written down yet"
+                : "\n\nIngredients: \(recipe.ingredients.joined(separator: ", "))"
 
-            prompt += "\n\nSteps:"
-            for (i, step) in recipe.instructions.enumerated() {
-                prompt += "\n\(i + 1). \(step)"
+            if recipe.instructions.isEmpty {
+                prompt += "\n\nSteps: none written down yet"
+            } else {
+                prompt += "\n\nSteps:"
+                for (i, step) in recipe.instructions.enumerated() {
+                    prompt += "\n\(i + 1). \(step)"
+                }
             }
         }
 
@@ -196,6 +209,42 @@ class LocalCookingAgent: ObservableObject {
         }
 
         return ChatMessage(role: .system, content: prompt)
+    }
+
+    /// How to use the recipe tools, which differs entirely depending on whether there is a recipe.
+    ///
+    /// Following one, editing it is a thing you do when told to and not otherwise: a model that
+    /// rewrites the recipe every time it suggests something turns its own advice into the user's
+    /// recorded method. Writing one from nothing, the opposite — the whole point of the cook is
+    /// that the recipe ends up written down, and a model waiting to be asked writes nothing.
+    private var recipeEditingInstructions: String {
+        if recipeEditor?.isBuildingNewRecipe == true {
+            return """
+
+
+                This cook started without a recipe: you are writing it down as the two of you go. \
+                Whenever the user names something they are using, record it with add_ingredient. \
+                Whenever they describe something they did, record it with add_step, in the order \
+                it happened. Use set_recipe_details to name the dish once you know what it is, \
+                and to fill in servings or times when the user mentions them. Record only what \
+                the user actually says they used or did — never your own suggestions, and never \
+                a whole recipe you have guessed at. Keep answering their questions as you \
+                normally would; writing the recipe down happens alongside that, not instead of it.
+                """
+        }
+
+        return """
+
+
+            The user may cook the recipe differently from how it reads. When they tell you they \
+            changed something — a different amount, an extra ingredient, a step they skipped or \
+            did another way — record it with update_ingredient, add_ingredient, \
+            remove_ingredient, update_step, add_step or remove_step. Only record what the user \
+            actually did or asked you to change; never edit the recipe to match a suggestion of \
+            your own, and never rewrite it just because they asked a question about it. Nothing \
+            you record is saved — they are shown every change when the cook ends and choose then \
+            whether to keep it — so do not tell them the recipe has been updated or saved.
+            """
     }
 }
 

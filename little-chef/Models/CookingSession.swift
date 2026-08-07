@@ -12,47 +12,71 @@ import Foundation
 struct CookingSession: Codable, Identifiable {
     var id = UUID()
 
-    let recipe: RecipeBase
+    /// The stored recipe this cook started from, or nil when it started without one and the
+    /// recipe is being written as the cook goes.
+    ///
+    /// Also the answer to "save or save as": a cook that began from a recipe writes back to it,
+    /// a cook that began from nothing becomes a new one.
+    let sourceRecipeID: UUID?
+
+    /// The recipe as it currently stands — what the pane shows, what the assistant is briefed on
+    /// each turn, and what gets written back if the user keeps their changes.
+    var recipe: RecipeBase
+
+    /// The same recipe as saving it would be a no-op against, at the servings now on screen.
+    ///
+    /// The yardstick for "has anything actually changed", and it moves with the servings stepper
+    /// on purpose. Scaling rewrites every ingredient line, so a baseline frozen at the starting
+    /// servings would read a serving nudge as a dozen edited ingredients and put a save prompt in
+    /// front of someone who changed nothing. Both sides go through the same arithmetic, so a pure
+    /// scale cancels out, while an edit made either side of one still stands out.
+    var baselineRecipe: RecipeBase
+
     var conversationHistory: [Message]
     let userPreferences: UserPreferencesDetailed
     let startedAt: Date
 
+    /// Whether this cook is writing a recipe rather than following one.
+    var isBuildingNewRecipe: Bool { sourceRecipeID == nil }
+
     enum CodingKeys: String, CodingKey {
         case recipe
+        case sourceRecipeID = "source_recipe_id"
+        case baselineRecipe = "baseline_recipe"
         case conversationHistory = "conversation_history"
         case userPreferences = "user_preferences"
         case startedAt = "started_at"
     }
 
-    init(recipe: RecipeBase, userPreferences: UserPreferencesDetailed) {
+    init(sourceRecipeID: UUID?, recipe: RecipeBase, userPreferences: UserPreferencesDetailed) {
+        self.sourceRecipeID = sourceRecipeID
         self.recipe = recipe
+        self.baselineRecipe = recipe
         self.conversationHistory = []
         self.userPreferences = userPreferences
         self.startedAt = Date()
-    }
-
-    init(recipe: RecipeBase, conversationHistory: [Message], userPreferences: UserPreferencesDetailed, startedAt: Date) {
-        self.recipe = recipe
-        self.conversationHistory = conversationHistory
-        self.userPreferences = userPreferences
-        self.startedAt = startedAt
     }
 }
 
 // MARK: - Recipe Base
 
-struct RecipeBase: Codable {
-    let title: String
-    let description: String?
-    let servings: Int
-    let prepTime: Int?
-    let cookTime: Int?
-    let ingredients: [String]
-    let instructions: [String]
-    let tags: [String]
-    let sourceUrl: String?
-    let cuisineType: String?
-    let difficulty: String?
+/// A recipe as a cooking session holds it.
+///
+/// Fields are `var` because the session's copy is edited in place while the cook runs — by the
+/// servings stepper, and by the assistant's recipe tools. Nothing here reaches the store until
+/// the user ends the session and says to keep it.
+struct RecipeBase: Codable, Equatable {
+    var title: String
+    var description: String?
+    var servings: Int
+    var prepTime: Int?
+    var cookTime: Int?
+    var ingredients: [String]
+    var instructions: [String]
+    var tags: [String]
+    var sourceUrl: String?
+    var cuisineType: String?
+    var difficulty: String?
 
     enum CodingKeys: String, CodingKey {
         case title, description, servings, ingredients, instructions, tags, difficulty
@@ -88,6 +112,54 @@ struct RecipeBase: Codable {
         self.sourceUrl = recipe.sourceUrl
         self.cuisineType = recipe.cuisineType
         self.difficulty = recipe.difficulty
+    }
+
+    /// A blank recipe, for a cook that starts without one.
+    static func blank() -> RecipeBase {
+        RecipeBase(
+            title: "",
+            description: nil,
+            servings: 4,
+            prepTime: nil,
+            cookTime: nil,
+            ingredients: [],
+            instructions: [],
+            tags: [],
+            sourceUrl: nil,
+            cuisineType: nil,
+            difficulty: nil
+        )
+    }
+
+    /// What to put in the header before the recipe has a name of its own.
+    var displayTitle: String {
+        let trimmed = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? "New Recipe" : trimmed
+    }
+
+    /// Whether anything has been written down yet. A blank recipe is not worth offering to save.
+    var hasContent: Bool {
+        !title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            || !ingredients.isEmpty
+            || !instructions.isEmpty
+    }
+
+    /// The form the store takes. `title` is overridable because a recipe written during a cook is
+    /// named on the way out, in the sheet that offers to save it.
+    func toRecipeData(overridingTitle newTitle: String? = nil) -> RecipeData {
+        RecipeData(
+            title: (newTitle ?? title).trimmingCharacters(in: .whitespacesAndNewlines),
+            description: description,
+            servings: servings,
+            prepTime: prepTime,
+            cookTime: cookTime,
+            ingredients: ingredients,
+            instructions: instructions,
+            tags: tags,
+            sourceUrl: sourceUrl,
+            cuisineType: cuisineType,
+            difficulty: difficulty
+        )
     }
 }
 

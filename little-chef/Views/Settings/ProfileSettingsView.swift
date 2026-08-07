@@ -24,8 +24,6 @@ struct ProfileSettingsView: View {
     @State private var autoSpeakResponses = true
     @State private var wakePhrase = "hey little chef"
     @State private var bigBroVoice = BigBroClient.defaultVoice
-    @State private var showingDeleteAlert = false
-    @State private var isDeleting = false
     @State private var hasLoaded = false
     @State private var pendingDownload: CookingModelChoice?
     @State private var downloadAlertKind: DownloadAlertKind?
@@ -183,18 +181,6 @@ struct ProfileSettingsView: View {
                 }
             }
 
-            // MARK: - Data
-            Section {
-                Button(role: .destructive) {
-                    showingDeleteAlert = true
-                } label: {
-                    Label("Delete All Data", systemImage: "trash")
-                }
-                .disabled(isDeleting)
-            } footer: {
-                Text("Permanently deletes all saved recipes and resets preferences.")
-            }
-
             // MARK: - About
             Section {
                 Text("Recipes imported from URLs remain the property of their original authors and are stored locally on your device for personal use only.")
@@ -224,12 +210,6 @@ struct ProfileSettingsView: View {
         .onChange(of: autoSpeakResponses) { _, _ in saveIfLoaded() }
         .onChange(of: wakePhrase) { _, _ in saveIfLoaded() }
         .onChange(of: bigBroVoice) { _, _ in saveIfLoaded() }
-        .alert("Delete All Data", isPresented: $showingDeleteAlert) {
-            Button("Cancel", role: .cancel) { }
-            Button("Delete", role: .destructive) { deleteAllData() }
-        } message: {
-            Text("This will permanently delete all your recipes and reset preferences. This cannot be undone.")
-        }
         .alert(item: $downloadAlertKind) { kind in
             downloadAlert(for: kind)
         }
@@ -554,23 +534,6 @@ struct ProfileSettingsView: View {
         }
     }
 
-    private func deleteAllData() {
-        isDeleting = true
-        Task {
-            do {
-                try LocalDataManager.shared.deleteAllRecipes()
-                try LocalDataManager.shared.resetPreferences()
-                await MainActor.run {
-                    isDeleting = false
-                    hasLoaded = false
-                    loadPreferences()
-                }
-            } catch {
-                dprint("Failed to delete data: \(error)")
-                await MainActor.run { isDeleting = false }
-            }
-        }
-    }
 }
 
 /// Picks which Kokoro voice the paired Mac speaks with.

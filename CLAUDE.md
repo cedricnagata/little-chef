@@ -200,7 +200,7 @@ front of someone whose recipe is, in fact, gone.
 
 **`storeDidChange` is how anything holding a cached copy finds out.** Subscribers are refetch
 triggers for the two cases a caller can't see for itself: a CloudKit import, and a bulk local
-write (`deleteAllRecipes`) made from a screen that doesn't own the list.
+write (`deleteRecipes(ids:)`) made from a screen that doesn't own the list.
 
 It is a `PassthroughSubject`, not a closure property, because there is more than one
 subscriber and a single `var onRemoteChange: (() -> Void)?` silently let the last assignment
@@ -227,3 +227,58 @@ Reach for that row first when told "my recipes aren't syncing". It separates *mi
 never started* — entitlements, no iCloud account, iCloud Drive off — from *mirroring
 started and records aren't landing*, which is the Production schema above or plain
 network. The two look identical from the recipe list and have nothing in common.
+
+## Editing the recipe mid-cook
+
+A cooking session holds its own copy of the recipe and the assistant is free to rewrite it —
+`add_ingredient`, `update_step`, `set_recipe_details` and the rest, in `CookingTools`. Nothing
+it does reaches the store. `CookingSession.recipe` is the working copy, and it is written back
+only when the user ends the cook and approves the changes in `SessionChangesView`.
+
+That order is the whole design. Asking before each edit would make the feature useless with
+your hands in a bowl; saving without asking would let a model rewrite someone's recipe on the
+strength of a sentence it half heard over an extractor fan. So it edits freely and asks once.
+
+### The baseline moves with the servings stepper
+
+`CookingSession.baselineRecipe` is what saving would be a no-op against, and `RecipeDiff`
+compares the two. It is *not* frozen at the start of the cook: scaling servings rewrites every
+ingredient line, so a frozen baseline would report a serving nudge as a dozen edited
+ingredients and put a save prompt in front of someone who changed nothing.
+`updateServings(newServings:)` therefore scales both sides through the same arithmetic — a pure
+scale cancels out, a real edit either side of one still shows.
+
+For the same reason `set_recipe_details` treats `servings` two ways, and it is not a judgement
+call: following a recipe it routes through `updateServings` (cook more of it, amounts scale),
+writing one down it sets the number flat (the amounts are what the user said they used, and
+rescaling them corrupts the only record of what went in the pan).
+
+`RecipeDiff` runs a real LCS rather than comparing position by position — the assistant can
+insert a step in the middle, and a positional compare reports that as every step below it
+having been rewritten.
+
+### Cooking without a recipe
+
+`startFreestyleSession()` opens a cook on a blank `RecipeBase` with `sourceRecipeID == nil`.
+That one nil is the whole difference: it picks the system prompt (record what the user says
+they used, rather than record what they say they changed), it makes the exit sheet show the
+recipe instead of a diff — a change list is the wrong way to show someone a recipe they have
+never seen written down — and it decides update-that-recipe versus create-a-new-one on save.
+
+Saving falls back to a create when the target recipe has gone: the only way that happens
+mid-cook is another device deleting it, and answering an hour of edits with "recipe not found"
+loses them to a race the user never saw.
+
+### One tool list, two backends
+
+`CookingTools.toolSpecs` is the single source; `mlxToolSpec` projects it for on-device and
+`LLMService.bigBroTools(from:)` for the Mac. These used to be two hand-written lists in two
+files. A tool added to one and forgotten in the other is a capability that silently exists
+on-device and not over BigBro — in a feature whose entire point is working hands-free.
+
+### `inferTimerAction` is guarded on the word "timer"
+
+It reads verbs out of ordinary prose and acts on them, and `deleteTimer` falls back to "the
+only timer" when the name doesn't match. Once the assistant could talk about recipes,
+"Removed 'garlic' from the ingredients" was one sentence away from cancelling the timer on the
+oven. Do not loosen that guard.
