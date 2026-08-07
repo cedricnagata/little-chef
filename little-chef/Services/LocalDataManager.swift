@@ -261,19 +261,6 @@ class LocalDataManager: ObservableObject {
         storeDidChange.send()
     }
 
-    /// Delete all recipes
-    func deleteAllRecipes() throws {
-        let allRecipes = try fetchAllRecipes()
-        for recipe in allRecipes {
-            modelContext.delete(recipe)
-        }
-        try modelContext.save()
-        // Bulk writes are the ones nothing else knows about. A caller deleting one recipe drops
-        // it from its own list; "Delete All Data" is invoked from Settings and left every open
-        // recipe list showing rows that no longer exist until something forced a refetch.
-        storeDidChange.send()
-    }
-
     // MARK: - User Preferences Operations
 
     /// Fetch user preferences (creates default if none exist)
@@ -342,22 +329,6 @@ class LocalDataManager: ObservableObject {
             cookingModel: cookingModel,
             llmProvider: llmProvider
         )
-
-        try modelContext.save()
-    }
-
-    /// Reset preferences to defaults
-    func resetPreferences() throws {
-        let preferences = try fetchPreferences()
-
-        preferences.measurementSystem = "imperial"
-        preferences.dietaryRestrictions = []
-        preferences.speechRate = 0.5
-        preferences.voiceIdentifier = "com.apple.ttsbundle.Samantha-compact"
-        preferences.autoSpeakResponses = true
-        preferences.useBigBroSpeech = false
-        preferences.cookingModel = CookingModelChoice.bonsai8B.rawValue
-        preferences.updatedAt = Date()
 
         try modelContext.save()
     }

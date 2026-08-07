@@ -200,7 +200,7 @@ front of someone whose recipe is, in fact, gone.
 
 **`storeDidChange` is how anything holding a cached copy finds out.** Subscribers are refetch
 triggers for the two cases a caller can't see for itself: a CloudKit import, and a bulk local
-write (`deleteAllRecipes`) made from a screen that doesn't own the list.
+write (`deleteRecipes(ids:)`) made from a screen that doesn't own the list.
 
 It is a `PassthroughSubject`, not a closure property, because there is more than one
 subscriber and a single `var onRemoteChange: (() -> Void)?` silently let the last assignment
