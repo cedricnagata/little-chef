@@ -528,9 +528,11 @@ class LLMService: ObservableObject {
             var toolResults: [String] = []
             for call in nativeToolCalls {
                 dprint("=== TOOL CALL: \(call.name), args: \(call.arguments) ===")
-                let result = tools.execute(toolName: call.name, arguments: call.arguments)
-                dprint("=== TOOL RESULT: \(result) ===")
-                toolResults.append(result)
+                let outcome = tools.execute(toolName: call.name, arguments: call.arguments)
+                dprint("=== TOOL RESULT: \(outcome.forModel) ===")
+                // `forUser`: nothing here feeds the result back for another turn, so it is
+                // returned to the caller as the reply — shown on screen and read out loud.
+                toolResults.append(outcome.forUser)
             }
             // Combine any text output with tool results
             let textPart = stripThinkingTags(from: output)
@@ -629,8 +631,9 @@ class LLMService: ObservableObject {
         if !nativeToolCalls.isEmpty, let tools {
             var toolResults: [String] = []
             for call in nativeToolCalls {
-                let result = tools.execute(toolName: call.name, arguments: call.arguments)
-                toolResults.append(result)
+                // `forUser`, for the same reason as the non-streaming path above.
+                let outcome = tools.execute(toolName: call.name, arguments: call.arguments)
+                toolResults.append(outcome.forUser)
             }
             let textPart = stripThinkingTags(from: output)
             let toolPart = toolResults.joined(separator: "\n")
@@ -691,7 +694,11 @@ class LLMService: ObservableObject {
                         required: spec.requiredParameterNames
                     )
                 ),
-                handler: { args in await MainActor.run { box.tools.execute(toolName: toolName, arguments: args) } }
+                // `forModel`: BigBroKit appends this as a `tool` message and runs another round,
+                // so this is the one place that wants the resulting list.
+                handler: { args in
+                    await MainActor.run { box.tools.execute(toolName: toolName, arguments: args).forModel }
+                }
             )
         }
     }
@@ -779,6 +786,9 @@ class LLMService: ObservableObject {
                 dprint("🌐 [BigBro] ⏳ Model '\(model)' downloading on Mac (alreadyInProgress=\(alreadyInProgress)). Waiting…")
                 try await waitForModelDownload(model)
                 dprint("🌐 [BigBro] ✅ Model '\(model)' downloaded — retrying chat")
+            } catch let BigBroError.toolLoopLimit(rounds) {
+                output = Self.answerForCappedToolLoop(output, rounds: rounds)
+                break chatLoop
             } catch {
                 dprint("🌐 [BigBro] ❌ chat failed after \(String(format: "%.2f", Date().timeIntervalSince(started)))s: \(error)")
                 throw error
@@ -847,11 +857,30 @@ class LLMService: ObservableObject {
                     }
                 }
                 onChunk("✅ Model ready, generating response…\n")
+            } catch let BigBroError.toolLoopLimit(rounds) {
+                let answer = Self.answerForCappedToolLoop(output, rounds: rounds)
+                // Only the part the caller hasn't already been streamed.
+                if answer != output { onChunk(String(answer.dropFirst(output.count))) }
+                output = answer
+                break chatLoop
             } catch {
                 throw error
             }
         }
         return output
+    }
+
+    /// What to say when BigBroKit's tool loop hit `maxToolRounds` without the model answering.
+    ///
+    /// Not rethrown, because the turn is not lost: every tool already ran, so the recipe edits are
+    /// in the session's working copy and will be offered for saving when the cook ends. Reporting
+    /// a failure would put "Failed to get response" in front of someone whose recipe did change.
+    /// Any text the model did produce is kept — a capped loop often has a usable half-answer in it.
+    private static func answerForCappedToolLoop(_ output: String, rounds: Int) -> String {
+        dprint("🌐 [BigBro] ⚠️ tool loop capped at \(rounds) rounds with no final answer")
+        guard output.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return output }
+        return "I got caught repeating myself there, so I have stopped. "
+             + "Have a look at the recipe and tell me what still needs changing."
     }
 
     // MARK: - Model Info
@@ -901,7 +930,8 @@ class LLMService: ObservableObject {
                let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
                let toolName = json["name"] as? String,
                let arguments = json["arguments"] as? [String: Any] {
-                let toolResult = tools.execute(toolName: toolName, arguments: arguments)
+                // `forUser`: this is spliced into the reply text in place of the tag.
+                let toolResult = tools.execute(toolName: toolName, arguments: arguments).forUser
                 result.replaceSubrange(fullRange, with: toolResult)
             } else {
                 result.replaceSubrange(fullRange, with: "")

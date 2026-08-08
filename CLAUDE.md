@@ -231,7 +231,7 @@ network. The two look identical from the recipe list and have nothing in common.
 ## Editing the recipe mid-cook
 
 A cooking session holds its own copy of the recipe and the assistant is free to rewrite it —
-`add_ingredient`, `update_step`, `set_recipe_details` and the rest, in `CookingTools`. Nothing
+`add_ingredients`, `update_steps`, `set_recipe_details` and the rest, in `CookingTools`. Nothing
 it does reaches the store. `CookingSession.recipe` is the working copy, and it is written back
 only when the user ends the cook and approves the changes in `SessionChangesView`.
 
@@ -269,12 +269,54 @@ Saving falls back to a create when the target recipe has gone: the only way that
 mid-cook is another device deleting it, and answering an hour of edits with "recipe not found"
 loses them to a race the user never saw.
 
+### Every recipe tool takes a list
+
+One call per kind of edit, not per line. A cook names three things in one breath, and a per-line
+tool answers that with three round trips — three full re-prefills of the conversation, each one
+another chance for a small model to lose track of what it has already recorded and start over.
+That is how a gpt-oss recipe-builder turn became an unbounded run of `add_ingredient` calls.
+
+Split by section rather than collapsed into one `edit_recipe`: a whole-recipe tool makes the
+model re-emit every untouched line to change one, and `RecipeDiff` then reports its paraphrase of
+all of them as the user's edits. Separate calls also fail separately.
+
+The lists are `string` in the schema, one entry per line, because
+`BigBroTool.Definition.Parameters.Property` is a `type` and a `description` with no `items` to
+describe an array with. `lines(from:keys:)` reads a real JSON array too — models send one anyway
+— and never splits on commas, since "two cloves of garlic, minced" is one ingredient.
+
+Repeating a batch is **not** an error. A duplicate add reports `alreadyPresent` and removing
+something absent says there was nothing to remove, both as ordinary success. Answering a retry
+with a correction tells the model its work didn't land, and a model that believes that retries —
+which is the loop, not a report of it. Same reasoning as `deleteRecipe(id:)`.
+
+### Tool results are told twice
+
+`CookingTools.execute` returns a `ToolOutcome`, because a result has two possible audiences.
+`forModel` ends with the resulting list and the not-saved reminder: the recipe in the system
+prompt is a snapshot from when the user's message arrived, so mid-turn it still says "none
+written down yet" while three ingredients are recorded, and that contradiction is what makes a
+model record them again. `forUser` is what happened and nothing else — the on-device path returns
+tool results *as the reply* (`LLMService`, native calls and the `<tool_call>` fallback), where an
+enumerated ingredient list would be printed on screen and read out loud.
+
 ### One tool list, two backends
 
 `CookingTools.toolSpecs` is the single source; `mlxToolSpec` projects it for on-device and
 `LLMService.bigBroTools(from:)` for the Mac. These used to be two hand-written lists in two
 files. A tool added to one and forgotten in the other is a capability that silently exists
 on-device and not over BigBro — in a feature whose entire point is working hands-free.
+
+The singular tool names (`add_ingredient`, `update_step`, …) still resolve, as `set_timer` does:
+models copy names out of their training data and out of earlier turns, and the text-tool-call
+fallback executes whatever name it parses. A singular call is a batch of one.
+
+### A capped tool loop is not a failed turn
+
+BigBroKit stops the agentic loop at `maxToolRounds` (8) with `BigBroError.toolLoopLimit`. The
+LLMService BigBro paths catch it rather than rethrowing: the tools already ran, so the edits are
+in the working copy and will be offered for saving at the end of the cook. Rethrowing would put
+"Failed to get response" in front of someone whose recipe did change.
 
 ### `inferTimerAction` is guarded on the word "timer"
 

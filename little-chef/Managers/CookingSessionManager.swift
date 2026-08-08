@@ -683,20 +683,24 @@ class CookingSessionManager: ObservableObject, TimerManager {
 extension CookingSessionManager: RecipeEditing {
     var isBuildingNewRecipe: Bool { currentSession?.isBuildingNewRecipe ?? false }
 
+    var currentIngredients: [String] { currentSession?.recipe.ingredients ?? [] }
+    var currentSteps: [String] { currentSession?.recipe.instructions ?? [] }
+
     // MARK: Ingredients
 
-    func addIngredient(_ text: String, at position: Int?) -> Bool {
-        guard let recipe = currentSession?.recipe else { return false }
+    func addIngredient(_ text: String, at position: Int?) -> LineAdditionOutcome {
+        guard let recipe = currentSession?.recipe else { return .rejected }
         let line = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !line.isEmpty else { return false }
-        // Refused rather than appended: a model recording as the cook talks will name the same
+        guard !line.isEmpty else { return .rejected }
+        // Not appended a second time: a model recording as the cook talks will name the same
         // ingredient again three turns later, and a recipe that lists garlic twice reads as a
-        // mistake the user has to go and find.
+        // mistake the user has to go and find. Reported as `alreadyPresent` rather than a
+        // failure, though — see `LineAdditionOutcome`.
         guard !recipe.ingredients.contains(where: { $0.caseInsensitiveCompare(line) == .orderedSame }) else {
-            return false
+            return .alreadyPresent
         }
         currentSession?.recipe.ingredients.insert(line, at: Self.insertionIndex(position, count: recipe.ingredients.count))
-        return true
+        return .added
     }
 
     func replaceIngredient(matching query: String, with text: String) -> String? {
@@ -719,15 +723,15 @@ extension CookingSessionManager: RecipeEditing {
 
     // MARK: Steps
 
-    func addStep(_ text: String, at position: Int?) -> Bool {
-        guard let recipe = currentSession?.recipe else { return false }
+    func addStep(_ text: String, at position: Int?) -> LineAdditionOutcome {
+        guard let recipe = currentSession?.recipe else { return .rejected }
         let line = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !line.isEmpty else { return false }
+        guard !line.isEmpty else { return .rejected }
         guard !recipe.instructions.contains(where: { $0.caseInsensitiveCompare(line) == .orderedSame }) else {
-            return false
+            return .alreadyPresent
         }
         currentSession?.recipe.instructions.insert(line, at: Self.insertionIndex(position, count: recipe.instructions.count))
-        return true
+        return .added
     }
 
     func replaceStep(matching query: String, with text: String) -> String? {
