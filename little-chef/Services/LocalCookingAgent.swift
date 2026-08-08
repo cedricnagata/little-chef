@@ -223,14 +223,14 @@ class LocalCookingAgent: ObservableObject {
 
 
                 This cook started without a recipe: you are writing it down as the two of you go. \
-                Whenever the user names something they are using, record it with add_ingredient. \
-                Whenever they describe something they did, record it with add_step, in the order \
-                it happened. Use set_recipe_details to name the dish once you know what it is, \
-                and to fill in servings or times when the user mentions them. Record only what \
-                the user actually says they used or did — never your own suggestions, and never \
-                a whole recipe you have guessed at. Keep answering their questions as you \
-                normally would; writing the recipe down happens alongside that, not instead of it.
-                """
+                Whenever the user names things they are using, record them with add_ingredients. \
+                Whenever they describe what they did, record it with add_steps, in the order it \
+                happened. Use set_recipe_details to name the dish once you know what it is, and \
+                to fill in servings or times when the user mentions them. Record only what the \
+                user actually says they used or did — never your own suggestions, and never a \
+                whole recipe you have guessed at. Keep answering their questions as you normally \
+                would; writing the recipe down happens alongside that, not instead of it.
+                """ + batchingInstructions
         }
 
         return """
@@ -238,13 +238,35 @@ class LocalCookingAgent: ObservableObject {
 
             The user may cook the recipe differently from how it reads. When they tell you they \
             changed something — a different amount, an extra ingredient, a step they skipped or \
-            did another way — record it with update_ingredient, add_ingredient, \
-            remove_ingredient, update_step, add_step or remove_step. Only record what the user \
-            actually did or asked you to change; never edit the recipe to match a suggestion of \
-            your own, and never rewrite it just because they asked a question about it. Nothing \
-            you record is saved — they are shown every change when the cook ends and choose then \
-            whether to keep it — so do not tell them the recipe has been updated or saved.
-            """
+            did another way — record it with update_ingredients, add_ingredients, \
+            remove_ingredients, update_steps, add_steps or remove_steps. Only record what the \
+            user actually did or asked you to change; never edit the recipe to match a \
+            suggestion of your own, and never rewrite it just because they asked a question \
+            about it. Nothing you record is saved — they are shown every change when the cook \
+            ends and choose then whether to keep it — so do not tell them the recipe has been \
+            updated or saved.
+            """ + batchingInstructions
+    }
+
+    /// How to spend tool calls, which matters more than it looks.
+    ///
+    /// Every recipe tool takes a list, and a model that calls them one line at a time turns "eggs,
+    /// flour and milk" into three round trips — three re-prefills of the whole conversation, each
+    /// one another chance to lose track of what it has already recorded and start over. The
+    /// snapshot note is the other half of that: the recipe printed below is taken when the user's
+    /// message arrives and does not move while the tools run, so the tool results are the only
+    /// honest account of the recipe mid-turn, and they say so.
+    private var batchingInstructions: String {
+        """
+
+
+        Record everything from one message in a single call per tool: pass every ingredient to \
+        one add_ingredients call, one per line, and every step to one add_steps call. Never call \
+        the same tool twice in a row. Each result ends with the list as it now stands — trust \
+        that over the recipe printed below, which is a snapshot from before your edits. When a \
+        result says a line was already there, it is recorded and there is nothing left to do: do \
+        not send it again. Once you have recorded what the user said, answer them in words.
+        """
     }
 }
 

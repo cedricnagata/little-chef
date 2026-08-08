@@ -30,6 +30,22 @@ protocol TimerManager {
 
 // MARK: - Recipe Editing Protocol
 
+/// What happened to one line an add was asked to record.
+///
+/// A duplicate is deliberately not a failure. The assistant records as the cook talks, so the
+/// same ingredient gets named again three turns later — and once a tool loop retries a batch,
+/// the lines it already recorded come back round a second time. Answering those with an error
+/// tells the model its work didn't land, and a model that believes that tries again: which is
+/// how one message turned into an endless run of `add_ingredient` calls. The line is already
+/// there, the recipe is already right, and that is worth saying plainly rather than refusing.
+enum LineAdditionOutcome {
+    case added
+    /// Already listed, so nothing changed — and nothing needed to.
+    case alreadyPresent
+    /// Nothing usable in the text, or no session to write to.
+    case rejected
+}
+
 /// The edits the assistant can make to the recipe being cooked.
 ///
 /// Everything here writes to the session's working copy only. Nothing reaches the store until
@@ -44,15 +60,23 @@ protocol RecipeEditing {
     /// Whether this cook is writing a recipe from nothing rather than following an existing one.
     var isBuildingNewRecipe: Bool { get }
 
+    /// The ingredient lines as they stand right now, for the tool results to report back.
+    ///
+    /// The recipe in the system prompt is a snapshot taken when the user's message arrived, so
+    /// from the second tool call of a turn onwards it is out of date — it still says "none
+    /// written down yet" while three ingredients have been recorded. The tool result is the only
+    /// thing that can correct that mid-turn, so it carries the list.
+    var currentIngredients: [String] { get }
+    var currentSteps: [String] { get }
+
     /// Inserts at `position` counting from 1, or appends when it is nil or out of range.
-    /// Returns false if that ingredient is already listed.
-    @discardableResult func addIngredient(_ text: String, at position: Int?) -> Bool
+    @discardableResult func addIngredient(_ text: String, at position: Int?) -> LineAdditionOutcome
     /// Returns the line that was replaced, or nil if nothing matched.
     func replaceIngredient(matching query: String, with text: String) -> String?
     /// Returns the line that was removed, or nil if nothing matched.
     func removeIngredient(matching query: String) -> String?
 
-    @discardableResult func addStep(_ text: String, at position: Int?) -> Bool
+    @discardableResult func addStep(_ text: String, at position: Int?) -> LineAdditionOutcome
     /// `query` may be a step number or a quote from the step itself.
     func replaceStep(matching query: String, with text: String) -> String?
     func removeStep(matching query: String) -> String?
@@ -223,51 +247,68 @@ struct CookingTools {
 
     // MARK: - Recipe tools
 
+    /// The recipe tools, one per kind of edit and each taking a *list*.
+    ///
+    /// Batched rather than one line per call, and that is the whole point of the shape. A cook
+    /// says "I used two eggs, some flour and a splash of milk" in one breath, and a per-line tool
+    /// answers that with three round trips — three full re-prefills of the conversation, each one
+    /// another chance for a small model to lose the thread of what it has already recorded. One
+    /// call records the lot.
+    ///
+    /// Split by section rather than collapsed into a single `edit_recipe`, for two reasons. A
+    /// whole-recipe tool makes the model re-emit every untouched line to change one of them,
+    /// which `RecipeDiff` then reports as the user having edited all of them — its own paraphrase
+    /// presented back as their changes. And a malformed batch of steps would take the ingredient
+    /// edits down with it; separate calls fail separately.
+    ///
+    /// The lists are `string` rather than `array` because the schema both backends project from
+    /// ``CookingToolSpec`` is flat — `BigBroTool.Definition.Parameters.Property` is a `type` and a
+    /// `description` and nothing else, so there is no `items` to describe an array with. One line
+    /// per entry travels fine through both, and ``CookingTools/lines(from:keys:)`` reads a real
+    /// JSON array too, for the models that send one anyway.
     static let recipeToolSpecs: [CookingToolSpec] = [
         CookingToolSpec(
-            name: "add_ingredient",
-            description: "Add an ingredient to the recipe being cooked. Put the amount in the text itself, e.g. 'two cloves of garlic, minced'.",
+            name: "add_ingredients",
+            description: "Record one or more ingredients in the recipe being cooked. Pass every ingredient at once, one per line, with the amount in the line itself — 'two cloves of garlic, minced\ntwo eggs\n300 grams plain flour'. Never call this once per ingredient.",
             parameters: [
-                .init(name: "item", type: "string", description: "The whole ingredient line, amount included", isRequired: true),
-                .init(name: "position", type: "integer", description: "Where in the ingredient list it goes, counting from 1. Omit to put it at the end.")
+                .init(name: "items", type: "string", description: "The ingredient lines, one per line, each including its amount", isRequired: true),
+                .init(name: "position", type: "integer", description: "Where the first of them goes in the list, counting from 1. Omit to add them at the end.")
             ]
         ),
         CookingToolSpec(
-            name: "update_ingredient",
-            description: "Rewrite an ingredient the recipe already lists — a different amount, a substitution. Give enough of the existing line to identify it.",
+            name: "update_ingredients",
+            description: "Rewrite ingredients the recipe already lists — a different amount, a substitution. One change per line, written as 'the line as it reads now -> the whole replacement line'. Pass every change at once.",
             parameters: [
-                .init(name: "item", type: "string", description: "The ingredient as the recipe lists it now", isRequired: true),
-                .init(name: "new_item", type: "string", description: "The whole replacement line, amount included", isRequired: true)
+                .init(name: "changes", type: "string", description: "One change per line, as 'existing ingredient -> replacement ingredient, amount included'", isRequired: true)
             ]
         ),
         CookingToolSpec(
-            name: "remove_ingredient",
-            description: "Remove an ingredient from the recipe being cooked",
+            name: "remove_ingredients",
+            description: "Remove one or more ingredients from the recipe being cooked. One per line, quoted as the recipe lists them.",
             parameters: [
-                .init(name: "item", type: "string", description: "The ingredient as the recipe lists it now", isRequired: true)
+                .init(name: "items", type: "string", description: "The ingredients to remove, one per line", isRequired: true)
             ]
         ),
         CookingToolSpec(
-            name: "add_step",
-            description: "Add a step to the recipe's method. Write it as an instruction, e.g. 'Fry the onions until soft, about eight minutes'.",
+            name: "add_steps",
+            description: "Record one or more steps in the recipe's method, in the order they happened. One step per line, each written as an instruction — 'Fry the onions until soft, about eight minutes\nAdd the garlic and cook for one minute'. Never call this once per step.",
             parameters: [
-                .init(name: "text", type: "string", description: "The step, written as an instruction", isRequired: true),
-                .init(name: "position", type: "integer", description: "Which step number it becomes, counting from 1. Omit to put it at the end.")
+                .init(name: "steps", type: "string", description: "The steps, one per line, each written as an instruction", isRequired: true),
+                .init(name: "position", type: "integer", description: "Which step number the first of them becomes, counting from 1. Omit to add them at the end.")
             ]
         ),
         CookingToolSpec(
-            name: "update_step",
-            description: "Rewrite one of the recipe's steps",
+            name: "update_steps",
+            description: "Rewrite steps the recipe already has. One change per line, written as 'step number or a quote from it -> the whole replacement step'. Pass every change at once.",
             parameters: [
-                .init(name: "step", type: "string", description: "The step number, or a quote from the step as it reads now", isRequired: true),
-                .init(name: "new_text", type: "string", description: "The whole replacement step", isRequired: true)
+                .init(name: "changes", type: "string", description: "One change per line, as 'step number or quote -> the whole replacement step'", isRequired: true)
             ]
         ),
         CookingToolSpec(
-            name: "remove_step",
-            description: "Remove one of the recipe's steps",
+            name: "remove_steps",
+            description: "Remove one or more of the recipe's steps. One per line, given as a step number or a quote from the step.",
             parameters: [
-                .init(name: "step", type: "string", description: "The step number, or a quote from the step as it reads now", isRequired: true)
+                .init(name: "steps", type: "string", description: "The steps to remove, one per line, each a number or a quote", isRequired: true)
             ]
         ),
         CookingToolSpec(
@@ -286,9 +327,44 @@ struct CookingTools {
         ),
     ]
 
+    /// What a tool call produced, told twice — because a tool result has two possible audiences
+    /// and they want different things.
+    ///
+    /// Fed back into a tool loop, the result is the model's only accurate view of the recipe
+    /// mid-turn, so it carries the resulting list. But not every caller feeds it back: the
+    /// on-device path executes tool calls and returns the results *as the reply*, and the
+    /// `<tool_call>` text fallback splices them into the answer — where an enumerated ingredient
+    /// list would be printed on screen and read out loud by the speech model. So the state echo
+    /// goes only to the model, and which audience a call site is serving is a decision the
+    /// compiler makes it state.
+    struct ToolOutcome {
+        /// Sent back as the tool result. Ends with the section as it now stands.
+        let forModel: String
+        /// Safe to show or speak: what happened, and nothing else.
+        let forUser: String
+
+        init(_ both: String) {
+            forModel = both
+            forUser = both
+        }
+
+        init(forModel: String, forUser: String) {
+            self.forModel = forModel
+            self.forUser = forUser
+        }
+    }
+
     /// Execute a tool by name with the given arguments
     @MainActor
-    func execute(toolName: String, arguments: [String: Any]) -> String {
+    func execute(toolName: String, arguments: [String: Any]) -> ToolOutcome {
+        if let outcome = executeRecipeTool(toolName: toolName, arguments: arguments) {
+            return outcome
+        }
+        return ToolOutcome(executeTimerTool(toolName: toolName, arguments: arguments))
+    }
+
+    @MainActor
+    private func executeTimerTool(toolName: String, arguments: [String: Any]) -> String {
         // `set_timer` and `pause_timer` are the names this tool set used to carry. Models copy
         // them out of their own training data and out of earlier turns in the transcript, and
         // the text-tool-call fallback parses whatever name it is handed, so both are mapped
@@ -371,76 +447,217 @@ struct CookingTools {
             }
             return "Timer '\(name)' deleted."
 
-        // The recipe tools below all end in the session's working copy, never the store — see
-        // `RecipeEditing`. Their results say so, because a model that thinks it just saved the
-        // recipe tells the user their change is safe, and it isn't until they say so on the way
-        // out.
-        case "add_ingredient":
-            guard let editor = recipeEditor else { return Self.noRecipeToEdit }
-            guard let item = string(arguments["item"]) ?? string(arguments["ingredient"]) ?? string(arguments["name"]) else {
-                return "Error: missing 'item'"
-            }
-            guard editor.addIngredient(item, at: optionalInt(arguments["position"])) else {
-                return "'\(item)' is already in the ingredients — use update_ingredient to change it."
-            }
-            return "Added '\(item)' to the ingredients."
+        default:
+            return "Unknown tool: \(toolName)"
+        }
+    }
 
-        case "update_ingredient":
+    /// The recipe tools, or nil when `toolName` is not one of them.
+    ///
+    /// These all end in the session's working copy and never the store — see ``RecipeEditing``. The
+    /// results say so to the model, because one that thinks it just saved tells the user their
+    /// change is safe, and it isn't until they say so on the way out.
+    ///
+    /// The singular tool names are the ones this set used to carry, kept for the same reason
+    /// `set_timer` is: models copy tool names out of their training data and out of earlier turns
+    /// of the transcript, and the text-tool-call fallback in `LLMService` executes whatever name it
+    /// parses. A singular call is just a batch of one.
+    @MainActor
+    private func executeRecipeTool(toolName: String, arguments: [String: Any]) -> ToolOutcome? {
+        switch toolName {
+        case "add_ingredients", "add_ingredient":
             guard let editor = recipeEditor else { return Self.noRecipeToEdit }
-            guard let item = string(arguments["item"]) ?? string(arguments["ingredient"]) else {
-                return "Error: missing 'item'"
-            }
-            guard let replacement = string(arguments["new_item"]) ?? string(arguments["newItem"]) ?? string(arguments["new_text"]) else {
-                return "Error: missing 'new_item'"
-            }
-            guard let previous = editor.replaceIngredient(matching: item, with: replacement) else {
-                return "No ingredient matching '\(item)' is in this recipe. "
-                     + "Use add_ingredient if it should be."
-            }
-            return "Changed '\(previous)' to '\(replacement)'."
+            let items = lines(from: arguments, keys: ["items", "item", "ingredients", "ingredient", "name"])
+            guard !items.isEmpty else { return ToolOutcome("Error: missing 'items'") }
 
-        case "remove_ingredient":
-            guard let editor = recipeEditor else { return Self.noRecipeToEdit }
-            guard let item = string(arguments["item"]) ?? string(arguments["ingredient"]) ?? string(arguments["name"]) else {
-                return "Error: missing 'item'"
+            var added: [String] = []
+            var alreadyThere: [String] = []
+            // Walked forward so a batch given a position keeps its own order rather than
+            // stacking up reversed at the insertion point.
+            var position = optionalInt(arguments["position"])
+            for item in items {
+                switch editor.addIngredient(item, at: position) {
+                case .added:
+                    added.append(item)
+                    position = position.map { $0 + 1 }
+                case .alreadyPresent:
+                    alreadyThere.append(item)
+                case .rejected:
+                    continue
+                }
             }
-            guard let removed = editor.removeIngredient(matching: item) else {
-                return "No ingredient matching '\(item)' is in this recipe."
-            }
-            return "Removed '\(removed)' from the ingredients."
 
-        case "add_step":
-            guard let editor = recipeEditor else { return Self.noRecipeToEdit }
-            guard let text = string(arguments["text"]) ?? string(arguments["step"]) ?? string(arguments["instruction"]) else {
-                return "Error: missing 'text'"
+            var sentences: [String] = []
+            if !added.isEmpty { sentences.append("Added \(Self.quoted(added)) to the ingredients.") }
+            if !alreadyThere.isEmpty {
+                sentences.append("\(Self.quoted(alreadyThere)) \(alreadyThere.count == 1 ? "was" : "were") already listed, so nothing needed doing there.")
             }
-            guard editor.addStep(text, at: optionalInt(arguments["position"])) else {
-                return "That step is already in the method."
-            }
-            return "Added the step '\(text)'."
+            if sentences.isEmpty { sentences.append("Nothing was recorded — no ingredient text came through.") }
+            return Self.recipeOutcome(
+                sentences,
+                state: Self.currentList("Ingredients", editor.currentIngredients, numbered: false),
+                changed: !added.isEmpty
+            )
 
-        case "update_step":
+        case "update_ingredients", "update_ingredient":
             guard let editor = recipeEditor else { return Self.noRecipeToEdit }
-            guard let step = string(arguments["step"]) ?? string(arguments["text"]) else {
-                return "Error: missing 'step'"
+            let requested = changes(
+                from: arguments,
+                listKeys: ["changes", "updates", "items", "ingredients"],
+                fromKeys: ["item", "ingredient", "old", "from"],
+                toKeys: ["new_item", "newItem", "new_text", "newText", "new", "to"]
+            )
+            guard !requested.pairs.isEmpty || !requested.unparsed.isEmpty else {
+                return ToolOutcome("Error: missing 'changes'")
             }
-            guard let replacement = string(arguments["new_text"]) ?? string(arguments["newText"]) ?? string(arguments["new_step"]) else {
-                return "Error: missing 'new_text'"
-            }
-            guard let previous = editor.replaceStep(matching: step, with: replacement) else {
-                return "No step matching '\(step)' is in this recipe. Use add_step if it should be."
-            }
-            return "Changed the step '\(previous)' to '\(replacement)'."
 
-        case "remove_step":
+            var changed: [String] = []
+            var unmatched: [String] = []
+            for change in requested.pairs {
+                if let previous = editor.replaceIngredient(matching: change.from, with: change.to) {
+                    changed.append("'\(previous)' to '\(change.to)'")
+                } else {
+                    unmatched.append(change.from)
+                }
+            }
+
+            var sentences: [String] = []
+            if !changed.isEmpty { sentences.append("Changed \(changed.joined(separator: ", and ")).") }
+            if !unmatched.isEmpty {
+                sentences.append("No ingredient matched \(Self.quoted(unmatched)) — use add_ingredients if \(unmatched.count == 1 ? "it" : "they") should be listed.")
+            }
+            if !requested.unparsed.isEmpty {
+                sentences.append("\(Self.quoted(requested.unparsed)) had no replacement in \(requested.unparsed.count == 1 ? "it" : "them") — write each change as 'existing line -> replacement line'.")
+            }
+            return Self.recipeOutcome(
+                sentences,
+                state: Self.currentList("Ingredients", editor.currentIngredients, numbered: false),
+                changed: !changed.isEmpty
+            )
+
+        case "remove_ingredients", "remove_ingredient":
             guard let editor = recipeEditor else { return Self.noRecipeToEdit }
-            guard let step = string(arguments["step"]) ?? string(arguments["text"]) else {
-                return "Error: missing 'step'"
+            let items = lines(from: arguments, keys: ["items", "item", "ingredients", "ingredient", "name"])
+            guard !items.isEmpty else { return ToolOutcome("Error: missing 'items'") }
+
+            var removed: [String] = []
+            var unmatched: [String] = []
+            for item in items {
+                if let line = editor.removeIngredient(matching: item) {
+                    removed.append(line)
+                } else {
+                    unmatched.append(item)
+                }
             }
-            guard let removed = editor.removeStep(matching: step) else {
-                return "No step matching '\(step)' is in this recipe."
+
+            var sentences: [String] = []
+            if !removed.isEmpty { sentences.append("Removed \(Self.quoted(removed)) from the ingredients.") }
+            if !unmatched.isEmpty {
+                // Not an error, for the same reason a duplicate add isn't: whatever the model
+                // was aiming at is not in the recipe, which is the state it was asking for.
+                sentences.append("\(Self.quoted(unmatched)) \(unmatched.count == 1 ? "was" : "were") not listed, so there was nothing to remove.")
             }
-            return "Removed the step '\(removed)'."
+            return Self.recipeOutcome(
+                sentences,
+                state: Self.currentList("Ingredients", editor.currentIngredients, numbered: false),
+                changed: !removed.isEmpty
+            )
+
+        case "add_steps", "add_step":
+            guard let editor = recipeEditor else { return Self.noRecipeToEdit }
+            let steps = lines(from: arguments, keys: ["steps", "step", "items", "text", "instruction", "instructions"])
+            guard !steps.isEmpty else { return ToolOutcome("Error: missing 'steps'") }
+
+            var added: [String] = []
+            var alreadyThere: [String] = []
+            var position = optionalInt(arguments["position"])
+            for step in steps {
+                switch editor.addStep(step, at: position) {
+                case .added:
+                    added.append(step)
+                    position = position.map { $0 + 1 }
+                case .alreadyPresent:
+                    alreadyThere.append(step)
+                case .rejected:
+                    continue
+                }
+            }
+
+            var sentences: [String] = []
+            if !added.isEmpty { sentences.append("Added \(added.count == 1 ? "the step" : "the steps") \(Self.quoted(added)).") }
+            if !alreadyThere.isEmpty {
+                sentences.append("\(Self.quoted(alreadyThere)) \(alreadyThere.count == 1 ? "was" : "were") already in the method, so nothing needed doing there.")
+            }
+            if sentences.isEmpty { sentences.append("Nothing was recorded — no step text came through.") }
+            return Self.recipeOutcome(
+                sentences,
+                state: Self.currentList("Steps", editor.currentSteps, numbered: true),
+                changed: !added.isEmpty
+            )
+
+        case "update_steps", "update_step":
+            guard let editor = recipeEditor else { return Self.noRecipeToEdit }
+            let requested = changes(
+                from: arguments,
+                listKeys: ["changes", "updates", "steps", "items"],
+                fromKeys: ["step", "text", "old", "from"],
+                toKeys: ["new_text", "newText", "new_step", "newStep", "new", "to"]
+            )
+            guard !requested.pairs.isEmpty || !requested.unparsed.isEmpty else {
+                return ToolOutcome("Error: missing 'changes'")
+            }
+
+            var changed: [String] = []
+            var unmatched: [String] = []
+            for change in requested.pairs {
+                if let previous = editor.replaceStep(matching: change.from, with: change.to) {
+                    changed.append("'\(previous)' to '\(change.to)'")
+                } else {
+                    unmatched.append(change.from)
+                }
+            }
+
+            var sentences: [String] = []
+            if !changed.isEmpty { sentences.append("Changed \(changed.joined(separator: ", and ")).") }
+            if !unmatched.isEmpty {
+                sentences.append("No step matched \(Self.quoted(unmatched)) — use add_steps if \(unmatched.count == 1 ? "it" : "they") should be in the method.")
+            }
+            if !requested.unparsed.isEmpty {
+                sentences.append("\(Self.quoted(requested.unparsed)) had no replacement in \(requested.unparsed.count == 1 ? "it" : "them") — write each change as 'step number or quote -> replacement step'.")
+            }
+            return Self.recipeOutcome(
+                sentences,
+                state: Self.currentList("Steps", editor.currentSteps, numbered: true),
+                changed: !changed.isEmpty
+            )
+
+        case "remove_steps", "remove_step":
+            guard let editor = recipeEditor else { return Self.noRecipeToEdit }
+            let steps = lines(from: arguments, keys: ["steps", "step", "items", "text"])
+            guard !steps.isEmpty else { return ToolOutcome("Error: missing 'steps'") }
+
+            // Highest position first: removing step 2 renumbers step 3, so a batch given as
+            // numbers and applied in order would take out the wrong lines after the first.
+            var removed: [String] = []
+            var unmatched: [String] = []
+            for step in Self.numberedLast(steps) {
+                if let line = editor.removeStep(matching: step) {
+                    removed.append(line)
+                } else {
+                    unmatched.append(step)
+                }
+            }
+
+            var sentences: [String] = []
+            if !removed.isEmpty { sentences.append("Removed \(removed.count == 1 ? "the step" : "the steps") \(Self.quoted(removed)).") }
+            if !unmatched.isEmpty {
+                sentences.append("No step matched \(Self.quoted(unmatched)), so there was nothing to remove there.")
+            }
+            return Self.recipeOutcome(
+                sentences,
+                state: Self.currentList("Steps", editor.currentSteps, numbered: true),
+                changed: !removed.isEmpty
+            )
 
         case "set_recipe_details":
             guard let editor = recipeEditor else { return Self.noRecipeToEdit }
@@ -460,17 +677,18 @@ struct CookingTools {
                 tags: tags
             )
             guard !applied.isEmpty else {
-                return "Nothing changed — give at least one detail to set."
+                return ToolOutcome("Nothing changed — give at least one detail to set.")
             }
-            return applied.joined(separator: " ")
+            // `setRecipeDetails` already ends its report with the not-saved reminder.
+            return ToolOutcome(applied.joined(separator: " "))
 
         default:
-            return "Unknown tool: \(toolName)"
+            return nil
         }
     }
 
     private static let noRecipeToEdit =
-        "There is no recipe open to edit in this session."
+        ToolOutcome("There is no recipe open to edit in this session.")
 
     // MARK: - Argument coercion
 
@@ -518,5 +736,199 @@ struct CookingTools {
         if minutes > 0 && remainder > 0 { return "\(minutePart) and \(secondPart)" }
         if minutes > 0 { return minutePart }
         return secondPart
+    }
+
+    // MARK: - List arguments
+
+    private static let bulletRegex = try? NSRegularExpression(
+        pattern: "^\\s*(?:[-*•\u{2022}]|\\d+[.)])\\s+"
+    )
+
+    /// The entries of a list argument, from whichever of `keys` the model actually used.
+    ///
+    /// Declared as one string in the schema — see ``recipeToolSpecs`` for why there is no array
+    /// type to declare — so the entries arrive newline-separated. Semicolons are accepted too,
+    /// because a model told "one per line" inside a JSON string argument will sometimes reach for
+    /// the separator that needs no escaping. A real JSON array is read as well: the schema says
+    /// string, and models send arrays anyway.
+    ///
+    /// Commas are deliberately *not* separators. "two cloves of garlic, minced" is one ingredient,
+    /// and splitting it would put 'minced' in the recipe as an ingredient of its own.
+    private func lines(from arguments: [String: Any], keys: [String]) -> [String] {
+        for key in keys {
+            guard let value = arguments[key] else { continue }
+
+            if let array = value as? [Any] {
+                let entries = array.compactMap { string($0).map(Self.strippingBullet) }.filter { !$0.isEmpty }
+                if !entries.isEmpty { return entries }
+            }
+
+            if let text = string(value) {
+                let entries = text
+                    .split(whereSeparator: { $0 == "\n" || $0 == ";" })
+                    .map { Self.strippingBullet(String($0)) }
+                    .filter { !$0.isEmpty }
+                if !entries.isEmpty { return entries }
+            }
+        }
+        return []
+    }
+
+    /// A list marker a model wrote as prose — "1. ", "- ", "• " — is markup, not part of the line.
+    ///
+    /// The digit form requires the space after the dot, so "1.5 litres of stock" survives intact.
+    private static func strippingBullet(_ line: String) -> String {
+        let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let regex = bulletRegex else { return trimmed }
+        let range = NSRange(trimmed.startIndex..., in: trimmed)
+        guard let match = regex.firstMatch(in: trimmed, range: range),
+              let matched = Range(match.range, in: trimmed)
+        else { return trimmed }
+        return String(trimmed[matched.upperBound...]).trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    /// One requested rewrite: the line to find, and what it becomes.
+    struct RequestedChange {
+        let from: String
+        let to: String
+    }
+
+    /// What an update tool was asked to change, and what it couldn't make sense of.
+    ///
+    /// Unparsed entries are carried rather than dropped so the result can name them. A change the
+    /// model wrote without an arrow, answered with silence, is a change it believes it made.
+    struct RequestedChanges {
+        let pairs: [RequestedChange]
+        let unparsed: [String]
+    }
+
+    /// The arrows a model uses to mean "becomes". Longest first: `->` matches inside `-->`, and
+    /// finding it there would leave a stray dash on the end of the line being looked for.
+    private static let changeArrows = ["-->", "->", "=>", "→"]
+
+    /// Reads the batch form ("existing -> replacement", one per line), the old two-argument form,
+    /// and a JSON array of objects, since a model that ignores the schema tends to reach for one
+    /// of the other two.
+    private func changes(
+        from arguments: [String: Any],
+        listKeys: [String],
+        fromKeys: [String],
+        toKeys: [String]
+    ) -> RequestedChanges {
+        // The two-argument form first: a model that sent both fields meant exactly one change,
+        // and the same words may well also appear in a `changes` string it padded the call with.
+        if let source = fromKeys.compactMap({ string(arguments[$0]) }).first,
+           let target = toKeys.compactMap({ string(arguments[$0]) }).first {
+            return RequestedChanges(pairs: [RequestedChange(from: source, to: target)], unparsed: [])
+        }
+
+        for key in listKeys {
+            guard let value = arguments[key] else { continue }
+
+            if let array = value as? [Any] {
+                var pairs: [RequestedChange] = []
+                var unparsed: [String] = []
+                for element in array {
+                    if let object = element as? [String: Any],
+                       let source = fromKeys.compactMap({ string(object[$0]) }).first,
+                       let target = toKeys.compactMap({ string(object[$0]) }).first {
+                        pairs.append(RequestedChange(from: source, to: target))
+                    } else if let line = string(element) {
+                        Self.appendChange(from: line, to: &pairs, unparsed: &unparsed)
+                    }
+                }
+                if !pairs.isEmpty || !unparsed.isEmpty {
+                    return RequestedChanges(pairs: pairs, unparsed: unparsed)
+                }
+            }
+
+            if let text = string(value) {
+                var pairs: [RequestedChange] = []
+                var unparsed: [String] = []
+                for line in text.split(whereSeparator: { $0 == "\n" }) {
+                    Self.appendChange(from: Self.strippingBullet(String(line)), to: &pairs, unparsed: &unparsed)
+                }
+                if !pairs.isEmpty || !unparsed.isEmpty {
+                    return RequestedChanges(pairs: pairs, unparsed: unparsed)
+                }
+            }
+        }
+
+        return RequestedChanges(pairs: [], unparsed: [])
+    }
+
+    private static func appendChange(
+        from line: String,
+        to pairs: inout [RequestedChange],
+        unparsed: inout [String]
+    ) {
+        guard !line.isEmpty else { return }
+        for arrow in changeArrows {
+            guard let range = line.range(of: arrow) else { continue }
+            let source = String(line[..<range.lowerBound]).trimmingCharacters(in: .whitespacesAndNewlines)
+            let target = String(line[range.upperBound...]).trimmingCharacters(in: .whitespacesAndNewlines)
+            if !source.isEmpty && !target.isEmpty {
+                pairs.append(RequestedChange(from: source, to: target))
+            } else {
+                unparsed.append(line)
+            }
+            return
+        }
+        unparsed.append(line)
+    }
+
+    // MARK: - Reporting
+
+    private static let notSavedYet =
+        "Nothing is saved until the user chooses to keep it at the end of the cook."
+
+    /// One recipe edit's result, told to both audiences.
+    ///
+    /// The user hears what happened. The model gets that plus the resulting list, and — when
+    /// something actually moved — the reminder that none of it is saved, which it needs and the
+    /// user must not be told, since the answer to "is my change safe" is still no.
+    private static func recipeOutcome(_ sentences: [String], state: String, changed: Bool) -> ToolOutcome {
+        let spoken = sentences.joined(separator: " ")
+        var forModel = [spoken, state]
+        if changed { forModel.append(notSavedYet) }
+        return ToolOutcome(forModel: forModel.joined(separator: " "), forUser: spoken)
+    }
+
+    private static func quoted(_ items: [String]) -> String {
+        let quoted = items.map { "'\($0)'" }
+        guard quoted.count > 1 else { return quoted.first ?? "" }
+        return quoted.dropLast().joined(separator: ", ") + " and " + quoted[quoted.count - 1]
+    }
+
+    /// The section as it now stands, appended to every recipe tool result.
+    ///
+    /// This is what keeps a tool loop from arguing with itself. The recipe in the system prompt is
+    /// a snapshot from when the user's message arrived, so mid-turn it still says "none written
+    /// down yet" while the model has already recorded three ingredients — and a model reading that
+    /// contradiction records them again. Whatever else a result says, it ends with the truth.
+    private static func currentList(_ label: String, _ lines: [String], numbered: Bool) -> String {
+        guard !lines.isEmpty else { return "\(label) now: none." }
+        let body = numbered
+            ? lines.enumerated().map { "\($0.offset + 1). \($0.element)" }.joined(separator: "; ")
+            : lines.joined(separator: "; ")
+        return "\(label) now: \(body)."
+    }
+
+    /// The entries reordered so that anything written as a bare position comes last, highest
+    /// first. Removing step 2 renumbers everything below it, so a batch of numbers applied in the
+    /// order given takes out the wrong lines after the first one. Quotes are unaffected by
+    /// renumbering and keep their order.
+    private static func numberedLast(_ entries: [String]) -> [String] {
+        func position(_ entry: String) -> Int? {
+            let digits = entry.lowercased()
+                .replacingOccurrences(of: "step", with: "")
+                .replacingOccurrences(of: "#", with: "")
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            return Int(digits)
+        }
+        let quotes = entries.filter { position($0) == nil }
+        let numbers = entries.filter { position($0) != nil }
+            .sorted { (position($0) ?? 0) > (position($1) ?? 0) }
+        return quotes + numbers
     }
 }
