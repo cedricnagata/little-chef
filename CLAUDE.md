@@ -18,7 +18,7 @@ Two ways in, and nothing else:
 `concurrency: testflight-ios` with `cancel-in-progress: false` so two uploads can
 never race for the same build number.
 
-### Signing style: automatic archive, manual export — and why
+### Signing style: unsigned archive, manual export — and why
 
 This project has **two signable targets**, `little-chef`
 (`NagataInc.little-chef`) and `TimerWidgetExtension`
@@ -26,11 +26,26 @@ This project has **two signable targets**, `little-chef`
 
 `xcodebuild` command-line build settings apply to *every target at once*, so manual
 signing cannot hand the app and its widget different profiles from the command line.
-**Archive** therefore signs automatically: `-allowProvisioningUpdates` with
-`-authenticationKeyPath/-authenticationKeyID/-authenticationKeyIssuerID`. It signs
-with an **Apple Development** identity (which it created via the API, and reuses) and
-Xcode-managed `iOS Team Provisioning Profile`s. That is expected — an archive is not
-the shipping artifact.
+`ExportOptions.plist` is the only place that per-target mapping can be expressed —
+so **export owns signing outright, and archive does none at all**:
+
+```
+CODE_SIGN_STYLE=Manual CODE_SIGN_IDENTITY="" PROVISIONING_PROFILE_SPECIFIER="" \
+CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO
+```
+
+All five matter. `CODE_SIGNING_ALLOWED=NO` on its own still leaves automatic signing
+to resolve a profile — and fail — before it gets as far as not signing; blanking the
+identity and specifier under `Manual` is what stops the lookup happening.
+
+Archive used to sign automatically, via `-allowProvisioningUpdates` and the
+`-authenticationKey*` trio. That asks Apple to mint an **Apple Development**
+certificate over the API — an account-global, *capped* mutation performed on every
+run, for an identity the build never ships, since export re-signs everything minutes
+later anyway. The account duly reached its certificate limit and every archive
+failed with `Choose a certificate to revoke`, followed by
+`No profiles for '<id>' were found` as the downstream symptom. Not signing needs no
+certificate, so the cap cannot be reached.
 
 **Export** is where distribution signing happens, and it is **manual**. The two App
 Store profiles are installed on the runner and named explicitly in
@@ -48,8 +63,13 @@ signing fails with `Cloud signing permission error`, followed by
 to Admin would fix it, at the cost of an account-wide credential in CI and a second,
 cloud-managed distribution certificate. We chose explicit profiles instead.
 
-Net effect: CI creates no distribution certificates and mints no distribution
-profiles. Archive still reuses the API-created development certificate.
+Net effect: **CI creates nothing at Apple.** No certificates of either kind, no
+profiles. The only signing identity in play is the Apple Distribution certificate
+imported from `IOS_DIST_CERT_P12_BASE64` — so revoking that one breaks the deploy,
+where revoking anything else no longer can.
+
+The App Store Connect key is still needed, but only for `altool` at the **upload**
+step. Nothing in archive or export authenticates to Apple any more.
 
 ### Build numbers
 
@@ -125,11 +145,12 @@ Read the error before changing anything; these look alike and aren't.
 | **409 `INVALID_APP_STATE`** | App record deleted/removed in App Store Connect. **Not** a signing problem — check the bundle ID against the live record |
 | **409 `VALIDATION_ERROR`**, "SDK version issue" | Runner's Xcode too old; see the `macos-26` invariant |
 | **409**, "bundle version must be higher" | `BUILD_NUMBER_OFFSET` too low |
-| `error: … is Xcode managed` at **Archive** | A managed profile met manual signing. This project signs automatically; something regressed the signing style |
-| `error: … doesn't include signing certificate` at **Archive** | Profile predates the certificate. Delete the profile in the portal and let CI remint it |
+| Any **certificate or profile** error at **Archive** | Archive signs nothing. Something regressed the signing style — check all five `CODE_SIGN*` settings are still on the `xcodebuild archive` line, and that no `-allowProvisioningUpdates`/`-authenticationKey*` crept back in |
+| `Choose a certificate to revoke` | The account is at its certificate cap. Should now be unreachable from CI; if it appears, something is minting certificates again |
+| `error: … doesn't include signing certificate` at **Export** | The stored profile predates the distribution certificate, or that certificate was revoked. Regenerate the profile against the current one and re-store both secrets |
 | `security import` fails on empty input | Secrets set on an environment the job doesn't declare |
 | `Cloud signing permission error` + `No profiles for '<id>' were found` at **Export** | Export fell back to cloud signing. Check `signingStyle` is `manual` and that no `-allowProvisioningUpdates`/`-authenticationKey*` reached `-exportArchive`. **Not** a missing-profile problem — the lookup was denied, not empty |
-| `Invalid authentication key credential … invalidPEMDocument` at **Archive** | `ASC_KEY_P8_BASE64` decodes to something that isn't a PEM — usually the base64 body saved without its `-----BEGIN PRIVATE KEY-----` delimiters. **Not** an auth failure. Validate with `openssl pkey -noout -in key.p8` (not `openssl pkcs8 … -noout`, which has no such flag in LibreSSL or OpenSSL 3 and rejects every key) |
+| `Invalid authentication key credential … invalidPEMDocument` at **Upload** | `ASC_KEY_P8_BASE64` decodes to something that isn't a PEM — usually the base64 body saved without its `-----BEGIN PRIVATE KEY-----` delimiters. **Not** an auth failure. Validate with `openssl pkey -noout -in key.p8` (not `openssl pkcs8 … -noout`, which has no such flag in LibreSSL or OpenSSL 3 and rejects every key) |
 | Profile name mismatch at **Export** | `IOS_PROFILE_*_NAME` must be the profile's **Name** field, not its filename or UUID |
 | `doesn't support the Push Notifications capability` / `entitlement 'aps-environment' … not present in profile` | The App ID or the stored profile predates the Push Notifications capability CloudKit needs. See **CloudKit sync** below |
 

@@ -126,11 +126,24 @@ jobs:
             rm -f "$RUNNER_TEMP/$name.mobileprovision"
           done
 
+      # Archived unsigned, on purpose. Export is what signs, and it signs for
+      # distribution with the explicit profiles below — so any identity the archive
+      # applied would be thrown away and re-signed over minutes later.
+      #
+      # Signing here used to be automatic, which asks Apple to mint an Apple
+      # Development certificate over the API. That is an account-global, capped
+      # mutation performed on every run to obtain an identity this build never
+      # ships: the account reached its certificate limit and every archive failed
+      # with "Choose a certificate to revoke", then "No profiles ... were found" as
+      # the downstream symptom. Not signing needs no certificate, so the cap cannot
+      # be reached and CI now creates nothing at Apple at all.
+      #
+      # CODE_SIGN_STYLE=Manual with the identity and profile blanked is what stops
+      # Xcode resolving a profile anyway: CODE_SIGNING_ALLOWED=NO alone still leaves
+      # automatic signing to look one up, and fail for the same reason.
       - name: Archive
         env:
           TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
-          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
-          ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
           # Build numbers must strictly increase within a MARKETING_VERSION train.
           # Bump this if you ever upload by hand; reset to 0 when MARKETING_VERSION moves.
           BUILD_NUMBER_OFFSET: ${{ vars.BUILD_NUMBER_OFFSET || 0 }}
@@ -147,12 +160,12 @@ jobs:
             -configuration Release \
             -destination 'generic/platform=iOS' \
             -archivePath "$ARCHIVE_PATH" \
-            -allowProvisioningUpdates \
-            -authenticationKeyPath "$ASC_KEY_PATH" \
-            -authenticationKeyID "$ASC_KEY_ID" \
-            -authenticationKeyIssuerID "$ASC_ISSUER_ID" \
             DEVELOPMENT_TEAM="$TEAM_ID" \
-            CODE_SIGN_STYLE=Automatic \
+            CODE_SIGN_STYLE=Manual \
+            CODE_SIGN_IDENTITY="" \
+            PROVISIONING_PROFILE_SPECIFIER="" \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
             CURRENT_PROJECT_VERSION="$BUILD"
 
       - name: Export IPA
