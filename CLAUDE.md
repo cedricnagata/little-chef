@@ -18,25 +18,43 @@ Two ways in, and nothing else:
 `concurrency: testflight-ios` with `cancel-in-progress: false` so two uploads can
 never race for the same build number.
 
-### Signing style: unsigned archive, manual export — and why
+### Signing style: manual at both archive and export — and why
 
 This project has **two signable targets**, `little-chef`
 (`NagataInc.little-chef`) and `TimerWidgetExtension`
 (`NagataInc.little-chef.TimerWidget`). Each needs its own provisioning profile.
 
-`xcodebuild` command-line build settings apply to *every target at once*, so manual
-signing cannot hand the app and its widget different profiles from the command line.
-`ExportOptions.plist` is the only place that per-target mapping can be expressed —
-so **export owns signing outright, and archive does none at all**:
+**Both steps sign, both manually, and neither asks Apple for anything.** The
+distribution certificate and both App Store profiles are put on the runner by earlier
+steps, so signing consumes what is already there and mints nothing.
 
-```
-CODE_SIGN_STYLE=Manual CODE_SIGN_IDENTITY="" PROVISIONING_PROFILE_SPECIFIER="" \
-CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO
-```
+**Archive must not skip signing.** Entitlements live *inside* a code signature, so an
+unsigned archive carries none — and `-exportArchive` re-signs from the bundle's
+**existing** entitlements rather than reading them out of the profile. Given an empty
+set it emits an empty set: the IPA ships with only `application-identifier`,
+`team-identifier`, `beta-reports-active` and `get-task-allow`, losing iCloud, push and
+the app group even though the embedded profile still grants all three. Build 18 shipped
+exactly that and crashed on launch — see the entitlements row in the failure table
+below. Check any build with
+`codesign -d --entitlements :- Payload/little-chef.app` on the exported IPA; the
+artifact upload keeps one from every run.
 
-All five matter. `CODE_SIGNING_ALLOWED=NO` on its own still leaves automatic signing
-to resolve a profile — and fail — before it gets as far as not signing; blanking the
-identity and specifier under `Manual` is what stops the lookup happening.
+The **per-target profile mapping lives in the project**, on the `Release` config of
+each of the two targets (`CODE_SIGN_STYLE = Manual`, `CODE_SIGN_IDENTITY = "Apple
+Distribution"`, `PROVISIONING_PROFILE_SPECIFIER` = the profile name). It cannot go on
+the `xcodebuild` command line: build settings there apply to *every* target at once,
+including the SPM package targets, which reject it outright with `<target> does not
+support provisioning profiles`. Ad-hoc signing is not an escape hatch either —
+`Ad Hoc code signing is not allowed with SDK 'iOS 26.x'` — and signing with a real
+certificate but no profile fails on `requires a provisioning profile with the App
+Groups, iCloud, and Push Notifications features`, since entitlements have to be backed
+by a profile that grants them.
+
+Only `Release` is manual. `Debug` stays on automatic signing with a development
+certificate, so ordinary development needs none of this. A local *Release* build or an
+Xcode archive does: it needs the two manually-managed App Store profiles installed, and
+an Xcode-managed profile for the same App ID will not substitute — it fails with `is
+Xcode managed, but signing settings require a manually managed profile`.
 
 Archive used to sign automatically, via `-allowProvisioningUpdates` and the
 `-authenticationKey*` trio. That asks Apple to mint an **Apple Development**
@@ -44,8 +62,11 @@ certificate over the API — an account-global, *capped* mutation performed on e
 run, for an identity the build never ships, since export re-signs everything minutes
 later anyway. The account duly reached its certificate limit and every archive
 failed with `Choose a certificate to revoke`, followed by
-`No profiles for '<id>' were found` as the downstream symptom. Not signing needs no
-certificate, so the cap cannot be reached.
+`No profiles for '<id>' were found` as the downstream symptom. Manual signing against
+an already-installed profile mints nothing, so the cap cannot be reached. **Do not
+reintroduce `-allowProvisioningUpdates` or `-authenticationKey*` at archive** — those,
+not signing as such, were the cause. Skipping signing altogether also fixes the cap,
+and is what shipped build 18 without entitlements; that cure is worse than the disease.
 
 **Export** is where distribution signing happens, and it is **manual**. The two App
 Store profiles are installed on the runner and named explicitly in
@@ -102,6 +123,11 @@ fail confusingly mid-run.
 
 Plus repository **variable** `BUILD_NUMBER_OFFSET`.
 
+Their **Name** fields are currently `NagataInc.little-chef` and
+`NagataInc.little-chef.TimerWidget` — the same strings the two `Release` configs carry
+as `PROVISIONING_PROFILE_SPECIFIER`, since archive resolves profiles by name from the
+project while export resolves them by name from these secrets.
+
 Both profiles must be **App Store** distribution profiles bound to the Apple
 Distribution certificate above, and must **not** be Xcode-managed. Verify one before
 wiring it into a secret with
@@ -145,13 +171,16 @@ Read the error before changing anything; these look alike and aren't.
 | **409 `INVALID_APP_STATE`** | App record deleted/removed in App Store Connect. **Not** a signing problem — check the bundle ID against the live record |
 | **409 `VALIDATION_ERROR`**, "SDK version issue" | Runner's Xcode too old; see the `macos-26` invariant |
 | **409**, "bundle version must be higher" | `BUILD_NUMBER_OFFSET` too low |
-| Any **certificate or profile** error at **Archive** | Archive signs nothing. Something regressed the signing style — check all five `CODE_SIGN*` settings are still on the `xcodebuild archive` line, and that no `-allowProvisioningUpdates`/`-authenticationKey*` crept back in |
+| **App launches from TestFlight and crashes immediately**, but the same code runs fine from Xcode | The IPA lost its entitlements — almost certainly because something made **Archive** stop signing. `codesign -d --entitlements :- Payload/little-chef.app`: if iCloud, `aps-environment` and the app group are absent, that's it. The crash is `LocalDataManager` opening the CloudKit-backed store in `App.init()`; its local-only fallback catches Swift errors and this arrives as an ObjC exception, so it aborts. **Not** a code bug — see the signing-style section |
+| Any **certificate or profile** error at **Archive** | Archive signs manually against the profiles installed earlier in the job. Check the `Release` config of both targets still names its profile, that both profiles installed, and that no `-allowProvisioningUpdates`/`-authenticationKey*` crept back in. Do **not** "fix" this by disabling signing — that ships an app with no entitlements |
+| `<target> does not support provisioning profiles` (an SPM package target) | A signing setting was put on the `xcodebuild` command line, where it hits every target. Per-target signing belongs in the project's `Release` configs |
+| `is Xcode managed, but signing settings require a manually managed profile` | An Xcode-managed profile is installed under the name the `Release` config asks for. The App Store profiles in `IOS_PROFILE_*_BASE64` must be manually created |
 | `Choose a certificate to revoke` | The account is at its certificate cap. Should now be unreachable from CI; if it appears, something is minting certificates again |
 | `error: … doesn't include signing certificate` at **Export** | The stored profile predates the distribution certificate, or that certificate was revoked. Regenerate the profile against the current one and re-store both secrets |
 | `security import` fails on empty input | Secrets set on an environment the job doesn't declare |
 | `Cloud signing permission error` + `No profiles for '<id>' were found` at **Export** | Export fell back to cloud signing. Check `signingStyle` is `manual` and that no `-allowProvisioningUpdates`/`-authenticationKey*` reached `-exportArchive`. **Not** a missing-profile problem — the lookup was denied, not empty |
 | `Invalid authentication key credential … invalidPEMDocument` at **Upload** | `ASC_KEY_P8_BASE64` decodes to something that isn't a PEM — usually the base64 body saved without its `-----BEGIN PRIVATE KEY-----` delimiters. **Not** an auth failure. Validate with `openssl pkey -noout -in key.p8` (not `openssl pkcs8 … -noout`, which has no such flag in LibreSSL or OpenSSL 3 and rejects every key) |
-| Profile name mismatch at **Export** | `IOS_PROFILE_*_NAME` must be the profile's **Name** field, not its filename or UUID |
+| Profile name mismatch at **Export** | `IOS_PROFILE_*_NAME` must be the profile's **Name** field, not its filename or UUID. The same name is also hardcoded as `PROVISIONING_PROFILE_SPECIFIER` in each target's `Release` config for the archive — rename a profile and **both** have to move |
 | `doesn't support the Push Notifications capability` / `entitlement 'aps-environment' … not present in profile` | The App ID or the stored profile predates the Push Notifications capability CloudKit needs. See **CloudKit sync** below |
 
 Inspect a run:

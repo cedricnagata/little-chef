@@ -126,21 +126,27 @@ jobs:
             rm -f "$RUNNER_TEMP/$name.mobileprovision"
           done
 
-      # Archived unsigned, on purpose. Export is what signs, and it signs for
-      # distribution with the explicit profiles below — so any identity the archive
-      # applied would be thrown away and re-signed over minutes later.
+      # Archive signs manually, with the distribution certificate imported above and
+      # the two App Store profiles installed above. Both are already on the runner, so
+      # nothing is requested from Apple and no certificate is minted — which is what
+      # matters here. Archive used to sign automatically via -allowProvisioningUpdates,
+      # asking Apple for an Apple Development certificate on every run; that is an
+      # account-global, capped mutation, the account hit the cap, and every archive
+      # failed with "Choose a certificate to revoke" then "No profiles ... were found".
+      # Do not reintroduce -allowProvisioningUpdates or -authenticationKey* here.
       #
-      # Signing here used to be automatic, which asks Apple to mint an Apple
-      # Development certificate over the API. That is an account-global, capped
-      # mutation performed on every run to obtain an identity this build never
-      # ships: the account reached its certificate limit and every archive failed
-      # with "Choose a certificate to revoke", then "No profiles ... were found" as
-      # the downstream symptom. Not signing needs no certificate, so the cap cannot
-      # be reached and CI now creates nothing at Apple at all.
+      # Archive must NOT skip signing. Entitlements live inside a code signature, so an
+      # unsigned archive carries none — and -exportArchive re-signs from the bundle's
+      # existing entitlements rather than reading them out of the profile, so it emits
+      # an empty set and ships an app with no iCloud, push or app-group entitlement.
+      # That reaches TestFlight as a launch crash: the CloudKit-backed SwiftData store
+      # opens in App.init(), and CoreData raises an ObjC exception the Swift fallback in
+      # LocalDataManager cannot catch. Build 18 shipped exactly that.
       #
-      # CODE_SIGN_STYLE=Manual with the identity and profile blanked is what stops
-      # Xcode resolving a profile anyway: CODE_SIGNING_ALLOWED=NO alone still leaves
-      # automatic signing to look one up, and fail for the same reason.
+      # The per-target profile mapping lives in the project's Release configs, not here:
+      # xcodebuild build settings apply to every target at once, and setting
+      # PROVISIONING_PROFILE_SPECIFIER globally also hits the SPM package targets, which
+      # reject it ("... does not support provisioning profiles").
       - name: Archive
         env:
           TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
@@ -161,11 +167,6 @@ jobs:
             -destination 'generic/platform=iOS' \
             -archivePath "$ARCHIVE_PATH" \
             DEVELOPMENT_TEAM="$TEAM_ID" \
-            CODE_SIGN_STYLE=Manual \
-            CODE_SIGN_IDENTITY="" \
-            PROVISIONING_PROFILE_SPECIFIER="" \
-            CODE_SIGNING_ALLOWED=NO \
-            CODE_SIGNING_REQUIRED=NO \
             CURRENT_PROJECT_VERSION="$BUILD"
 
       - name: Export IPA
