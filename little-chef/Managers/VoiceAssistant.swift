@@ -297,9 +297,11 @@ final class VoiceAssistant: NSObject, ObservableObject {
             .sink { [weak self] phase in
                 guard let self else { return }
                 self.phase = Self.map(phase)
-                // A finished turn releases the bubble so the next one starts a fresh pair.
-                // Both resting phases count: with no follow-up window a turn goes straight
-                // back to `.armed` without passing through `.listening`.
+                // A finished turn releases the bubble. Not what starts the next pair — the
+                // transcript does that — but it stops a tool that returns after the turn
+                // ended from appending to a reply nobody is waiting on. Both resting phases
+                // count: with no follow-up window a turn goes straight back to `.armed`
+                // without passing through `.listening`.
                 if self.phase.isResting { self.spokenReplyID = nil }
             }
             .store(in: &sessionCancellables)
@@ -314,21 +316,28 @@ final class VoiceAssistant: NSObject, ObservableObject {
             .sink { [weak self] in self?.threshold = $0 }
             .store(in: &sessionCancellables)
 
-        session.$transcript
+        // One pair of messages per turn, keyed on the turn's own identity rather than inferred
+        // from anything else. `removeDuplicates` is safe here and was not on `$transcript`:
+        // asking the same thing twice is two turns with two ids, and only a re-emission of one
+        // turn compares equal.
+        //
+        // Identity is what makes barge-in work. Cutting an answer off and asking something else
+        // runs .speaking → .transcribing → .thinking with no resting phase in between, so the
+        // old gate — wait for the phase to rest, then open the next pair — never opened one for
+        // the interrupting question, let its answer overwrite the previous reply in the previous
+        // message, and skipped the tool-loop reset below with it.
+        session.$turn
             .receive(on: DispatchQueue.main)
-            .filter { !$0.isEmpty }
-            .sink { [weak self] heard in
+            .compactMap { $0 }
+            .removeDuplicates()
+            .sink { [weak self] turn in
                 guard let self else { return }
-                // One bubble per turn, gated on not already having one rather than on the text
-                // being new. Deduplicating on the text looked equivalent and was not: asking
-                // the same thing twice suppressed the second turn entirely.
-                guard self.spokenReplyID == nil else { return }
                 // A heard question is where a tool loop begins on this path. The Mac runs its
                 // own loop against one long-lived `CookingTools`, so without this the
                 // create-then-start hold set in one turn would still be blocking starts several
                 // turns later.
                 context.tools?.beginToolLoop()
-                self.spokenReplyID = context.beginTurn(heard)
+                self.spokenReplyID = context.beginTurn(turn.question)
             }
             .store(in: &sessionCancellables)
 
