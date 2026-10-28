@@ -294,6 +294,21 @@ never started* — entitlements, no iCloud account, iCloud Drive off — from *m
 started and records aren't landing*, which is the Production schema above or plain
 network. The two look identical from the recipe list and have nothing in common.
 
+## Privacy promises the code keeps
+
+`docs/privacy.md` is the published policy, and three things in it are enforced in code. Change
+the code and the policy together.
+
+- **Audio stays on the device in on-device mode.** Both speech paths set
+  `requiresOnDeviceRecognition` and refuse outright when `supportsOnDeviceRecognition` is
+  false. Falling back to Apple's servers would make the policy untrue.
+- **Models download only when the user chooses.** The chat paths go through
+  `downloadedModelContainer`, which throws `modelNotDownloaded` rather than fetching. Only
+  Settings' download button, behind its size and cellular prompts, calls `downloadModel`.
+- **Settings → Delete All Data deletes everything.** That means recipes and preferences, row by
+  row so the deletes mirror to iCloud and the user's other devices, plus every downloaded model,
+  the model settings and every paired Mac. Anything new the app persists has to be added to it.
+
 ## Editing the recipe mid-cook
 
 A cooking session holds its own copy of the recipe and the assistant is free to rewrite it —

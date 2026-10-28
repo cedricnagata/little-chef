@@ -261,6 +261,24 @@ class LocalDataManager: ObservableObject {
         storeDidChange.send()
     }
 
+    /// Deletes every recipe and preference row.
+    ///
+    /// Row by row through the context rather than a batch delete, so the deletions go through
+    /// the same path CloudKit mirroring exports from: the user's iCloud copy and their other
+    /// devices empty too. That is what "delete all my data" has to mean while sync is on —
+    /// otherwise the next import would quietly put everything back.
+    func deleteAllData() throws {
+        for recipe in try modelContext.fetch(FetchDescriptor<RecipeEntity>()) {
+            modelContext.delete(recipe)
+        }
+        for preferences in try modelContext.fetch(FetchDescriptor<UserPreferencesEntity>()) {
+            modelContext.delete(preferences)
+        }
+        try modelContext.save()
+        Self.log.notice("Deleted all recipes and preferences at the user's request")
+        storeDidChange.send()
+    }
+
     // MARK: - User Preferences Operations
 
     /// Fetch user preferences (creates default if none exist)

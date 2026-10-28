@@ -300,6 +300,19 @@ class LLMService: ObservableObject {
         }
     }
 
+    /// The container for a model that is already on disk, refusing rather than fetching one.
+    ///
+    /// Asking a question must never be what starts a multi-gigabyte download. That is a
+    /// decision made in Settings, behind a size warning and a cellular check, and the privacy
+    /// policy promises models download only when the user chooses to.
+    private func downloadedModelContainer(modelId: String?) async throws -> MLXLMCommon.ModelContainer {
+        let id = modelId ?? activeOnDeviceModel?.modelId ?? CookingModelChoice.bonsai8B.modelId
+        guard isModelLoaded(id) || isModelDownloaded(id) else {
+            throw LLMError.modelNotDownloaded(CookingModelChoice(modelId: id)?.displayName ?? "The AI model")
+        }
+        return try await loadModel(modelId: id)
+    }
+
     /// Download a model to disk cache without keeping it loaded in memory.
     func downloadModel(modelId: String) async throws {
         _ = try await loadModel(modelId: modelId)
@@ -417,6 +430,32 @@ class LLMService: ObservableObject {
         dprint("🤖 [LLM] ✅ Deleted \(modelId)")
     }
 
+    /// Removes every downloaded model and puts the model settings back to their defaults.
+    ///
+    /// Clears the whole hub cache rather than walking the known models, so a model this
+    /// version no longer lists is not left behind as gigabytes nothing can see.
+    ///
+    /// - Throws: ``LLMError/generationFailed`` while a model is answering or downloading.
+    func deleteAllModels() throws {
+        guard !isGenerating, currentlyLoadingModelId == nil else {
+            throw LLMError.generationFailed("Can't remove models while one is answering or downloading. Try again in a moment.")
+        }
+        unloadModel()
+
+        let fm = FileManager.default
+        let root = HubModelStore.rootDirectory
+        for item in (try? fm.contentsOfDirectory(at: root, includingPropertiesForKeys: nil)) ?? [] {
+            try fm.removeItem(at: item)
+        }
+        refreshDownloadedModels()
+
+        UserDefaults.standard.removeObject(forKey: "little-chef.on-device-model")
+        UserDefaults.standard.removeObject(forKey: "little-chef.llm-provider")
+        preferredOnDeviceModel = .bonsai8B
+        currentProvider = LLMService.deviceSupportsLocalModels ? .local : .bigBro
+        dprint("🤖 [LLM] ✅ Deleted all models")
+    }
+
     // MARK: - Session Warm-Up
 
     /// Whether ``prepareForSession(provider:)`` has anything to do.
@@ -515,7 +554,7 @@ class LLMService: ObservableObject {
         isGenerating = true
         defer { isGenerating = false }
 
-        let container = try await loadModel(modelId: modelId)
+        let container = try await downloadedModelContainer(modelId: modelId)
 
         // Convert to Chat.Message
         let chatMessages: [Chat.Message] = messages.map { msg in
@@ -624,7 +663,7 @@ class LLMService: ObservableObject {
         isGenerating = true
         defer { isGenerating = false }
 
-        let container = try await loadModel(modelId: modelId)
+        let container = try await downloadedModelContainer(modelId: modelId)
 
         let chatMessages: [Chat.Message] = messages.map { msg in
             switch msg.role {
@@ -1058,6 +1097,7 @@ struct ModelInfo {
 
 enum LLMError: LocalizedError {
     case modelNotLoaded
+    case modelNotDownloaded(String)
     case loadFailed(String)
     case downloadFailed(String)
     case generationFailed(String)
@@ -1065,6 +1105,8 @@ enum LLMError: LocalizedError {
     var errorDescription: String? {
         switch self {
         case .modelNotLoaded: return "Model is not loaded."
+        case .modelNotDownloaded(let name):
+            return "\(name) isn't downloaded yet. Download it in Settings to use the on-device assistant."
         case .loadFailed(let msg): return "Failed to load model: \(msg)"
         case .downloadFailed(let msg): return "Failed to download model: \(msg)"
         case .generationFailed(let msg): return "Generation failed: \(msg)"

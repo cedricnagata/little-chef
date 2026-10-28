@@ -106,6 +106,10 @@ enum HubModelStore {
         return HubCache(cacheDirectory: root)
     }()
 
+    /// The directory every model is stored under. Exposed here so callers needn't import
+    /// HuggingFace to read it; this target has member import visibility on.
+    static var rootDirectory: URL { cache.cacheDirectory }
+
     /// The model's whole cache entry — blobs, snapshots and refs — or nil for a bad id.
     static func repoDirectory(for modelId: String) -> URL? {
         Repo.ID(rawValue: modelId).map { cache.repoDirectory(repo: $0, kind: .model) }
