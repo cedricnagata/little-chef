@@ -108,7 +108,7 @@ Turn-taking is the same on both paths: the microphone endpoints on signal energy
 ## Tech Stack
 
 - **UI**: SwiftUI, AVFoundation (TTS), Speech Framework (STT)
-- **On-device inference**: MLX Swift, PrismML Bonsai 1-bit (8B / 4B / 1.7B by device RAM)
+- **On-device inference**: MLX Swift (`mlx-swift`, `mlx-swift-lm`), PrismML Bonsai 1-bit (8B / 4B / 1.7B by device RAM), Bonsai 27B ternary where memory allows
 - **Mac inference & speech**: BigBroKit (local network pairing, Parakeet STT, Kokoro TTS)
 - **Recipe parsing**: WebScraperService, OCRService, schema.org extraction
 - **Storage**: SwiftData (CloudKit-backed, falling back to a local-only store)

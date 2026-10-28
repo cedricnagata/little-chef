@@ -25,7 +25,3 @@ little-chef/Config.plist
 *.p8
 *.mobileprovision
 *.cer
-
-# Local MLX packages (PrismML fork + mlx-swift-lm)
-mlx-swift/
-mlx-swift-lm/
