@@ -291,7 +291,7 @@ struct ProfileSettingsView: View {
 
     @ViewBuilder
     private var providerFooter: some View {
-        if let model = LLMService.supportedOnDeviceModel, llmProvider == .local {
+        if let model = llmService.activeOnDeviceModel, llmProvider == .local {
             if model.isFullCapability {
                 Text("On-device inference. \(model.displayName) handles both recipe parsing and cooking assistance.")
             } else {
@@ -308,7 +308,18 @@ struct ProfileSettingsView: View {
 
     @ViewBuilder
     private var localModelSection: some View {
-        if let model = LLMService.supportedOnDeviceModel {
+        // Only offered where there is a choice to make: a device with the memory for the 27B.
+        // Switching takes effect on the next request, which unloads the other model first.
+        if LLMService.onDeviceModelOptions.count > 1 {
+            Picker("Model", selection: $llmService.preferredOnDeviceModel) {
+                ForEach(LLMService.onDeviceModelOptions, id: \.self) { choice in
+                    Text(choice.displayName).tag(choice)
+                }
+            }
+            .disabled(llmService.isGenerating || llmService.isLoadingModel)
+        }
+
+        if let model = llmService.activeOnDeviceModel {
             modelRow(
                 for: model,
                 usage: model.isFullCapability

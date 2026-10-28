@@ -44,14 +44,16 @@ Runs a [PrismML Bonsai](https://huggingface.co/prism-ml) 1-bit model directly on
 | 3 GB+ | [Bonsai 1.7B](https://huggingface.co/prism-ml/Bonsai-1.7B-mlx-1bit) (~0.9 GB) | Cooking assistant only |
 | Under 3 GB | — | BigBro only |
 
-Only the 8B model supports tool use. Below it, recipe import still works from recipe websites via structured data, and timers are set manually.
+A device whose per-app memory limit is 9 GB or more (in practice a 16 GB iPad, with the increased-memory-limit entitlement) can also pick [Bonsai 27B ternary](https://huggingface.co/prism-ml/Ternary-Bonsai-27B-mlx-2bit) (~7 GB) in Settings, alongside its default model.
+
+Only the 27B and 8B models support tool use. Below them, recipe import still works from recipe websites via structured data, and timers are set manually.
 
 - No internet required after initial model download
 - Full privacy — all inference runs on-device
 - ~44 tok/s generation on iPhone 16 Pro Max
 
 ### BigBro (Mac Companion)
-Pairs with a Mac running the BigBro companion app over local network. The Mac runs `gpt-oss-20b` in-process through MLX and handles all inference, with tool use fully supported. Suitable for older devices that don't meet the RAM requirement.
+Pairs with a Mac running the BigBro companion app over local network. The Mac runs `bonsai-27b-ternary` (Bonsai 27B ternary) in-process through MLX and handles all inference, with tool use fully supported. Suitable for older devices that don't meet the RAM requirement.
 
 - No model download on iPhone
 - Full tool support (timers, recipe modifications)

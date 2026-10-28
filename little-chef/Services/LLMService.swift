@@ -9,6 +9,7 @@
 
 import Foundation
 import UIKit
+import os
 import MLX
 import MLXLLM
 import MLXLMCommon
@@ -51,6 +52,48 @@ class LLMService: ObservableObject {
     /// Whether the device can run any on-device model.
     static var deviceSupportsLocalModels: Bool { supportedOnDeviceModel != nil }
 
+    /// Every on-device model this device can run, largest first. The baseline
+    /// ``supportedOnDeviceModel`` plus, where the memory allows, the 27B.
+    ///
+    /// The 27B is gated on the app's own memory limit rather than on installed RAM, and in
+    /// DEBUG too. iOS caps each app well below the RAM fitted (raised by the
+    /// increased-memory-limit entitlement), and an app that crosses the cap while loading ~7 GB
+    /// of weights is terminated: no error, just a cook that has vanished. Measuring the limit
+    /// asks the question that actually decides that. Sampled once, from `init`, before any
+    /// model has taken a share of it.
+    static let onDeviceModelOptions: [CookingModelChoice] = {
+        guard let baseline = supportedOnDeviceModel else { return [] }
+        let gib = Double(appMemoryLimit) / 1_073_741_824
+        return gib >= 9 ? [.bonsai27BTernary, baseline] : [baseline]
+    }()
+
+    /// What iOS will let this process use before terminating it: what is left plus what is
+    /// already in use. 0 where the call is unsupported, such as the simulator.
+    private static var appMemoryLimit: UInt64 {
+        let available = UInt64(os_proc_available_memory())
+        guard available > 0 else { return 0 }
+        var info = task_vm_info_data_t()
+        var count = mach_msg_type_number_t(MemoryLayout<task_vm_info_data_t>.size / MemoryLayout<integer_t>.size)
+        let result = withUnsafeMutablePointer(to: &info) {
+            $0.withMemoryRebound(to: integer_t.self, capacity: Int(count)) {
+                task_info(mach_task_self_, task_flavor_t(TASK_VM_INFO), $0, &count)
+            }
+        }
+        return available + (result == KERN_SUCCESS ? info.phys_footprint : 0)
+    }
+
+    /// The on-device model in use: the one picked in Settings if this device can run it,
+    /// otherwise the baseline.
+    ///
+    /// The pick is kept per device in `UserDefaults`, not in the synced preferences. What a
+    /// device can run and what it has downloaded are both facts about that device, and a 27B
+    /// chosen on an iPad means nothing to the phone it would sync to.
+    var activeOnDeviceModel: CookingModelChoice? {
+        Self.onDeviceModelOptions.contains(preferredOnDeviceModel)
+            ? preferredOnDeviceModel
+            : Self.supportedOnDeviceModel
+    }
+
     /// What the active provider + model can do, in production. DEBUG = always full.
     var capability: AICapability { capability(of: currentProvider) }
 
@@ -68,7 +111,7 @@ class LLMService: ObservableObject {
         case .bigBro:
             return bigBroClient.isConnected ? .full : .none
         case .local:
-            guard let model = LLMService.supportedOnDeviceModel else { return .none }
+            guard let model = activeOnDeviceModel else { return .none }
             return model.isFullCapability ? .full : .limited
         }
         #endif
@@ -83,7 +126,7 @@ class LLMService: ObservableObject {
         case .bigBro:
             return true
         case .local:
-            guard let model = LLMService.supportedOnDeviceModel else { return false }
+            guard let model = activeOnDeviceModel else { return false }
             return isModelDownloaded(model.modelId)
         }
     }
@@ -105,6 +148,11 @@ class LLMService: ObservableObject {
     @Published var currentProvider: LLMProvider = .local {
         didSet { UserDefaults.standard.set(currentProvider.rawValue, forKey: "little-chef.llm-provider") }
     }
+    /// The on-device model picked in Settings. Read through ``activeOnDeviceModel``, which
+    /// falls back when this device can't run it.
+    @Published var preferredOnDeviceModel: CookingModelChoice = .bonsai8B {
+        didSet { UserDefaults.standard.set(preferredOnDeviceModel.rawValue, forKey: "little-chef.on-device-model") }
+    }
 
     // MARK: - Private State
     /// Containers keyed by model ID — allows both 8B and 4B to be loaded
@@ -115,10 +163,12 @@ class LLMService: ObservableObject {
     /// The model asked for on the Mac, by its id in BigBro's catalog.
     ///
     /// A catalog id, not an Ollama tag: BigBro runs models in-process through MLX and names
-    /// them `gpt-oss-20b`. The old `gpt-oss:20b` spelling is left over from its Ollama-proxy
-    /// days and matches nothing, which surfaces as a permanent missing-model warning and a
-    /// request the Mac cannot serve.
-    static let bigBroModel = "gpt-oss-20b"
+    /// them `bonsai-27b-ternary`. An id the catalog doesn't carry surfaces as a permanent
+    /// missing-model warning and a request the Mac cannot serve.
+    ///
+    /// A Qwen3.6-architecture model, so `think: false` on the chat calls turns its reasoning
+    /// off through `enable_thinking` rather than only hiding it, which is all it did for gpt-oss.
+    static let bigBroModel = "bonsai-27b-ternary"
 
     let bigBroClient = BigBroClient(appName: "LittleChef", requiredModels: [LLMService.bigBroModel])
 
@@ -128,6 +178,11 @@ class LLMService: ObservableObject {
     )
 
     private init() {
+        _ = Self.onDeviceModelOptions
+        if let stored = UserDefaults.standard.string(forKey: "little-chef.on-device-model"),
+           let choice = CookingModelChoice(rawValue: stored) {
+            preferredOnDeviceModel = choice
+        }
         if LLMService.deviceSupportsLocalModels {
             currentProvider = .local
         } else {
@@ -172,7 +227,7 @@ class LLMService: ObservableObject {
     // MARK: - Model Lifecycle
 
     private func loadModel(modelId: String? = nil) async throws -> MLXLMCommon.ModelContainer {
-        let id = modelId ?? CookingModelChoice.bonsai8B.modelId
+        let id = modelId ?? activeOnDeviceModel?.modelId ?? CookingModelChoice.bonsai8B.modelId
 
         if let container = modelContainers[id] {
             dprint("🤖 [LLM] Model \(id) already loaded, returning cached container")
@@ -388,7 +443,7 @@ class LLMService: ObservableObject {
     func needsWarmUp(for provider: LLMProvider) -> Bool {
         switch provider {
         case .local:
-            guard let model = LLMService.supportedOnDeviceModel else { return false }
+            guard let model = activeOnDeviceModel else { return false }
             return isModelDownloaded(model.modelId) && !isModelLoaded(model.modelId)
         case .bigBro:
             // No way to ask the Mac what it already has running, and `runModel` on a running
@@ -400,7 +455,7 @@ class LLMService: ObservableObject {
     /// Gets the backend ready to answer *before* the user asks anything.
     ///
     /// Both providers load lazily on whichever request happens to be first, which put the whole
-    /// cold-start cost — several seconds of weight loading on-device, a 20B model starting on
+    /// cold-start cost — several seconds of weight loading on-device, a 27B model starting on
     /// the Mac — on the user's first question, where it reads as a hung assistant rather than a
     /// model warming up. Starting it when the cook starts moves that wait to a moment the UI
     /// can label.
@@ -411,7 +466,7 @@ class LLMService: ObservableObject {
     func prepareForSession(provider: LLMProvider) async {
         switch provider {
         case .local:
-            guard let model = LLMService.supportedOnDeviceModel else { return }
+            guard let model = activeOnDeviceModel else { return }
             // Downloading is a multi-gigabyte, user-consented decision made in Settings. Warming
             // up must not turn starting a cook into one.
             guard isModelDownloaded(model.modelId) else {
@@ -490,7 +545,10 @@ class LLMService: ObservableObject {
         // Build native tool specs if tools are provided
         let toolSpecs: [ToolSpec]? = tools?.nativeToolSpecs
 
-        let userInput = UserInput(chat: chatMessages, tools: toolSpecs)
+        let userInput = UserInput(
+            chat: chatMessages, tools: toolSpecs,
+            additionalContext: templateContext(for: modelId)
+        )
 
         // Generate using AsyncStream API
         let stream: AsyncStream<Generation> = try await container.perform { (context: ModelContext) in
@@ -593,7 +651,10 @@ class LLMService: ObservableObject {
         }
 
         let toolSpecs: [ToolSpec]? = tools?.nativeToolSpecs
-        let userInput = UserInput(chat: chatMessages, tools: toolSpecs)
+        let userInput = UserInput(
+            chat: chatMessages, tools: toolSpecs,
+            additionalContext: templateContext(for: modelId)
+        )
 
         let stream: AsyncStream<Generation> = try await container.perform { (context: ModelContext) in
             let lmInput = try await context.processor.prepare(input: userInput)
@@ -883,6 +944,12 @@ class LLMService: ObservableObject {
              + "Have a look at the recipe and tell me what still needs changing."
     }
 
+    /// The chat-template variables for the model a request will load.
+    private func templateContext(for modelId: String?) -> [String: any Sendable]? {
+        let id = modelId ?? activeOnDeviceModel?.modelId ?? CookingModelChoice.bonsai8B.modelId
+        return CookingModelChoice(modelId: id)?.templateContext
+    }
+
     // MARK: - Model Info
 
     func getModelInfo(for choice: CookingModelChoice = .bonsai8B) -> ModelInfo? {
@@ -890,7 +957,7 @@ class LLMService: ObservableObject {
         return ModelInfo(
             name: choice.displayName,
             parameters: choice.modelId,
-            quantization: "1-bit",
+            quantization: choice.quantization,
             contextLength: 8192
         )
     }
