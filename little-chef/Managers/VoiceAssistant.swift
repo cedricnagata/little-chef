@@ -487,11 +487,13 @@ final class VoiceAssistant: NSObject, ObservableObject {
               recognizer.isAvailable else {
             throw VoiceError.recognizerUnavailable
         }
+        // Refused rather than sent to Apple's servers, which the privacy policy rules out.
+        guard recognizer.supportsOnDeviceRecognition else {
+            throw VoiceError.onDeviceRecognitionUnsupported
+        }
         let request = SFSpeechURLRecognitionRequest(url: url)
         request.shouldReportPartialResults = false
-        if recognizer.supportsOnDeviceRecognition {
-            request.requiresOnDeviceRecognition = true
-        }
+        request.requiresOnDeviceRecognition = true
         return try await withCheckedThrowingContinuation { continuation in
             let settled = OnceFlag()
             recognizer.recognitionTask(with: request) { result, error in
@@ -523,9 +525,12 @@ final class VoiceAssistant: NSObject, ObservableObject {
 
     private enum VoiceError: LocalizedError {
         case recognizerUnavailable
+        case onDeviceRecognitionUnsupported
         var errorDescription: String? {
             switch self {
             case .recognizerUnavailable: return "Speech recognition is unavailable right now."
+            case .onDeviceRecognitionUnsupported:
+                return "On-device speech recognition isn't available on this device, so voice input is off. Type your question instead."
             }
         }
     }

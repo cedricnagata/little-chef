@@ -1,0 +1,44 @@
+name: PR build check
+
+# Catches a broken build — a package bump, a missing import — on the pull request,
+# instead of in the TestFlight deploy after it merges.
+on:
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: pr-build-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    # Same image as the deploy: the iOS 26 SDK only ships with Xcode 26.
+    runs-on: macos-26
+    timeout-minutes: 45
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Select Xcode 26
+        run: |
+          set -euo pipefail
+          APP="$(ls -d /Applications/Xcode_26*.app 2>/dev/null | sort -V | tail -1 || true)"
+          if [ -z "$APP" ]; then
+            echo "::error::No Xcode 26 on this runner."
+            ls -d /Applications/Xcode*.app || true
+            exit 1
+          fi
+          sudo xcode-select -s "$APP"
+
+      # A device build rather than a simulator one: it is what the archive compiles, and
+      # MLX's Metal kernels are built for the device GPU. Unsigned, since signing is the
+      # deploy's job and needs secrets a pull request shouldn't see.
+      - name: Build
+        run: |
+          set -euo pipefail
+          xcodebuild build \
+            -project little-chef.xcodeproj \
+            -scheme little-chef \
+            -configuration Release \
+            -destination 'generic/platform=iOS' \
+            CODE_SIGNING_ALLOWED=NO

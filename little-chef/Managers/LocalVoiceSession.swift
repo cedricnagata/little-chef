@@ -211,6 +211,14 @@ final class LocalVoiceSession: NSObject, ObservableObject {
             phase = .idle
             return
         }
+        // Up front, because the per-turn check in `transcribe` fails quietly by design — a
+        // device that can only recognize on Apple's servers would otherwise sit there armed,
+        // hearing everything and answering nothing.
+        guard recognizer.supportsOnDeviceRecognition else {
+            error = LocalVoiceError.onDeviceRecognitionUnsupported.localizedDescription
+            phase = .idle
+            return
+        }
 
         do {
             try configureAudioSession()
@@ -465,6 +473,11 @@ final class LocalVoiceSession: NSObject, ObservableObject {
         guard let recognizer, recognizer.isAvailable else {
             throw LocalVoiceError.recognizerUnavailable
         }
+        // Refused rather than sent to Apple's servers: the privacy policy says audio never
+        // leaves the device in on-device mode, and a server fallback would make that untrue.
+        guard recognizer.supportsOnDeviceRecognition else {
+            throw LocalVoiceError.onDeviceRecognitionUnsupported
+        }
 
         let url = FileManager.default.temporaryDirectory
             .appendingPathComponent("littlechef-utterance-\(UUID().uuidString).wav")
@@ -473,11 +486,7 @@ final class LocalVoiceSession: NSObject, ObservableObject {
 
         let request = SFSpeechURLRecognitionRequest(url: url)
         request.shouldReportPartialResults = false
-        // Keep audio on the device, per the privacy policy. The on-device recognizer is
-        // available for en-US on every device this app supports.
-        if recognizer.supportsOnDeviceRecognition {
-            request.requiresOnDeviceRecognition = true
-        }
+        request.requiresOnDeviceRecognition = true
 
         return try await withCheckedThrowingContinuation { continuation in
             // `recognitionTask` can call back more than once — a result and then an error, or
@@ -583,10 +592,13 @@ final class LocalVoiceSession: NSObject, ObservableObject {
 
     private enum LocalVoiceError: LocalizedError {
         case recognizerUnavailable
+        case onDeviceRecognitionUnsupported
 
         var errorDescription: String? {
             switch self {
             case .recognizerUnavailable: return "Speech recognition is unavailable right now."
+            case .onDeviceRecognitionUnsupported:
+                return "On-device speech recognition isn't available on this device, so voice input is off. Type your question instead."
             }
         }
     }

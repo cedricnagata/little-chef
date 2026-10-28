@@ -78,7 +78,7 @@ class LocalCookingAgent: ObservableObject {
         let response = try await llmService.generateChatCompletion(
             messages: messages,
             tools: cookingTools(),
-            modelId: provider == .local ? LLMService.supportedOnDeviceModel?.modelId : nil,
+            modelId: provider == .local ? llmService.activeOnDeviceModel?.modelId : nil,
             provider: provider
         )
 
@@ -114,7 +114,7 @@ class LocalCookingAgent: ObservableObject {
         let response = try await llmService.generateChatCompletionStreaming(
             messages: messages,
             tools: cookingTools(),
-            modelId: provider == .local ? LLMService.supportedOnDeviceModel?.modelId : nil,
+            modelId: provider == .local ? llmService.activeOnDeviceModel?.modelId : nil,
             provider: provider,
             onChunk: onChunk
         )

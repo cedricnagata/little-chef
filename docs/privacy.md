@@ -4,7 +4,7 @@ title: LittleChef Privacy Policy
 
 # LittleChef Privacy Policy
 
-**Last updated: May 8, 2026**
+**Last updated: October 28, 2026**
 
 LittleChef ("we", "the app") is designed with privacy as a core principle. This policy explains what data the app handles and how.
 
@@ -18,7 +18,7 @@ LittleChef does not collect, transmit, sell, or share any personal information. 
 
 **Voice and speech.** When you use voice input, audio is captured by the microphone and converted to text. Where that conversion happens depends on which AI mode the cooking session is using:
 
-- *On-device mode (default):* audio is transcribed with Apple's on-device Speech Recognition framework and spoken replies use the iOS voice. Audio never leaves your device.
+- *On-device mode (default):* audio is transcribed with Apple's on-device Speech Recognition framework and spoken replies use the iOS voice. Audio never leaves your device. If your device can't recognize speech on-device, voice input is turned off rather than sending audio to Apple's servers.
 - *BigBro mode (optional):* audio is sent over your local Wi-Fi network to the Mac you paired with, which transcribes it and synthesizes spoken replies. It does not leave your local network.
 
 In neither case is audio sent to LittleChef or to any third-party server.
@@ -27,7 +27,7 @@ In neither case is audio sent to LittleChef or to any third-party server.
 
 **AI inference.**
 
-- *On-device mode (default):* The Bonsai 8B model runs entirely on your iPhone using Apple's MLX framework. No prompts or responses leave the device. The model weights are downloaded once from HuggingFace's public model repository on first use.
+- *On-device mode (default):* A PrismML Bonsai model runs entirely on your iPhone or iPad using Apple's MLX framework. Which model depends on your device's memory, and devices with enough memory can choose the larger Bonsai 27B in Settings. No prompts or responses leave the device. Model weights are downloaded from Hugging Face's public model repository when you choose to download them in Settings. As with any download, Hugging Face can see the request, including your IP address. Nothing about you or your recipes is sent.
 - *BigBro mode (optional):* If you choose to pair LittleChef with a Mac running the BigBro companion app on your local network, prompts and responses — and, when you use voice, the recorded audio — are sent over your local Wi-Fi network to that Mac for processing. They do not leave your local network.
 
 The mode is fixed for the duration of a cooking session: it is chosen before you start cooking and cannot change partway through.
@@ -46,8 +46,8 @@ The mode is fixed for the duration of a cooking session: it is chosen before you
 - **Microphone** — required for voice questions while cooking.
 - **Speech Recognition** — required to convert your voice to text on-device. Not used in BigBro mode, where the paired Mac transcribes instead.
 - **Local Network** — used only to discover an optional Mac running BigBro on your home network. No connections are made without your pairing.
-- **Notifications** — used only for timer completion alerts.
-- **Photo Library** — used only for selecting a recipe photo to import. The photo is processed on-device.
+- **Notifications** — used only for timer completion alerts. The app also receives silent notifications from iCloud so recipes sync between your devices. These never show anything or ask for permission.
+- **Photos** — recipe photos are chosen with the system photo picker, which gives the app only the photos you select. No photo library permission is needed, and the photos are processed on-device.
 
 You can revoke any of these permissions at any time in iOS Settings.
 
@@ -57,7 +57,9 @@ LittleChef is not directed at children under 13 and does not knowingly collect a
 
 ## Data deletion
 
-You can delete all locally stored data at any time from Settings → Delete All Data. Uninstalling the app also removes local data. iCloud-synced data can be removed from Settings → [your name] → iCloud → Manage Storage.
+You can delete your data at any time from **Settings → Delete All Data** in the app. This removes your recipes and settings, downloaded AI models, and paired Macs. If iCloud sync is on, your recipes and settings are also deleted from iCloud and from your other devices signed in to the same iCloud account. Deletion can't be undone.
+
+Uninstalling the app removes everything stored on that device. Data already synced to iCloud stays there until you delete it in the app, or remove it from iOS Settings → [your name] → iCloud → Manage Storage.
 
 ## Changes
 

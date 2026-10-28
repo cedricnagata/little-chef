@@ -9,10 +9,10 @@
 
 import Foundation
 import UIKit
+import os
 import MLX
 import MLXLLM
 import MLXLMCommon
-import Tokenizers
 import BigBroKit
 
 /// What AI features are available given the active provider, device hardware, and
@@ -51,6 +51,48 @@ class LLMService: ObservableObject {
     /// Whether the device can run any on-device model.
     static var deviceSupportsLocalModels: Bool { supportedOnDeviceModel != nil }
 
+    /// Every on-device model this device can run, largest first. The baseline
+    /// ``supportedOnDeviceModel`` plus, where the memory allows, the 27B.
+    ///
+    /// The 27B is gated on the app's own memory limit rather than on installed RAM, and in
+    /// DEBUG too. iOS caps each app well below the RAM fitted (raised by the
+    /// increased-memory-limit entitlement), and an app that crosses the cap while loading ~7 GB
+    /// of weights is terminated: no error, just a cook that has vanished. Measuring the limit
+    /// asks the question that actually decides that. Sampled once, from `init`, before any
+    /// model has taken a share of it.
+    static let onDeviceModelOptions: [CookingModelChoice] = {
+        guard let baseline = supportedOnDeviceModel else { return [] }
+        let gib = Double(appMemoryLimit) / 1_073_741_824
+        return gib >= 9 ? [.bonsai27BTernary, baseline] : [baseline]
+    }()
+
+    /// What iOS will let this process use before terminating it: what is left plus what is
+    /// already in use. 0 where the call is unsupported, such as the simulator.
+    private static var appMemoryLimit: UInt64 {
+        let available = UInt64(os_proc_available_memory())
+        guard available > 0 else { return 0 }
+        var info = task_vm_info_data_t()
+        var count = mach_msg_type_number_t(MemoryLayout<task_vm_info_data_t>.size / MemoryLayout<integer_t>.size)
+        let result = withUnsafeMutablePointer(to: &info) {
+            $0.withMemoryRebound(to: integer_t.self, capacity: Int(count)) {
+                task_info(mach_task_self_, task_flavor_t(TASK_VM_INFO), $0, &count)
+            }
+        }
+        return available + (result == KERN_SUCCESS ? info.phys_footprint : 0)
+    }
+
+    /// The on-device model in use: the one picked in Settings if this device can run it,
+    /// otherwise the baseline.
+    ///
+    /// The pick is kept per device in `UserDefaults`, not in the synced preferences. What a
+    /// device can run and what it has downloaded are both facts about that device, and a 27B
+    /// chosen on an iPad means nothing to the phone it would sync to.
+    var activeOnDeviceModel: CookingModelChoice? {
+        Self.onDeviceModelOptions.contains(preferredOnDeviceModel)
+            ? preferredOnDeviceModel
+            : Self.supportedOnDeviceModel
+    }
+
     /// What the active provider + model can do, in production. DEBUG = always full.
     var capability: AICapability { capability(of: currentProvider) }
 
@@ -68,7 +110,7 @@ class LLMService: ObservableObject {
         case .bigBro:
             return bigBroClient.isConnected ? .full : .none
         case .local:
-            guard let model = LLMService.supportedOnDeviceModel else { return .none }
+            guard let model = activeOnDeviceModel else { return .none }
             return model.isFullCapability ? .full : .limited
         }
         #endif
@@ -83,7 +125,7 @@ class LLMService: ObservableObject {
         case .bigBro:
             return true
         case .local:
-            guard let model = LLMService.supportedOnDeviceModel else { return false }
+            guard let model = activeOnDeviceModel else { return false }
             return isModelDownloaded(model.modelId)
         }
     }
@@ -105,6 +147,11 @@ class LLMService: ObservableObject {
     @Published var currentProvider: LLMProvider = .local {
         didSet { UserDefaults.standard.set(currentProvider.rawValue, forKey: "little-chef.llm-provider") }
     }
+    /// The on-device model picked in Settings. Read through ``activeOnDeviceModel``, which
+    /// falls back when this device can't run it.
+    @Published var preferredOnDeviceModel: CookingModelChoice = .bonsai8B {
+        didSet { UserDefaults.standard.set(preferredOnDeviceModel.rawValue, forKey: "little-chef.on-device-model") }
+    }
 
     // MARK: - Private State
     /// Containers keyed by model ID — allows both 8B and 4B to be loaded
@@ -115,10 +162,12 @@ class LLMService: ObservableObject {
     /// The model asked for on the Mac, by its id in BigBro's catalog.
     ///
     /// A catalog id, not an Ollama tag: BigBro runs models in-process through MLX and names
-    /// them `gpt-oss-20b`. The old `gpt-oss:20b` spelling is left over from its Ollama-proxy
-    /// days and matches nothing, which surfaces as a permanent missing-model warning and a
-    /// request the Mac cannot serve.
-    static let bigBroModel = "gpt-oss-20b"
+    /// them `bonsai-27b-ternary`. An id the catalog doesn't carry surfaces as a permanent
+    /// missing-model warning and a request the Mac cannot serve.
+    ///
+    /// A Qwen3.6-architecture model, so `think: false` on the chat calls turns its reasoning
+    /// off through `enable_thinking` rather than only hiding it, which is all it did for gpt-oss.
+    static let bigBroModel = "bonsai-27b-ternary"
 
     let bigBroClient = BigBroClient(appName: "LittleChef", requiredModels: [LLMService.bigBroModel])
 
@@ -128,12 +177,18 @@ class LLMService: ObservableObject {
     )
 
     private init() {
+        _ = Self.onDeviceModelOptions
+        if let stored = UserDefaults.standard.string(forKey: "little-chef.on-device-model"),
+           let choice = CookingModelChoice(rawValue: stored) {
+            preferredOnDeviceModel = choice
+        }
         if LLMService.deviceSupportsLocalModels {
             currentProvider = .local
         } else {
             currentProvider = .bigBro
         }
         refreshDownloadedModels()
+        Self.removeLegacyDownloads()
         // Restore BigBro auto-reconnect from previous launches.
         bigBroClient.resumeAutoReconnectIfEnabled()
 
@@ -172,7 +227,7 @@ class LLMService: ObservableObject {
     // MARK: - Model Lifecycle
 
     private func loadModel(modelId: String? = nil) async throws -> MLXLMCommon.ModelContainer {
-        let id = modelId ?? CookingModelChoice.bonsai8B.modelId
+        let id = modelId ?? activeOnDeviceModel?.modelId ?? CookingModelChoice.bonsai8B.modelId
 
         if let container = modelContainers[id] {
             dprint("🤖 [LLM] Model \(id) already loaded, returning cached container")
@@ -214,6 +269,8 @@ class LLMService: ObservableObject {
         do {
             dprint("🤖 [LLM] Calling LLMModelFactory.loadContainer for \(id)...")
             let container = try await LLMModelFactory.shared.loadContainer(
+                from: HubDownloader(),
+                using: TransformersTokenizerLoader(),
                 configuration: config
             ) { progress in
                 Task { @MainActor in
@@ -241,6 +298,19 @@ class LLMService: ObservableObject {
             currentlyLoadingModelId = nil
             throw error
         }
+    }
+
+    /// The container for a model that is already on disk, refusing rather than fetching one.
+    ///
+    /// Asking a question must never be what starts a multi-gigabyte download. That is a
+    /// decision made in Settings, behind a size warning and a cellular check, and the privacy
+    /// policy promises models download only when the user chooses to.
+    private func downloadedModelContainer(modelId: String?) async throws -> MLXLMCommon.ModelContainer {
+        let id = modelId ?? activeOnDeviceModel?.modelId ?? CookingModelChoice.bonsai8B.modelId
+        guard isModelLoaded(id) || isModelDownloaded(id) else {
+            throw LLMError.modelNotDownloaded(CookingModelChoice(modelId: id)?.displayName ?? "The AI model")
+        }
+        return try await loadModel(modelId: id)
     }
 
     /// Download a model to disk cache without keeping it loaded in memory.
@@ -286,61 +356,43 @@ class LLMService: ObservableObject {
 
     // MARK: - On-Disk Model Cache
 
-    /// Where a downloaded model's files could be sitting.
-    ///
-    /// More than one candidate on purpose. The weights are written by `HubApi`, whose
-    /// `downloadBase` has moved between releases of swift-transformers and can be overridden by
-    /// whatever constructs it — so hard-coding one path is how "Downloaded" stayed unticked
-    /// under a model that was fully on disk, and how a delete could silently free nothing.
-    /// Every layout the hub has used is checked, and a delete removes all of them.
-    private static func candidateModelDirectories(for modelId: String) -> [URL] {
-        let fm = FileManager.default
-        let searchPaths: [FileManager.SearchPathDirectory] = [
-            .documentDirectory, .cachesDirectory, .applicationSupportDirectory,
-        ]
-        let bases: [URL] = searchPaths.compactMap { fm.urls(for: $0, in: .userDomainMask).first }
-
-        return bases.flatMap { base in
-            ["huggingface/models", "models"].map { base.appendingPathComponent("\($0)/\(modelId)") }
-        }
-    }
-
-    /// The directories that actually exist for `modelId` and hold a usable download.
-    private static func existingModelDirectories(for modelId: String) -> [URL] {
-        candidateModelDirectories(for: modelId).filter { url in
-            // A bare directory isn't a download: an interrupted fetch leaves the folder behind
-            // with nothing in it, and reporting that as "Downloaded" sends the next request
-            // straight into a load that has to re-fetch everything anyway.
-            guard let contents = try? FileManager.default.contentsOfDirectory(atPath: url.path) else {
-                return false
-            }
-            return !contents.isEmpty
-        }
-    }
-
-    /// Check if a model has been downloaded to the HuggingFace hub cache.
+    /// Check if a model has been downloaded to the hub cache.
     func isModelDownloaded(_ modelId: String) -> Bool {
-        !Self.existingModelDirectories(for: modelId).isEmpty
+        HubModelStore.hasSnapshot(of: modelId)
     }
 
     /// Total bytes `modelId` occupies on disk, or nil if it isn't downloaded.
+    ///
+    /// Counts regular files only. A snapshot is a directory of symlinks into the repo's blobs,
+    /// so following both would report every model at twice its size.
     func downloadedSize(of modelId: String) -> Int64? {
-        let directories = Self.existingModelDirectories(for: modelId)
-        guard !directories.isEmpty else { return nil }
+        guard isModelDownloaded(modelId), let directory = HubModelStore.repoDirectory(for: modelId),
+              let enumerator = FileManager.default.enumerator(
+                  at: directory,
+                  includingPropertiesForKeys: [.fileSizeKey, .isRegularFileKey]
+              ) else { return nil }
 
         var total: Int64 = 0
-        for directory in directories {
-            guard let enumerator = FileManager.default.enumerator(
-                at: directory,
-                includingPropertiesForKeys: [.fileSizeKey, .isRegularFileKey]
-            ) else { continue }
-            for case let url as URL in enumerator {
-                let values = try? url.resourceValues(forKeys: [.fileSizeKey, .isRegularFileKey])
-                guard values?.isRegularFile == true, let size = values?.fileSize else { continue }
-                total += Int64(size)
-            }
+        for case let url as URL in enumerator {
+            let values = try? url.resourceValues(forKeys: [.fileSizeKey, .isRegularFileKey])
+            guard values?.isRegularFile == true, let size = values?.fileSize else { continue }
+            total += Int64(size)
         }
         return total
+    }
+
+    /// Deletes models left where swift-transformers' `HubApi` put them before mlx-swift-lm 3.
+    ///
+    /// The new downloader never reads them, so each is a model the user can neither use nor see
+    /// in Settings to remove. Off the main thread: it can be several gigabytes.
+    private static func removeLegacyDownloads() {
+        let directories = CookingModelChoice.allCases.flatMap { HubModelStore.legacyDirectories(for: $0.modelId) }
+        Task.detached(priority: .utility) {
+            for directory in directories where FileManager.default.fileExists(atPath: directory.path) {
+                try? FileManager.default.removeItem(at: directory)
+                dprint("🤖 [LLM] 🗑️ Removed legacy download \(directory.path)")
+            }
+        }
     }
 
     /// Evicts `modelId` from memory *and* removes its files from disk.
@@ -362,8 +414,8 @@ class LLMService: ObservableObject {
 
         unloadModel(modelId: modelId)
 
-        let directories = Self.existingModelDirectories(for: modelId)
-        for directory in directories {
+        if let directory = HubModelStore.repoDirectory(for: modelId),
+           FileManager.default.fileExists(atPath: directory.path) {
             try FileManager.default.removeItem(at: directory)
             dprint("🤖 [LLM] 🗑️ Removed \(directory.path)")
         }
@@ -375,7 +427,33 @@ class LLMService: ObservableObject {
         if isModelDownloaded(modelId) {
             throw LLMError.loadFailed("The model files are still on disk. Try again after restarting the app.")
         }
-        dprint("🤖 [LLM] ✅ Deleted \(modelId) (\(directories.count) director\(directories.count == 1 ? "y" : "ies"))")
+        dprint("🤖 [LLM] ✅ Deleted \(modelId)")
+    }
+
+    /// Removes every downloaded model and puts the model settings back to their defaults.
+    ///
+    /// Clears the whole hub cache rather than walking the known models, so a model this
+    /// version no longer lists is not left behind as gigabytes nothing can see.
+    ///
+    /// - Throws: ``LLMError/generationFailed`` while a model is answering or downloading.
+    func deleteAllModels() throws {
+        guard !isGenerating, currentlyLoadingModelId == nil else {
+            throw LLMError.generationFailed("Can't remove models while one is answering or downloading. Try again in a moment.")
+        }
+        unloadModel()
+
+        let fm = FileManager.default
+        let root = HubModelStore.rootDirectory
+        for item in (try? fm.contentsOfDirectory(at: root, includingPropertiesForKeys: nil)) ?? [] {
+            try fm.removeItem(at: item)
+        }
+        refreshDownloadedModels()
+
+        UserDefaults.standard.removeObject(forKey: "little-chef.on-device-model")
+        UserDefaults.standard.removeObject(forKey: "little-chef.llm-provider")
+        preferredOnDeviceModel = .bonsai8B
+        currentProvider = LLMService.deviceSupportsLocalModels ? .local : .bigBro
+        dprint("🤖 [LLM] ✅ Deleted all models")
     }
 
     // MARK: - Session Warm-Up
@@ -388,7 +466,7 @@ class LLMService: ObservableObject {
     func needsWarmUp(for provider: LLMProvider) -> Bool {
         switch provider {
         case .local:
-            guard let model = LLMService.supportedOnDeviceModel else { return false }
+            guard let model = activeOnDeviceModel else { return false }
             return isModelDownloaded(model.modelId) && !isModelLoaded(model.modelId)
         case .bigBro:
             // No way to ask the Mac what it already has running, and `runModel` on a running
@@ -400,7 +478,7 @@ class LLMService: ObservableObject {
     /// Gets the backend ready to answer *before* the user asks anything.
     ///
     /// Both providers load lazily on whichever request happens to be first, which put the whole
-    /// cold-start cost — several seconds of weight loading on-device, a 20B model starting on
+    /// cold-start cost — several seconds of weight loading on-device, a 27B model starting on
     /// the Mac — on the user's first question, where it reads as a hung assistant rather than a
     /// model warming up. Starting it when the cook starts moves that wait to a moment the UI
     /// can label.
@@ -411,7 +489,7 @@ class LLMService: ObservableObject {
     func prepareForSession(provider: LLMProvider) async {
         switch provider {
         case .local:
-            guard let model = LLMService.supportedOnDeviceModel else { return }
+            guard let model = activeOnDeviceModel else { return }
             // Downloading is a multi-gigabyte, user-consented decision made in Settings. Warming
             // up must not turn starting a cook into one.
             guard isModelDownloaded(model.modelId) else {
@@ -476,7 +554,7 @@ class LLMService: ObservableObject {
         isGenerating = true
         defer { isGenerating = false }
 
-        let container = try await loadModel(modelId: modelId)
+        let container = try await downloadedModelContainer(modelId: modelId)
 
         // Convert to Chat.Message
         let chatMessages: [Chat.Message] = messages.map { msg in
@@ -490,7 +568,10 @@ class LLMService: ObservableObject {
         // Build native tool specs if tools are provided
         let toolSpecs: [ToolSpec]? = tools?.nativeToolSpecs
 
-        let userInput = UserInput(chat: chatMessages, tools: toolSpecs)
+        let userInput = UserInput(
+            chat: chatMessages, tools: toolSpecs,
+            additionalContext: templateContext(for: modelId)
+        )
 
         // Generate using AsyncStream API
         let stream: AsyncStream<Generation> = try await container.perform { (context: ModelContext) in
@@ -582,7 +663,7 @@ class LLMService: ObservableObject {
         isGenerating = true
         defer { isGenerating = false }
 
-        let container = try await loadModel(modelId: modelId)
+        let container = try await downloadedModelContainer(modelId: modelId)
 
         let chatMessages: [Chat.Message] = messages.map { msg in
             switch msg.role {
@@ -593,7 +674,10 @@ class LLMService: ObservableObject {
         }
 
         let toolSpecs: [ToolSpec]? = tools?.nativeToolSpecs
-        let userInput = UserInput(chat: chatMessages, tools: toolSpecs)
+        let userInput = UserInput(
+            chat: chatMessages, tools: toolSpecs,
+            additionalContext: templateContext(for: modelId)
+        )
 
         let stream: AsyncStream<Generation> = try await container.perform { (context: ModelContext) in
             let lmInput = try await context.processor.prepare(input: userInput)
@@ -883,6 +967,12 @@ class LLMService: ObservableObject {
              + "Have a look at the recipe and tell me what still needs changing."
     }
 
+    /// The chat-template variables for the model a request will load.
+    private func templateContext(for modelId: String?) -> [String: any Sendable]? {
+        let id = modelId ?? activeOnDeviceModel?.modelId ?? CookingModelChoice.bonsai8B.modelId
+        return CookingModelChoice(modelId: id)?.templateContext
+    }
+
     // MARK: - Model Info
 
     func getModelInfo(for choice: CookingModelChoice = .bonsai8B) -> ModelInfo? {
@@ -890,7 +980,7 @@ class LLMService: ObservableObject {
         return ModelInfo(
             name: choice.displayName,
             parameters: choice.modelId,
-            quantization: "1-bit",
+            quantization: choice.quantization,
             contextLength: 8192
         )
     }
@@ -1007,6 +1097,7 @@ struct ModelInfo {
 
 enum LLMError: LocalizedError {
     case modelNotLoaded
+    case modelNotDownloaded(String)
     case loadFailed(String)
     case downloadFailed(String)
     case generationFailed(String)
@@ -1014,6 +1105,8 @@ enum LLMError: LocalizedError {
     var errorDescription: String? {
         switch self {
         case .modelNotLoaded: return "Model is not loaded."
+        case .modelNotDownloaded(let name):
+            return "\(name) isn't downloaded yet. Download it in Settings to use the on-device assistant."
         case .loadFailed(let msg): return "Failed to load model: \(msg)"
         case .downloadFailed(let msg): return "Failed to download model: \(msg)"
         case .generationFailed(let msg): return "Generation failed: \(msg)"

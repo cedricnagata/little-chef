@@ -23,12 +23,14 @@ enum LLMProvider: String, Codable, CaseIterable {
 
 /// Which on-device model to use for cooking assistance
 enum CookingModelChoice: String, Codable, CaseIterable {
+    case bonsai27BTernary = "bonsai27b_ternary"
     case bonsai8B = "bonsai8b"
     case bonsai4B = "bonsai4b"
     case bonsai1_7B = "bonsai1_7b"
 
     var displayName: String {
         switch self {
+        case .bonsai27BTernary: return "Bonsai 27B (ternary)"
         case .bonsai8B: return "Bonsai 8B (1-bit)"
         case .bonsai4B: return "Bonsai 4B (1-bit)"
         case .bonsai1_7B: return "Bonsai 1.7B (1-bit)"
@@ -37,6 +39,7 @@ enum CookingModelChoice: String, Codable, CaseIterable {
 
     var modelId: String {
         switch self {
+        case .bonsai27BTernary: return "prism-ml/Ternary-Bonsai-27B-mlx-2bit"
         case .bonsai8B: return "prism-ml/Bonsai-8B-mlx-1bit"
         case .bonsai4B: return "prism-ml/Bonsai-4B-mlx-1bit"
         case .bonsai1_7B: return "prism-ml/Bonsai-1.7B-mlx-1bit"
@@ -45,23 +48,49 @@ enum CookingModelChoice: String, Codable, CaseIterable {
 
     var supportsTools: Bool {
         switch self {
-        case .bonsai8B: return true
+        case .bonsai27BTernary, .bonsai8B: return true
         case .bonsai4B, .bonsai1_7B: return false
         }
     }
 
     var approximateSize: String {
         switch self {
+        case .bonsai27BTernary: return "~7 GB"
         case .bonsai8B: return "~3.5 GB"
         case .bonsai4B: return "~1.8 GB"
         case .bonsai1_7B: return "~0.9 GB"
         }
     }
 
+    var quantization: String {
+        switch self {
+        case .bonsai27BTernary: return "ternary"
+        case .bonsai8B, .bonsai4B, .bonsai1_7B: return "1-bit"
+        }
+    }
+
     /// Whether this on-device model supports the full feature set (recipe parsing + timer tools).
-    /// Only the 8B model is capable; smaller models run cooking chat only.
+    /// The 27B and 8B models are capable; smaller models run cooking chat only.
     var isFullCapability: Bool {
-        self == .bonsai8B
+        self == .bonsai27BTernary || self == .bonsai8B
+    }
+
+    /// Chat-template variables this model needs on every request.
+    ///
+    /// The 27B is Qwen3.6 underneath, whose template thinks by default. On a phone that is
+    /// hundreds of tokens of reasoning at a few tokens a second before the first word of an
+    /// answer, out of a 2048-token budget — a cook asking how long to rest the meat would wait
+    /// most of a minute.
+    var templateContext: [String: any Sendable]? {
+        switch self {
+        case .bonsai27BTernary: return ["enable_thinking": false]
+        case .bonsai8B, .bonsai4B, .bonsai1_7B: return nil
+        }
+    }
+
+    init?(modelId: String) {
+        guard let match = Self.allCases.first(where: { $0.modelId == modelId }) else { return nil }
+        self = match
     }
 }
 

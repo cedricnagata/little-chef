@@ -190,6 +190,22 @@ gh run view <id> --json jobs -q '.jobs[].steps[] | "\(.conclusion)\t\(.name)"'
 gh run view <id> --log-failed
 ```
 
+## MLX packages
+
+On-device inference uses the stock `ml-explore/mlx-swift` and `ml-explore/mlx-swift-lm`.
+Bonsai's 1-bit weights need `mlx-swift` **0.33.0** or later — the first release whose bundled
+MLX has 1-bit quantization.
+
+`mlx-swift-lm` is pinned to a **revision**, not a version, because no release yet accepts
+`mlx-swift` 0.33: the latest tag, 3.32.3, caps it below. Move it to a version requirement once a
+release declares `mlx-swift` 0.33 or later.
+
+mlx-swift-lm 3 doesn't download or tokenize by itself. `HubModelLoading.swift` bridges it to
+`swift-huggingface` and `swift-transformers` by hand rather than through the `MLXHuggingFace`
+macros, because `xcodebuild` won't run a package's macros in CI until someone trusts them
+interactively. Models are stored under Application Support in the hub's
+`models--<org>--<name>` layout. Caches is not used, because iOS can empty it.
+
 ## CloudKit sync
 
 Recipes and preferences live in SwiftData, mirrored to the user's **private** database in
@@ -277,6 +293,21 @@ Reach for that row first when told "my recipes aren't syncing". It separates *mi
 never started* — entitlements, no iCloud account, iCloud Drive off — from *mirroring
 started and records aren't landing*, which is the Production schema above or plain
 network. The two look identical from the recipe list and have nothing in common.
+
+## Privacy promises the code keeps
+
+`docs/privacy.md` is the published policy, and three things in it are enforced in code. Change
+the code and the policy together.
+
+- **Audio stays on the device in on-device mode.** Both speech paths set
+  `requiresOnDeviceRecognition` and refuse outright when `supportsOnDeviceRecognition` is
+  false. Falling back to Apple's servers would make the policy untrue.
+- **Models download only when the user chooses.** The chat paths go through
+  `downloadedModelContainer`, which throws `modelNotDownloaded` rather than fetching. Only
+  Settings' download button, behind its size and cellular prompts, calls `downloadModel`.
+- **Settings → Delete All Data deletes everything.** That means recipes and preferences, row by
+  row so the deletes mirror to iCloud and the user's other devices, plus every downloaded model,
+  the model settings and every paired Mac. Anything new the app persists has to be added to it.
 
 ## Editing the recipe mid-cook
 

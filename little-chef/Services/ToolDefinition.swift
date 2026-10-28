@@ -6,7 +6,7 @@
 //
 
 import Foundation
-import Tokenizers
+import MLXLMCommon
 
 // MARK: - Timer Manager Protocol
 

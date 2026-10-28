@@ -29,6 +29,8 @@ struct ProfileSettingsView: View {
     @State private var downloadAlertKind: DownloadAlertKind?
     @State private var pendingDeletion: CookingModelChoice?
     @State private var modelError: String?
+    @State private var confirmingDeleteAll = false
+    @State private var deleteAllError: String?
     /// On-disk sizes, sampled rather than read live. Measuring one means walking the model's
     /// directory, and a SwiftUI body runs far too often to put a filesystem crawl inside it.
     @State private var modelSizes: [String: Int64] = [:]
@@ -181,6 +183,22 @@ struct ProfileSettingsView: View {
                 }
             }
 
+            // MARK: - Your Data
+            Section {
+                Button("Delete All Data", role: .destructive) { confirmingDeleteAll = true }
+                    .disabled(llmService.isGenerating || llmService.isLoadingModel)
+
+                if let deleteAllError {
+                    Text(deleteAllError)
+                        .font(.caption)
+                        .foregroundColor(.red)
+                }
+            } header: {
+                Text("Your Data")
+            } footer: {
+                Text("Removes your recipes and settings, downloaded AI models, and paired Macs.")
+            }
+
             // MARK: - About
             Section {
                 Text("Recipes imported from URLs remain the property of their original authors and are stored locally on your device for personal use only.")
@@ -210,6 +228,20 @@ struct ProfileSettingsView: View {
         .onChange(of: autoSpeakResponses) { _, _ in saveIfLoaded() }
         .onChange(of: wakePhrase) { _, _ in saveIfLoaded() }
         .onChange(of: bigBroVoice) { _, _ in saveIfLoaded() }
+        .confirmationDialog(
+            "Delete all data?",
+            isPresented: $confirmingDeleteAll,
+            titleVisibility: .visible
+        ) {
+            Button("Delete All Data", role: .destructive) { deleteAllData() }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            // Mirrored deletes reach iCloud, so a syncing user loses the recipes everywhere —
+            // and has to be told that before, not after.
+            Text(dataManager.cloudSyncStatus.isSyncing
+                 ? "Your recipes and settings will be deleted from this device, from iCloud, and from your other devices signed in to the same iCloud account. Downloaded AI models and paired Macs are removed from this device. This can't be undone."
+                 : "Your recipes and settings, downloaded AI models, and paired Macs will be deleted from this device. This can't be undone.")
+        }
         .alert(item: $downloadAlertKind) { kind in
             downloadAlert(for: kind)
         }
@@ -291,7 +323,7 @@ struct ProfileSettingsView: View {
 
     @ViewBuilder
     private var providerFooter: some View {
-        if let model = LLMService.supportedOnDeviceModel, llmProvider == .local {
+        if let model = llmService.activeOnDeviceModel, llmProvider == .local {
             if model.isFullCapability {
                 Text("On-device inference. \(model.displayName) handles both recipe parsing and cooking assistance.")
             } else {
@@ -308,7 +340,18 @@ struct ProfileSettingsView: View {
 
     @ViewBuilder
     private var localModelSection: some View {
-        if let model = LLMService.supportedOnDeviceModel {
+        // Only offered where there is a choice to make: a device with the memory for the 27B.
+        // Switching takes effect on the next request, which unloads the other model first.
+        if LLMService.onDeviceModelOptions.count > 1 {
+            Picker("Model", selection: $llmService.preferredOnDeviceModel) {
+                ForEach(LLMService.onDeviceModelOptions, id: \.self) { choice in
+                    Text(choice.displayName).tag(choice)
+                }
+            }
+            .disabled(llmService.isGenerating || llmService.isLoadingModel)
+        }
+
+        if let model = llmService.activeOnDeviceModel {
             modelRow(
                 for: model,
                 usage: model.isFullCapability
@@ -463,6 +506,34 @@ struct ProfileSettingsView: View {
     }
 
     // MARK: - Data Operations
+
+    /// Everything the app keeps about the user, gone: recipes and preferences (and their iCloud
+    /// copies), downloaded models and model settings, and every paired Mac.
+    ///
+    /// Models first, because it is the step that can refuse — mid-answer or mid-download — and
+    /// refusing before anything is deleted beats deleting the recipes and then reporting that
+    /// the rest didn't happen.
+    private func deleteAllData() {
+        deleteAllError = nil
+        do {
+            try llmService.deleteAllModels()
+            try LocalDataManager.shared.deleteAllData()
+        } catch {
+            deleteAllError = error.localizedDescription
+            return
+        }
+
+        let client = llmService.bigBroClient
+        client.disableAutoReconnect()
+        client.disconnect()
+        client.forgetAllDevices()
+
+        // Reload the form from the freshly recreated defaults. `hasLoaded` off first, so the
+        // reload's own writes to the fields aren't saved back as if the user had made them.
+        hasLoaded = false
+        loadPreferences()
+        refreshModelSizes()
+    }
 
     private func saveIfLoaded() {
         guard hasLoaded else { return }
