@@ -182,6 +182,7 @@ Read the error before changing anything; these look alike and aren't.
 | `Invalid authentication key credential … invalidPEMDocument` at **Upload** | `ASC_KEY_P8_BASE64` decodes to something that isn't a PEM — usually the base64 body saved without its `-----BEGIN PRIVATE KEY-----` delimiters. **Not** an auth failure. Validate with `openssl pkey -noout -in key.p8` (not `openssl pkcs8 … -noout`, which has no such flag in LibreSSL or OpenSSL 3 and rejects every key) |
 | Profile name mismatch at **Export** | `IOS_PROFILE_*_NAME` must be the profile's **Name** field, not its filename or UUID. The same name is also hardcoded as `PROVISIONING_PROFILE_SPECIFIER` in each target's `Release` config for the archive — rename a profile and **both** have to move |
 | `doesn't support the Push Notifications capability` / `entitlement 'aps-environment' … not present in profile` | The App ID or the stored profile predates the Push Notifications capability CloudKit needs. See **CloudKit sync** below |
+| `entitlement 'com.apple.developer.kernel.increased-memory-limit' … not present in profile` | The app's App Store profile predates the **Increased Memory Limit** capability. Enable it on the `NagataInc.little-chef` App ID, regenerate the profile under the same name and replace `IOS_PROFILE_APP_BASE64`. The widget doesn't carry this entitlement, so its profile is unaffected |
 
 Inspect a run:
 
@@ -205,6 +206,18 @@ mlx-swift-lm 3 doesn't download or tokenize by itself. `HubModelLoading.swift` b
 macros, because `xcodebuild` won't run a package's macros in CI until someone trusts them
 interactively. Models are stored under Application Support in the hub's
 `models--<org>--<name>` layout. Caches is not used, because iOS can empty it.
+
+### The increased-memory-limit entitlement
+
+`com.apple.developer.kernel.increased-memory-limit` is on the app target, not the widget. iOS caps
+each app well below the RAM fitted, and the 27B's ~7 GB of weights can't load under the default
+cap on any current device. `LLMService.onDeviceModelOptions` offers the 27B only when the app's
+measured limit (`os_proc_available_memory()` plus the current footprint) is 9 GB or more. So the
+entitlement is what makes the option appear at all, on devices that grant it. It also gives the
+8B more room on 6–8 GB iPhones.
+
+The entitlement has to be granted by the profile. Removing it from the App ID, or restoring an
+older profile, fails the archive with the row in the table above.
 
 ## CloudKit sync
 
