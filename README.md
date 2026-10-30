@@ -25,6 +25,14 @@ Available on [TestFlight](https://testflight.apple.com/join/Rz11FzNk)
 - **Images**: Extract recipes from photos of cookbooks or handwritten cards via OCR
 - **Text**: Paste or type any recipe and have it structured automatically
 
+### Kitchen: Inventory and Shopping List
+- Keep a list of the ingredients you have, with a Staples section (salt, oil, flour…) that counts as always on hand
+- A shopping list: add items by hand or a recipe's missing ingredients in one tap, then tick them off and move them into the inventory with **Done Shopping**
+- Recipes show what you have and what's missing, and you're warned before starting a cook that needs something you don't have
+- Filter recipes to those you **Can Make Now** or are **Missing a Few** ingredients for
+- **Suggested** ranks your recipes with AI for the time of day (breakfast, lunch or dinner) and what's in your kitchen, with a non-AI fallback
+- Synced through iCloud with your recipes
+
 ### Timer Management
 - Set multiple timers via voice or text
 - Native iOS notifications when timers complete

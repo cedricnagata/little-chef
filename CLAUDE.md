@@ -318,9 +318,60 @@ the code and the policy together.
 - **Models download only when the user chooses.** The chat paths go through
   `downloadedModelContainer`, which throws `modelNotDownloaded` rather than fetching. Only
   Settings' download button, behind its size and cellular prompts, calls `downloadModel`.
-- **Settings → Delete All Data deletes everything.** That means recipes and preferences, row by
-  row so the deletes mirror to iCloud and the user's other devices, plus every downloaded model,
-  the model settings and every paired Mac. Anything new the app persists has to be added to it.
+- **Settings → Delete All Data deletes everything.** That means recipes, preferences, inventory
+  and shopping list, row by row so the deletes mirror to iCloud and the user's other devices, plus
+  every downloaded model, the model settings and every paired Mac. Anything new the app persists
+  has to be added to it.
+
+## Inventory, shopping list and suggestions
+
+The Kitchen tab keeps two SwiftData models, `PantryItemEntity` and `ShoppingItemEntity`, mirrored to
+iCloud with the recipes. **They are new CloudKit record types, so they need Deploy Schema to
+Production too.** Until then TestFlight and App Store builds keep them on the device only.
+
+`KitchenManager` is the one instance `MainView` owns, like `RecipeManager`. It is the inventory the
+recipe filters and the pre-cook check read.
+
+### Matching is deterministic, not AI
+
+`IngredientMatcher` decides what a recipe is missing. It runs for every recipe on every redraw of
+the list, with or without an AI backend, so it has to be instant and give the same answer twice.
+
+- **Reducing a line to names.** A line is cut at its first comma (the rest is preparation), and
+  asides, quantities, units and size or preparation words are stripped. "2 cloves garlic, minced"
+  becomes `garlic`.
+- **Several ingredients, or a choice.** "Salt and pepper" is two ingredients. "Butter or oil" is
+  one ingredient with two acceptable alternatives.
+- **What is skipped.** Optional, garnish and serving lines are never counted as missing. Water and
+  section headers ("For the sauce:") are dropped.
+- **When two names match.** One side's words must be a subset of the other's. "Garlic" covers
+  "garlic cloves", but "black pepper" doesn't cover "bell pepper". This is lenient on purpose:
+  "cinnamon" also covers "ground cinnamon". A wrong "you have it" costs a substitution, while a
+  wrong "missing" hides a recipe the user could have made.
+
+### Staples and duplicates
+
+- **Staples.** Common staples are seeded once per device (`KitchenManager.staplesSeededKey`, which
+  Delete All Data clears), in the inventory's Staples section, and count as always on hand.
+- **Why duplicates happen.** A second device seeds the staples again before iCloud has delivered
+  the first device's, so duplicate names are expected.
+- **How they're collapsed.** `fetchPantryItems()` and `fetchShoppingItems()` collapse them the way
+  `fetchPreferences()` does: oldest row wins, ties broken on `id`, so every device converges.
+- **No warnings until the inventory is in use.** Recipes only show have and missing, and the pre-cook
+  warning only appears, once the user has added an item beyond the staples
+  (`isTrackingInventory`). Before that, every recipe would report everything missing.
+
+### Suggested ranking
+
+`RecipeSuggester` asks the active AI provider to order recipes for the current meal period
+(breakfast, lunch, dinner or late night), given what each is missing.
+
+- **Numbers, not UUIDs.** Recipes are given to the model by number, so it never has to reproduce a
+  UUID. `parseOrder` accepts `{"order": [...]}` or a bare list of numbers.
+- **Never an error.** No AI, a model that isn't downloaded, or an unusable answer all fall back to a
+  deterministic order: fewest missing, then meal keywords, then title. The header says when that
+  happened.
+- **Cached.** The ranking is reused until the meal period, inventory or recipe list changes.
 
 ## Editing the recipe mid-cook
 

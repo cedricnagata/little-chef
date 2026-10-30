@@ -687,19 +687,32 @@ struct EditableServingsCard: View {
 struct RecipeSelectorView: View {
     @EnvironmentObject var recipeManager: RecipeManager
     @EnvironmentObject var cookingSessionManager: CookingSessionManager
+    @EnvironmentObject var kitchenManager: KitchenManager
     @Environment(\.dismiss) private var dismiss
+    @State private var missingCheck: MissingIngredientsCheck?
+
+    private func choose(_ recipe: Recipe) {
+        if let check = kitchenManager.checkBeforeCooking(recipe) {
+            missingCheck = check
+        } else {
+            cook(recipe)
+        }
+    }
+
+    private func cook(_ recipe: Recipe) {
+        Task { await cookingSessionManager.startCookingSession(with: recipe) }
+        dismiss()
+    }
 
     var body: some View {
         NavigationStack {
             List(recipeManager.recipes) { recipe in
-                Button(action: {
-                    Task { await cookingSessionManager.startCookingSession(with: recipe) }
-                    dismiss()
-                }) {
+                Button(action: { choose(recipe) }) {
                     RecipeRowView(recipe: recipe)
                 }
                 .buttonStyle(PlainButtonStyle())
             }
+            .missingIngredientsDialog($missingCheck) { cook($0) }
             .navigationTitle("Choose Recipe")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -719,5 +732,6 @@ struct RecipeSelectorView: View {
         .environmentObject(CookingSessionManager())
         .environmentObject(VoiceAssistant())
         .environmentObject(RecipeManager())
+        .environmentObject(KitchenManager())
         .environmentObject(LLMService.shared)
 }
