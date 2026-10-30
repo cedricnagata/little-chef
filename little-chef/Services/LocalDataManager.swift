@@ -70,7 +70,9 @@ class LocalDataManager: ObservableObject {
     private init() throws {
         let schema = Schema([
             RecipeEntity.self,
-            UserPreferencesEntity.self
+            UserPreferencesEntity.self,
+            PantryItemEntity.self,
+            ShoppingItemEntity.self
         ])
 
         let cloudConfiguration = ModelConfiguration(
@@ -274,9 +276,137 @@ class LocalDataManager: ObservableObject {
         for preferences in try modelContext.fetch(FetchDescriptor<UserPreferencesEntity>()) {
             modelContext.delete(preferences)
         }
+        for item in try modelContext.fetch(FetchDescriptor<PantryItemEntity>()) {
+            modelContext.delete(item)
+        }
+        for item in try modelContext.fetch(FetchDescriptor<ShoppingItemEntity>()) {
+            modelContext.delete(item)
+        }
         try modelContext.save()
-        Self.log.notice("Deleted all recipes and preferences at the user's request")
+        Self.log.notice("Deleted all recipes, preferences, inventory and shopping list at the user's request")
+        // So the default staples come back, as the default settings do.
+        UserDefaults.standard.removeObject(forKey: KitchenManager.staplesSeededKey)
         storeDidChange.send()
+    }
+
+    // MARK: - Kitchen Operations
+
+    /// The inventory, with any duplicate names collapsed.
+    ///
+    /// Duplicates arrive the same way preference rows do: two devices each seed the default
+    /// staples before either has imported the other's, or the same item is added on both. The
+    /// oldest row wins, ties broken on `id`, so every device deletes the same losers and the
+    /// store converges instead of each device keeping its own copy.
+    func fetchPantryItems() throws -> [PantryItemEntity] {
+        let items = try modelContext.fetch(FetchDescriptor<PantryItemEntity>())
+        return try collapseDuplicates(items, name: \.name, createdAt: \.createdAt, id: \.id)
+    }
+
+    /// Adds `name` to the inventory, or returns the item already there under the same name.
+    @discardableResult
+    func addPantryItem(name: String, note: String? = nil, isStaple: Bool = false) throws -> PantryItemEntity {
+        if let existing = try fetchPantryItems().first(where: { IngredientMatcher.sameItem($0.name, name) }) {
+            return existing
+        }
+        let item = PantryItemEntity(name: name, note: note, isStaple: isStaple)
+        modelContext.insert(item)
+        try modelContext.save()
+        return item
+    }
+
+    func updatePantryItem(id: UUID, name: String? = nil, note: String?? = nil, isStaple: Bool? = nil) throws {
+        let descriptor = FetchDescriptor<PantryItemEntity>(predicate: #Predicate { $0.id == id })
+        guard let item = try modelContext.fetch(descriptor).first else { return }
+        if let name { item.name = name }
+        if let note { item.note = note }
+        if let isStaple { item.isStaple = isStaple }
+        item.updatedAt = Date()
+        try modelContext.save()
+    }
+
+    /// Idempotent for the same reason ``deleteRecipe(id:)`` is.
+    func deletePantryItems(ids: [UUID]) throws {
+        let descriptor = FetchDescriptor<PantryItemEntity>(predicate: #Predicate { ids.contains($0.id) })
+        let items = try modelContext.fetch(descriptor)
+        guard !items.isEmpty else { return }
+        items.forEach { modelContext.delete($0) }
+        try modelContext.save()
+    }
+
+    /// The shopping list, with duplicate names collapsed as ``fetchPantryItems()`` does.
+    func fetchShoppingItems() throws -> [ShoppingItemEntity] {
+        let items = try modelContext.fetch(FetchDescriptor<ShoppingItemEntity>())
+        return try collapseDuplicates(items, name: \.name, createdAt: \.createdAt, id: \.id)
+    }
+
+    /// Adds `name` to the shopping list unless it's already on it. Returns whether it was added.
+    @discardableResult
+    func addShoppingItem(name: String, note: String? = nil, recipeTitle: String? = nil) throws -> Bool {
+        if try fetchShoppingItems().contains(where: { IngredientMatcher.sameItem($0.name, name) }) {
+            return false
+        }
+        modelContext.insert(ShoppingItemEntity(name: name, note: note, recipeTitle: recipeTitle))
+        try modelContext.save()
+        return true
+    }
+
+    func setShoppingItemChecked(id: UUID, isChecked: Bool) throws {
+        let descriptor = FetchDescriptor<ShoppingItemEntity>(predicate: #Predicate { $0.id == id })
+        guard let item = try modelContext.fetch(descriptor).first else { return }
+        item.isChecked = isChecked
+        item.updatedAt = Date()
+        try modelContext.save()
+    }
+
+    func deleteShoppingItems(ids: [UUID]) throws {
+        let descriptor = FetchDescriptor<ShoppingItemEntity>(predicate: #Predicate { ids.contains($0.id) })
+        let items = try modelContext.fetch(descriptor)
+        guard !items.isEmpty else { return }
+        items.forEach { modelContext.delete($0) }
+        try modelContext.save()
+    }
+
+    /// Moves every checked shopping item into the inventory, in one save. Returns how many moved.
+    @discardableResult
+    func moveCheckedShoppingItemsToPantry() throws -> Int {
+        let checked = try fetchShoppingItems().filter(\.isChecked)
+        guard !checked.isEmpty else { return 0 }
+        let pantry = try fetchPantryItems()
+        for item in checked {
+            if !pantry.contains(where: { IngredientMatcher.sameItem($0.name, item.name) }) {
+                modelContext.insert(PantryItemEntity(name: item.name, note: item.note))
+            }
+            modelContext.delete(item)
+        }
+        try modelContext.save()
+        return checked.count
+    }
+
+    /// Keeps the oldest row of each name and deletes the rest.
+    private func collapseDuplicates<T: PersistentModel>(
+        _ items: [T],
+        name: KeyPath<T, String>,
+        createdAt: KeyPath<T, Date>,
+        id: KeyPath<T, UUID>
+    ) throws -> [T] {
+        let ordered = items.sorted {
+            ($0[keyPath: createdAt], $0[keyPath: id].uuidString) < ($1[keyPath: createdAt], $1[keyPath: id].uuidString)
+        }
+        var kept: [T] = []
+        var losers: [T] = []
+        for item in ordered {
+            if kept.contains(where: { IngredientMatcher.sameItem($0[keyPath: name], item[keyPath: name]) }) {
+                losers.append(item)
+            } else {
+                kept.append(item)
+            }
+        }
+        if !losers.isEmpty {
+            Self.log.notice("Collapsing \(losers.count) duplicate \(String(describing: T.self)) rows")
+            losers.forEach { modelContext.delete($0) }
+            try modelContext.save()
+        }
+        return kept
     }
 
     // MARK: - User Preferences Operations

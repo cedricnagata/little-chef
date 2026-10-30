@@ -15,18 +15,57 @@ struct RecipeListView: View {
     /// so adding a recipe here left the cooking tab's recipe picker showing the old list until
     /// it happened to refetch. One store, one manager.
     @EnvironmentObject var recipeManager: RecipeManager
+    @EnvironmentObject var kitchenManager: KitchenManager
     @State private var showingAddRecipe = false
     @State private var searchText = ""
+    @State private var filter: RecipeFilter = .all
 
-    var filteredRecipes: [Recipe] {
-        if searchText.isEmpty {
-            return recipeManager.recipes
-        } else {
-            return recipeManager.recipes.filter { recipe in
-                recipe.title.localizedCaseInsensitiveContains(searchText) ||
-                recipe.ingredients.joined().localizedCaseInsensitiveContains(searchText) ||
-                recipe.tags.joined().localizedCaseInsensitiveContains(searchText)
+    enum RecipeFilter: String, CaseIterable, Identifiable {
+        case all = "All Recipes"
+        case canMake = "Can Make Now"
+        case almost = "Missing a Few"
+        case suggested = "Suggested"
+        var id: String { rawValue }
+
+        var icon: String {
+            switch self {
+            case .all: return "line.3.horizontal.decrease.circle"
+            case .canMake: return "checkmark.circle"
+            case .almost: return "cart"
+            case .suggested: return "sparkles"
             }
+        }
+    }
+
+    /// Worked out once per render for every recipe, rather than once per row.
+    private var availability: [UUID: RecipeAvailability] {
+        kitchenManager.availability(of: recipeManager.recipes)
+    }
+
+    private func filteredRecipes(_ availability: [UUID: RecipeAvailability]) -> [Recipe] {
+        let searched = searchText.isEmpty ? recipeManager.recipes : recipeManager.recipes.filter { recipe in
+            recipe.title.localizedCaseInsensitiveContains(searchText) ||
+            recipe.ingredients.joined().localizedCaseInsensitiveContains(searchText) ||
+            recipe.tags.joined().localizedCaseInsensitiveContains(searchText)
+        }
+        func missing(_ recipe: Recipe) -> Int { availability[recipe.id]?.missing.count ?? .max }
+
+        // Before the user keeps an inventory, "can make" would mean "needs only staples".
+        if filter == .canMake || filter == .almost, !kitchenManager.isTrackingInventory { return [] }
+
+        switch filter {
+        case .all:
+            return searched
+        case .canMake:
+            return searched.filter { missing($0) == 0 }
+        case .almost:
+            return searched
+                .filter { (1...IngredientMatcher.almostThreshold).contains(missing($0)) }
+                .sorted { missing($0) < missing($1) }
+        case .suggested:
+            guard let order = kitchenManager.suggestions?.order else { return searched }
+            let position = Dictionary(order.enumerated().map { ($1, $0) }, uniquingKeysWith: { first, _ in first })
+            return searched.sorted { (position[$0.id] ?? .max) < (position[$1.id] ?? .max) }
         }
     }
 
@@ -55,27 +94,58 @@ struct RecipeListView: View {
                         .tint(.orange)
                     }
                 } else {
+                    let availability = self.availability
+                    let recipes = filteredRecipes(availability)
                     List {
-                        ForEach(filteredRecipes) { recipe in
+                        filterHeader
+
+                        if recipes.isEmpty, filter != .all {
+                            emptyFilterMessage
+                        }
+
+                        ForEach(recipes) { recipe in
                             NavigationLink(destination: RecipeDetailView(recipe: recipe).environmentObject(recipeManager)) {
-                                RecipeRowView(recipe: recipe)
+                                RecipeRowView(
+                                    recipe: recipe,
+                                    availability: kitchenManager.isTrackingInventory ? availability[recipe.id] : nil
+                                )
                             }
                         }
-                        .onDelete(perform: deleteRecipes)
+                        .onDelete { offsets in deleteRecipes(offsets.map { recipes[$0] }) }
                     }
                     .refreshable {
                         await recipeManager.loadRecipes()
+                        if filter == .suggested { await kitchenManager.refreshSuggestions(for: recipeManager.recipes, force: true) }
                     }
                 }
             }
             .navigationTitle("My Recipes")
             .searchable(text: $searchText, prompt: "Search recipes, ingredients, or tags")
             .toolbar {
+                ToolbarItem(placement: .navigationBarLeading) {
+                    Menu {
+                        Picker("Filter", selection: $filter) {
+                            ForEach(RecipeFilter.allCases) { option in
+                                Label(option.rawValue, systemImage: option.icon).tag(option)
+                            }
+                        }
+                    } label: {
+                        Image(systemName: filter == .all
+                              ? "line.3.horizontal.decrease.circle"
+                              : "line.3.horizontal.decrease.circle.fill")
+                    }
+                    .accessibilityLabel("Filter recipes")
+                }
                 ToolbarItem(placement: .navigationBarTrailing) {
                     Button(action: { showingAddRecipe = true }) {
                         Image(systemName: "plus")
                     }
                 }
+            }
+            // Re-run when the inventory or recipe list changes too. `refreshSuggestions` keeps the
+            // last ranking when nothing it depends on has, so this asks the model only when needed.
+            .task(id: "\(filter.rawValue)|\(kitchenManager.pantry.count)|\(recipeManager.recipes.count)") {
+                if filter == .suggested { await kitchenManager.refreshSuggestions(for: recipeManager.recipes) }
             }
             .sheet(isPresented: $showingAddRecipe) {
                 AddRecipeView()
@@ -92,12 +162,62 @@ struct RecipeListView: View {
         }
     }
 
-    private func deleteRecipes(offsets: IndexSet) {
-        for index in offsets {
-            let recipe = filteredRecipes[index]
+    private func deleteRecipes(_ recipes: [Recipe]) {
+        for recipe in recipes {
             Task {
                 await recipeManager.deleteRecipe(recipe)
             }
+        }
+    }
+
+    // MARK: - Filter UI
+
+    /// Says which filter is on, and for Suggested, what it was ranked for and how.
+    @ViewBuilder
+    private var filterHeader: some View {
+        if filter == .suggested {
+            HStack(spacing: 8) {
+                if kitchenManager.isRankingSuggestions {
+                    ProgressView()
+                    Text("Finding the best recipes for \(MealPeriod(date: Date()).displayName)…")
+                } else if let suggestions = kitchenManager.suggestions {
+                    Image(systemName: "sparkles").foregroundColor(.orange)
+                    Text(suggestions.rankedByAI
+                         ? "Suggested for \(suggestions.mealPeriod.displayName)"
+                         : "Suggested for \(suggestions.mealPeriod.displayName), by what you have (AI unavailable)")
+                    Spacer()
+                    Button {
+                        Task { await kitchenManager.refreshSuggestions(for: recipeManager.recipes, force: true) }
+                    } label: {
+                        Image(systemName: "arrow.clockwise")
+                    }
+                    .buttonStyle(.borderless)
+                    .accessibilityLabel("Re-rank suggestions")
+                }
+            }
+            .font(.footnote)
+            .foregroundColor(.secondary)
+        } else if filter != .all {
+            Label(filter.rawValue, systemImage: filter.icon)
+                .font(.footnote)
+                .foregroundColor(.secondary)
+        }
+    }
+
+    @ViewBuilder
+    private var emptyFilterMessage: some View {
+        if !kitchenManager.isTrackingInventory {
+            Text("Add the ingredients you have in the Kitchen tab, and this shows what you can make with them.")
+                .font(.subheadline)
+                .foregroundColor(.secondary)
+        } else if filter == .canMake {
+            Text("Nothing you can make with just what's in your kitchen. Try Missing a Few.")
+                .font(.subheadline)
+                .foregroundColor(.secondary)
+        } else if filter == .almost {
+            Text("No recipes are only one or two ingredients away.")
+                .font(.subheadline)
+                .foregroundColor(.secondary)
         }
     }
 }
@@ -106,6 +226,8 @@ struct RecipeListView: View {
 
 struct RecipeRowView: View {
     let recipe: Recipe
+    /// Shown as "You have everything" or "Missing 2" when the user keeps an inventory.
+    var availability: RecipeAvailability? = nil
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -146,6 +268,18 @@ struct RecipeRowView: View {
                 Label("\(recipe.servings) servings", systemImage: "person.2")
                     .font(.caption)
                     .foregroundColor(.secondary)
+            }
+
+            if let availability {
+                if availability.canMake {
+                    Label("You have everything", systemImage: "checkmark.circle.fill")
+                        .font(.caption)
+                        .foregroundColor(.green)
+                } else {
+                    Label("Missing \(availability.missing.count)", systemImage: "cart")
+                        .font(.caption)
+                        .foregroundColor(.orange)
+                }
             }
 
             if !recipe.tags.isEmpty {
@@ -201,4 +335,5 @@ struct DifficultyBadge: View {
 #Preview {
     RecipeListView()
         .environmentObject(RecipeManager())
+        .environmentObject(KitchenManager())
 }

@@ -13,12 +13,24 @@ struct RecipeDetailView: View {
     @State private var isEditing = false
     @EnvironmentObject var recipeManager: RecipeManager
     @EnvironmentObject var cookingSessionManager: CookingSessionManager
+    @EnvironmentObject var kitchenManager: KitchenManager
     @Environment(\.dismiss) private var dismiss
     @Environment(\.selectedTab) private var selectedTab
 
     /// The edit in progress. Nil unless editing, so there is no stale half-edit to accidentally
     /// save and no second copy of the recipe's fields to keep in step with `RecipeData`.
     @State private var draft: RecipeDraft?
+
+    /// Set while the missing-ingredients warning is up, before a cook starts.
+    @State private var missingCheck: MissingIngredientsCheck?
+    /// How many items the last "add missing" put on the shopping list, for the confirmation line.
+    @State private var addedToShoppingList: Int?
+
+    /// What this recipe needs that the inventory doesn't have. Nil until the user keeps an
+    /// inventory, so a recipe isn't shown as missing everything before they've started.
+    private var availability: RecipeAvailability? {
+        kitchenManager.isTrackingInventory ? kitchenManager.availability(of: currentRecipe) : nil
+    }
 
     /// The recipe as the store currently has it.
     ///
@@ -75,6 +87,7 @@ struct RecipeDetailView: View {
                 }
             }
         }
+        .missingIngredientsDialog($missingCheck) { _ in beginCooking() }
         .alert("Delete Recipe", isPresented: $showingDeleteAlert) {
             Button("Cancel", role: .cancel) { }
             Button("Delete", role: .destructive) {
@@ -149,17 +162,51 @@ struct RecipeDetailView: View {
                         .foregroundColor(.secondary)
                 }
 
+                let availability = self.availability
+                let missingLines = Set(availability?.missing ?? [])
                 LazyVStack(alignment: .leading, spacing: 8) {
                     ForEach(Array(currentRecipe.ingredients.enumerated()), id: \.offset) { _, ingredient in
                         HStack(alignment: .top, spacing: 12) {
-                            Circle()
-                                .fill(Color.orange.opacity(0.2))
-                                .frame(width: 8, height: 8)
-                                .padding(.top, 6)
+                            if availability == nil {
+                                Circle()
+                                    .fill(Color.orange.opacity(0.2))
+                                    .frame(width: 8, height: 8)
+                                    .padding(.top, 6)
+                            } else if missingLines.contains(ingredient) {
+                                Image(systemName: "cart")
+                                    .font(.caption)
+                                    .foregroundColor(.orange)
+                                    .padding(.top, 3)
+                                    .accessibilityLabel("Missing")
+                            } else {
+                                Image(systemName: "checkmark")
+                                    .font(.caption)
+                                    .foregroundColor(.green)
+                                    .padding(.top, 3)
+                                    .accessibilityLabel("In your kitchen")
+                            }
                             Text(ingredient)
                                 .font(.body)
                             Spacer()
                         }
+                    }
+                }
+
+                if let availability, !availability.canMake {
+                    Button {
+                        addedToShoppingList = kitchenManager.addToShoppingList(
+                            availability.missingNames, recipeTitle: currentRecipe.title)
+                    } label: {
+                        Label("Add \(availability.missingNames.count) missing to shopping list", systemImage: "cart.badge.plus")
+                            .font(.subheadline)
+                    }
+                    .buttonStyle(.bordered)
+                    .tint(.orange)
+
+                    if let added = addedToShoppingList {
+                        Text(added == 0 ? "Already on your shopping list." : "Added \(added) to your shopping list.")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
                     }
                 }
             }
@@ -256,6 +303,14 @@ struct RecipeDetailView: View {
     }
 
     private func startCookingSession() {
+        if let check = kitchenManager.checkBeforeCooking(currentRecipe) {
+            missingCheck = check
+        } else {
+            beginCooking()
+        }
+    }
+
+    private func beginCooking() {
         Task { await cookingSessionManager.startCookingSession(with: currentRecipe) }
         dismiss()
         selectedTab.wrappedValue = 1

@@ -196,7 +196,7 @@ struct ProfileSettingsView: View {
             } header: {
                 Text("Your Data")
             } footer: {
-                Text("Removes your recipes and settings, downloaded AI models, and paired Macs.")
+                Text("Removes your recipes, inventory, shopping list and settings, downloaded AI models, and paired Macs.")
             }
 
             // MARK: - About
@@ -239,8 +239,8 @@ struct ProfileSettingsView: View {
             // Mirrored deletes reach iCloud, so a syncing user loses the recipes everywhere —
             // and has to be told that before, not after.
             Text(dataManager.cloudSyncStatus.isSyncing
-                 ? "Your recipes and settings will be deleted from this device, from iCloud, and from your other devices signed in to the same iCloud account. Downloaded AI models and paired Macs are removed from this device. This can't be undone."
-                 : "Your recipes and settings, downloaded AI models, and paired Macs will be deleted from this device. This can't be undone.")
+                 ? "Your recipes, inventory, shopping list and settings will be deleted from this device, from iCloud, and from your other devices signed in to the same iCloud account. Downloaded AI models and paired Macs are removed from this device. This can't be undone."
+                 : "Your recipes, inventory, shopping list and settings, downloaded AI models, and paired Macs will be deleted from this device. This can't be undone.")
         }
         .alert(item: $downloadAlertKind) { kind in
             downloadAlert(for: kind)
