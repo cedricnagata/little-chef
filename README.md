@@ -104,14 +104,15 @@ Turn-taking is the same on both paths: the microphone endpoints on signal energy
 
 **Key components:**
 - `LLMService` — manages inference backend selection, model download/loading, and chat completions
-- `LocalCookingAgent` — maintains conversation history and builds prompts for the cooking session
-- `LocalRecipeParser` — parses recipes from URLs (schema.org + LLM cleanup), images (OCR), and text
+- `LocalCookingAgent` — builds the system prompt and tool list for the cooking session, and runs each turn from the session's transcript
+- `LocalRecipeParser` — imports recipes from URLs (schema.org + LLM cleanup), images (OCR), and text; the parsing itself is `RecipeExtraction`
+- `KitchenManager` — the ingredient inventory and shopping list, and what each recipe is missing (`IngredientMatcher`)
 - `VoiceAssistant` — the voice front end; owns permissions, the shared `VoicePhase` state the UI renders, and which of the two sessions below is running
 - `LocalVoiceSession` — the on-device hands-free loop: listen, transcribe, answer, speak, repeat, with no Mac in the loop. Mirrors `BigBroVoiceSession` in BigBroKit, which does the same on the Mac path
 - `OnDeviceSpeaker` — `AVSpeechSynthesizer` wrapped so an utterance can be awaited, and so a cancelled one exits the same way a finished one does
 - `BigBroClient` (BigBroKit) — handles pairing, connection, and streaming chat with the Mac companion
-- `TimerManager` — manages multiple concurrent cooking timers with iOS notifications
-- `LocalDataManager` — SwiftData persistence for recipes and user preferences, with optional iCloud sync
+- `CookingSessionManager` — the cook in progress: its recipe, conversation and timers (`LocalTimer`, with notifications and Live Activities), and the assistant's edits
+- `LocalDataManager` — SwiftData persistence for recipes, preferences, inventory and shopping list, with optional iCloud sync
 
 ## Tech Stack
 
@@ -120,3 +121,13 @@ Turn-taking is the same on both paths: the microphone endpoints on signal energy
 - **Mac inference & speech**: BigBroKit (local network pairing, Parakeet STT, Kokoro TTS)
 - **Recipe parsing**: WebScraperService, OCRService, schema.org extraction
 - **Storage**: SwiftData (CloudKit-backed, falling back to a local-only store)
+
+## Tests
+
+Unit tests live in `little-chefTests` and use Swift Testing. Run them in Xcode with ⌘U, or without a simulator:
+
+```sh
+swift test --package-path tools/linux-tests
+```
+
+That package links the app's Foundation-only files and the same test folder, so it runs anywhere Swift does. It runs on Linux for every pull request. See CLAUDE.md, "Testing", for which files it covers and how to add one.
