@@ -121,3 +121,62 @@ func mealPeriodFollowsTheClock(hour: Int, expected: MealPeriod) {
     let date = calendar.date(from: DateComponents(year: 2026, month: 10, day: 30, hour: hour))!
     #expect(MealPeriod(date: date, calendar: calendar) == expected)
 }
+
+// MARK: - Ranking
+
+private func recipe(_ title: String, _ ingredients: [String], tags: [String] = []) -> Recipe {
+    Recipe(id: UUID(), title: title, description: nil, servings: 2, prepTime: nil, cookTime: nil,
+           ingredients: ingredients, instructions: [], tags: tags, sourceUrl: nil, cuisineType: nil,
+           difficulty: nil, createdAt: Date(), updatedAt: Date())
+}
+
+private let breakfastTime: Date = {
+    var calendar = Calendar(identifier: .gregorian)
+    calendar.timeZone = .current
+    return calendar.date(from: DateComponents(year: 2026, month: 10, day: 30, hour: 8))!
+}()
+
+@Test func ranksByWhatIsMissingThenByTheMeal() {
+    let omelette = recipe("Omelette", ["3 eggs", "Butter"], tags: ["breakfast"])
+    let curry = recipe("Curry", ["Chicken", "Rice"])
+    let pasta = recipe("Pasta", ["Spaghetti", "Garlic", "Basil", "Parmesan"])
+    let recipes = [pasta, curry, omelette]
+    let availability = Dictionary(uniqueKeysWithValues: recipes.map {
+        ($0.id, IngredientMatcher.availability(of: $0.ingredients, inventory: ["eggs", "butter", "chicken", "rice"]))
+    })
+
+    let order = RecipeSuggester.heuristicOrder(recipes, availability: availability, meal: .breakfast).map(\.title)
+    #expect(order == ["Omelette", "Curry", "Pasta"])
+}
+
+@MainActor
+@Test func usesTheModelsOrderAndKeepsTheRest() async {
+    let recipes = [recipe("A", ["x"]), recipe("B", ["x"]), recipe("C", ["x"])]
+    var prompt = ""
+    let ranked = await RecipeSuggester.rank(recipes, availability: [:], now: breakfastTime) { messages in
+        prompt = messages.map(\.content).joined(separator: "\n")
+        return #"{"order": [3, 1]}"#
+    }
+    #expect(ranked.rankedByAI)
+    #expect(ranked.mealPeriod == .breakfast)
+    #expect(ranked.order == [recipes[2].id, recipes[0].id, recipes[1].id])
+    #expect(prompt.contains("breakfast"))
+    #expect(prompt.contains("1. A"))
+}
+
+@MainActor
+@Test func fallsBackWhenThereIsNoModelOrItFails() async {
+    struct Offline: Error {}
+    let recipes = [recipe("B", ["x"]), recipe("A", ["x"])]
+
+    let none = await RecipeSuggester.rank(recipes, availability: [:], now: breakfastTime, ask: nil)
+    #expect(!none.rankedByAI)
+    #expect(none.order == [recipes[1].id, recipes[0].id])
+
+    let failing = await RecipeSuggester.rank(recipes, availability: [:], now: breakfastTime) { _ in throw Offline() }
+    #expect(!failing.rankedByAI)
+
+    let nonsense = await RecipeSuggester.rank(recipes, availability: [:], now: breakfastTime) { _ in "no idea" }
+    #expect(!nonsense.rankedByAI)
+    #expect(nonsense.order.count == 2)
+}

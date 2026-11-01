@@ -1,0 +1,26 @@
+name: Unit tests
+
+# Runs little-chefTests on Linux, through the SwiftPM package in tools/linux-tests whose
+# sources are symlinks into the app. Minutes on a Linux runner rather than a macOS one, and no
+# simulator: everything it tests is Foundation-only by design (see CLAUDE.md, "Testing").
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+concurrency:
+  group: unit-tests-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    container: swift:6.1-noble
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Test
+        run: swift test --package-path tools/linux-tests

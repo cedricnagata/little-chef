@@ -25,3 +25,6 @@ little-chef/Config.plist
 *.p8
 *.mobileprovision
 *.cer
+
+# SwiftPM build products (tools/linux-tests)
+.build/
