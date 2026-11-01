@@ -52,13 +52,11 @@ class LocalDataManager: ObservableObject {
     @Published private(set) var cloudSyncStatus: CloudSyncStatus = .syncing
 
     /// Fires when the store changed underneath whatever you last read out of it: a CloudKit
-    /// import from another device, or a bulk local write that no per-screen cache saw.
+    /// import from another device, or Delete All Data.
     ///
-    /// A subject rather than the `onRemoteChange` closure this replaces. That was a single
-    /// property, and `RecipeManager` — which is instantiated twice, once in `MainView` and once
-    /// in `RecipeListView` — assigned it in `init`. The second one to be built silently
-    /// overwrote the first, so exactly one of the two ever heard about a remote change and the
-    /// other showed a recipe list that no longer matched the store. Every subscriber gets this.
+    /// A subject rather than a closure property because there is more than one subscriber —
+    /// `RecipeManager` and `KitchenManager` — and a single `var onRemoteChange` silently kept
+    /// only the last one assigned.
     ///
     /// Deliberately not sent for ordinary single-record writes: the caller that made the change
     /// already updated its own state, and `ProfileSettingsView` writes a preference on every
@@ -149,31 +147,6 @@ class LocalDataManager: ObservableObject {
         return try modelContext.fetch(descriptor).first
     }
 
-    /// Search recipes by query
-    func searchRecipes(query: String) throws -> [RecipeEntity] {
-        // Fetch all recipes and filter in memory for complex matching
-        let allRecipes = try fetchAllRecipes()
-
-        guard !query.isEmpty else {
-            return allRecipes
-        }
-
-        return allRecipes.filter { $0.matches(query: query) }
-    }
-
-    /// Fetch recipes by tag
-    func fetchRecipes(byTag tag: String) throws -> [RecipeEntity] {
-        let allRecipes = try fetchAllRecipes()
-        return allRecipes.filter { $0.tags.contains(tag) }
-    }
-
-    /// Fetch all unique tags
-    func fetchAllTags() throws -> [String] {
-        let allRecipes = try fetchAllRecipes()
-        let allTags = allRecipes.flatMap { $0.tags }
-        return Array(Set(allTags)).sorted()
-    }
-
     /// Create a new recipe
     @discardableResult
     func createRecipe(_ recipeData: RecipeData) throws -> RecipeEntity {
@@ -183,15 +156,6 @@ class LocalDataManager: ObservableObject {
         return recipe
     }
 
-    /// Create a recipe from existing Recipe struct
-    @discardableResult
-    func createRecipe(from recipe: Recipe) throws -> RecipeEntity {
-        let entity = RecipeEntity.from(recipe)
-        modelContext.insert(entity)
-        try modelContext.save()
-        return entity
-    }
-
     /// Update an existing recipe
     func updateRecipe(id: UUID, with recipeData: RecipeData) throws {
         guard let recipe = try fetchRecipe(id: id) else {
@@ -199,41 +163,6 @@ class LocalDataManager: ObservableObject {
         }
 
         recipe.update(from: recipeData)
-        try modelContext.save()
-    }
-
-    /// Update specific recipe fields
-    func updateRecipe(
-        id: UUID,
-        title: String? = nil,
-        description: String? = nil,
-        servings: Int? = nil,
-        prepTime: Int? = nil,
-        cookTime: Int? = nil,
-        ingredients: [String]? = nil,
-        instructions: [String]? = nil,
-        tags: [String]? = nil,
-        sourceUrl: String? = nil,
-        cuisineType: String? = nil,
-        difficulty: String? = nil
-    ) throws {
-        guard let recipe = try fetchRecipe(id: id) else {
-            throw LocalDataError.recipeNotFound(id)
-        }
-
-        if let title = title { recipe.title = title }
-        if let description = description { recipe.recipeDescription = description }
-        if let servings = servings { recipe.servings = servings }
-        if let prepTime = prepTime { recipe.prepTime = prepTime }
-        if let cookTime = cookTime { recipe.cookTime = cookTime }
-        if let ingredients = ingredients { recipe.ingredients = ingredients }
-        if let instructions = instructions { recipe.instructions = instructions }
-        if let tags = tags { recipe.tags = tags }
-        if let sourceUrl = sourceUrl { recipe.sourceUrl = sourceUrl }
-        if let cuisineType = cuisineType { recipe.cuisineType = cuisineType }
-        if let difficulty = difficulty { recipe.difficulty = difficulty }
-
-        recipe.updatedAt = Date()
         try modelContext.save()
     }
 
@@ -251,19 +180,7 @@ class LocalDataManager: ObservableObject {
         try modelContext.save()
     }
 
-    /// Delete multiple recipes
-    func deleteRecipes(ids: [UUID]) throws {
-        let descriptor = FetchDescriptor<RecipeEntity>(
-            predicate: #Predicate { ids.contains($0.id) }
-        )
-        let recipes = try modelContext.fetch(descriptor)
-        guard !recipes.isEmpty else { return }
-        recipes.forEach { modelContext.delete($0) }
-        try modelContext.save()
-        storeDidChange.send()
-    }
-
-    /// Deletes every recipe and preference row.
+    /// Deletes every recipe, preference, inventory and shopping-list row.
     ///
     /// Row by row through the context rather than a batch delete, so the deletions go through
     /// the same path CloudKit mirroring exports from: the user's iCloud copy and their other
@@ -314,10 +231,9 @@ class LocalDataManager: ObservableObject {
         return item
     }
 
-    func updatePantryItem(id: UUID, name: String? = nil, note: String?? = nil, isStaple: Bool? = nil) throws {
+    func updatePantryItem(id: UUID, note: String?? = nil, isStaple: Bool? = nil) throws {
         let descriptor = FetchDescriptor<PantryItemEntity>(predicate: #Predicate { $0.id == id })
         guard let item = try modelContext.fetch(descriptor).first else { return }
-        if let name { item.name = name }
         if let note { item.note = note }
         if let isStaple { item.isStaple = isStaple }
         item.updatedAt = Date()
@@ -433,7 +349,7 @@ class LocalDataManager: ObservableObject {
             .sorted { ($0.updatedAt, $0.id.uuidString) > ($1.updatedAt, $1.id.uuidString) }
 
         guard let winner = preferences.first else {
-            let defaultPrefs = UserPreferencesEntity.createDefault()
+            let defaultPrefs = UserPreferencesEntity()
             modelContext.insert(defaultPrefs)
             try modelContext.save()
             return defaultPrefs
@@ -450,59 +366,9 @@ class LocalDataManager: ObservableObject {
         return winner
     }
 
-    /// Update user preferences
-    func updatePreferences(
-        measurementSystem: String? = nil,
-        dietaryRestrictions: [String]? = nil,
-        speechRate: Float? = nil,
-        voiceIdentifier: String? = nil,
-        autoSpeakResponses: Bool? = nil,
-        useBigBroSpeech: Bool? = nil,
-        wakePhrase: String? = nil,
-        bigBroVoice: String? = nil,
-        cookingModel: CookingModelChoice? = nil,
-        llmProvider: LLMProvider? = nil
-    ) throws {
-        let preferences = try fetchPreferences()
-
-        preferences.update(
-            measurementSystem: measurementSystem,
-            dietaryRestrictions: dietaryRestrictions,
-            speechRate: speechRate,
-            voiceIdentifier: voiceIdentifier,
-            autoSpeakResponses: autoSpeakResponses,
-            useBigBroSpeech: useBigBroSpeech,
-            wakePhrase: wakePhrase,
-            bigBroVoice: bigBroVoice,
-            cookingModel: cookingModel,
-            llmProvider: llmProvider
-        )
-
+    func updatePreferences(voiceSettings: LocalVoiceSettings, llmProvider: LLMProvider) throws {
+        try fetchPreferences().update(voiceSettings: voiceSettings, llmProvider: llmProvider)
         try modelContext.save()
-    }
-
-    // MARK: - Statistics
-
-    /// Get total recipe count
-    func getRecipeCount() throws -> Int {
-        return try modelContext.fetchCount(FetchDescriptor<RecipeEntity>())
-    }
-
-    /// Get recipes grouped by cuisine type
-    func getRecipesByCuisine() throws -> [String: Int] {
-        try groupRecipes(by: \.cuisineType)
-    }
-
-    /// Get recipes grouped by difficulty
-    func getRecipesByDifficulty() throws -> [String: Int] {
-        try groupRecipes(by: \.difficulty)
-    }
-
-    private func groupRecipes(by keyPath: KeyPath<RecipeEntity, String?>) throws -> [String: Int] {
-        let allRecipes = try fetchAllRecipes()
-        return allRecipes.reduce(into: [:]) { counts, recipe in
-            counts[recipe[keyPath: keyPath] ?? "Unknown", default: 0] += 1
-        }
     }
 }
 
@@ -510,17 +376,11 @@ class LocalDataManager: ObservableObject {
 
 enum LocalDataError: LocalizedError {
     case recipeNotFound(UUID)
-    case preferencesNotFound
-    case saveFailed(Error)
 
     var errorDescription: String? {
         switch self {
-        case .recipeNotFound(let id):
-            return "Recipe with ID \(id) not found"
-        case .preferencesNotFound:
-            return "User preferences not found"
-        case .saveFailed(let error):
-            return "Failed to save data: \(error.localizedDescription)"
+        case .recipeNotFound:
+            return "That recipe isn't in your collection any more."
         }
     }
 }

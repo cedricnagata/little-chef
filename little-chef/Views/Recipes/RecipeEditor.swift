@@ -25,8 +25,6 @@ struct RecipeLine: Identifiable, Equatable {
         self.id = id
         self.text = text
     }
-
-    var isBlank: Bool { text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
 }
 
 extension Array where Element == RecipeLine {

@@ -2,7 +2,8 @@
 //  ToolDefinition.swift
 //  little-chef
 //
-//  Timer and recipe tool definitions for the cooking assistant
+//  The tools the cooking assistant can call, defined once for both backends, and what
+//  happens when it calls them.
 //
 
 import Foundation
@@ -728,15 +729,7 @@ struct CookingTools {
 
     /// Tool results are read back by a speech model, so durations are spelled out rather than
     /// abbreviated — see the same rule in `LocalCookingAgent`'s system prompt.
-    private func spoken(_ seconds: Int) -> String {
-        let minutes = seconds / 60
-        let remainder = seconds % 60
-        let minutePart = "\(minutes) \(minutes == 1 ? "minute" : "minutes")"
-        let secondPart = "\(remainder) \(remainder == 1 ? "second" : "seconds")"
-        if minutes > 0 && remainder > 0 { return "\(minutePart) and \(secondPart)" }
-        if minutes > 0 { return minutePart }
-        return secondPart
-    }
+    private func spoken(_ seconds: Int) -> String { SpokenDuration.text(seconds: seconds) }
 
     // MARK: - List arguments
 
@@ -919,13 +912,7 @@ struct CookingTools {
     /// order given takes out the wrong lines after the first one. Quotes are unaffected by
     /// renumbering and keep their order.
     private static func numberedLast(_ entries: [String]) -> [String] {
-        func position(_ entry: String) -> Int? {
-            let digits = entry.lowercased()
-                .replacingOccurrences(of: "step", with: "")
-                .replacingOccurrences(of: "#", with: "")
-                .trimmingCharacters(in: .whitespacesAndNewlines)
-            return Int(digits)
-        }
+        let position = RecipeLineMatcher.stepNumber
         let quotes = entries.filter { position($0) == nil }
         let numbers = entries.filter { position($0) != nil }
             .sorted { (position($0) ?? 0) > (position($1) ?? 0) }

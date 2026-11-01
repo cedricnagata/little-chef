@@ -6,7 +6,6 @@
 //
 
 import Foundation
-import BigBroKit
 
 /// Which meal the current time of day is for.
 enum MealPeriod: String {
@@ -54,36 +53,36 @@ struct RecipeSuggestions: Equatable {
     let mealPeriod: MealPeriod
 }
 
-@MainActor
 enum RecipeSuggester {
 
     /// Recipes beyond this many (after the deterministic pre-sort) are appended unranked. Keeps
     /// the prompt small enough for an on-device model to answer in a few seconds.
     static let maxRankedByAI = 30
 
-    /// Ranks `recipes`, asking the AI when it is available and falling back to the deterministic
-    /// order when it isn't or its answer can't be used. Never throws: a suggestion list is
+    /// Asks a model for a JSON answer to `messages`.
+    typealias Ask = ([ChatMessage]) async throws -> String
+
+    /// Ranks `recipes`, asking the AI when there is one and falling back to the deterministic
+    /// order when there isn't or its answer can't be used. Never throws: a suggestion list is
     /// always better than an error in a filter.
+    ///
+    /// - Parameter ask: the model to rank with, or nil to rank without one.
+    @MainActor
     static func rank(
         _ recipes: [Recipe],
         availability: [UUID: RecipeAvailability],
         now: Date = Date(),
-        llmService: LLMService
+        ask: Ask?
     ) async -> RecipeSuggestions {
         let meal = MealPeriod(date: now)
         let fallback = heuristicOrder(recipes, availability: availability, meal: meal)
-        guard !recipes.isEmpty, llmService.capability.llmChatEnabled else {
+        guard !recipes.isEmpty, let ask else {
             return RecipeSuggestions(order: fallback.map(\.id), rankedByAI: false, mealPeriod: meal)
         }
 
         let candidates = Array(fallback.prefix(maxRankedByAI))
         do {
-            let response = try await llmService.generateChatCompletion(
-                messages: prompt(for: candidates, availability: availability, meal: meal, now: now),
-                temperature: 0.2,
-                maxTokens: 300,
-                responseFormat: .json
-            )
+            let response = try await ask(prompt(for: candidates, availability: availability, meal: meal, now: now))
             let ranked = parseOrder(response, count: candidates.count).map { candidates[$0].id }
             guard !ranked.isEmpty else {
                 dprint("🍽️ [SUGGEST] AI answer had no usable order, using the fallback: \(response.prefix(200))")
@@ -99,7 +98,7 @@ enum RecipeSuggester {
     }
 
     /// Fewest missing ingredients first, then recipes whose title or tags fit the meal, then title.
-    nonisolated static func heuristicOrder(_ recipes: [Recipe], availability: [UUID: RecipeAvailability], meal: MealPeriod) -> [Recipe] {
+    static func heuristicOrder(_ recipes: [Recipe], availability: [UUID: RecipeAvailability], meal: MealPeriod) -> [Recipe] {
         func fitsMeal(_ recipe: Recipe) -> Bool {
             let text = ([recipe.title] + recipe.tags).joined(separator: " ").lowercased()
             return meal.keywords.contains { text.contains($0) }
@@ -145,7 +144,7 @@ enum RecipeSuggester {
 
     /// Zero-based indices from a model's `{"order": [...]}` answer, in order, deduplicated and
     /// limited to `0..<count`. Reads bare number lists too: small models drop the wrapper.
-    nonisolated static func parseOrder(_ response: String, count: Int) -> [Int] {
+    static func parseOrder(_ response: String, count: Int) -> [Int] {
         var numbers: [Int] = []
         if let start = response.firstIndex(of: "{"), let end = response.lastIndex(of: "}"), start < end,
            let data = String(response[start...end]).data(using: .utf8),

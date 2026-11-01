@@ -2,15 +2,20 @@
 //  LocalCookingAgent.swift
 //  little-chef
 //
-//  Local cooking agent that orchestrates LLM + tool calling
+//  Briefs the model for a cooking session and asks it one question at a time.
 //
 
 import Foundation
 
-/// Local agent for handling cooking assistant interactions
+/// Turns a cooking session's state into a prompt and a tool list, and runs one turn against the
+/// provider the session pinned.
+///
+/// Holds no conversation of its own. The session's transcript is the conversation — typed turns
+/// and the turns a hands-free loop on the Mac mirrored in alike — so every turn is built from
+/// what the caller passes. A private copy here used to drift from it: a question typed after a
+/// spoken exchange on the Mac was asked with none of that exchange in context.
 @MainActor
-class LocalCookingAgent: ObservableObject {
-    // MARK: - Dependencies
+final class LocalCookingAgent {
     private let llmService: LLMService
     private let timerManager: TimerManager
     /// The session's recipe, for the tools that edit it. Nil for a session with nothing to edit.
@@ -20,12 +25,9 @@ class LocalCookingAgent: ObservableObject {
     /// one turn of a conversation to a different backend than the rest.
     let provider: LLMProvider
 
-    // MARK: - State
-    @Published var isProcessing = false
-    private var conversationHistory: [ChatMessage] = []
-    private let maxHistoryLength = 20
-
-    // MARK: - Initialization
+    /// How many earlier messages go into each prompt. Enough for "and how long for that?" to
+    /// make sense, not so many that an hour-long cook outgrows an on-device model's context.
+    private let maxHistoryMessages = 20
 
     convenience init(timerManager: TimerManager, recipeEditor: RecipeEditing?, provider: LLMProvider) {
         self.init(llmService: .shared, timerManager: timerManager, recipeEditor: recipeEditor, provider: provider)
@@ -56,86 +58,29 @@ class LocalCookingAgent: ObservableObject {
             : nil
     }
 
-    // MARK: - Public Methods
+    // MARK: - Asking
 
-    func processQuery(
-        userMessage: String,
+    /// Answers `question`, streaming the visible reply to `onChunk` as it generates.
+    ///
+    /// - Parameter history: the conversation before this question, oldest first.
+    func reply(
+        to question: String,
         recipe: Recipe?,
-        conversationContext: [Message]
-    ) async throws -> String {
-        isProcessing = true
-        defer { isProcessing = false }
-
-        let systemMessage = buildSystemMessage(recipe: recipe)
-        let userChatMessage = ChatMessage(role: .user, content: userMessage)
-
-        var messages: [ChatMessage] = [systemMessage] + conversationHistory + [userChatMessage]
-
-        if messages.count > maxHistoryLength {
-            messages = [systemMessage] + Array(messages.suffix(maxHistoryLength - 1))
-        }
-
-        let response = try await llmService.generateChatCompletion(
-            messages: messages,
-            tools: cookingTools(),
-            modelId: provider == .local ? llmService.activeOnDeviceModel?.modelId : nil,
-            provider: provider
-        )
-
-        conversationHistory.append(ChatMessage(role: .user, content: userMessage))
-        conversationHistory.append(ChatMessage(role: .assistant, content: response))
-
-        if conversationHistory.count > maxHistoryLength {
-            conversationHistory = Array(conversationHistory.suffix(maxHistoryLength))
-        }
-
-        return response
-    }
-
-    /// Streaming variant — calls `onChunk` with each text fragment as it arrives.
-    func processQueryStreaming(
-        userMessage: String,
-        recipe: Recipe?,
-        conversationContext: [Message],
+        history: [Message],
         onChunk: @escaping (String) -> Void
     ) async throws -> String {
-        isProcessing = true
-        defer { isProcessing = false }
+        let earlier = history
+            .filter { !$0.content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+            .suffix(maxHistoryMessages)
+            .map { ChatMessage(role: $0.isUser ? .user : .assistant, content: $0.content) }
 
-        let systemMessage = buildSystemMessage(recipe: recipe)
-        let userChatMessage = ChatMessage(role: .user, content: userMessage)
-
-        var messages: [ChatMessage] = [systemMessage] + conversationHistory + [userChatMessage]
-
-        if messages.count > maxHistoryLength {
-            messages = [systemMessage] + Array(messages.suffix(maxHistoryLength - 1))
-        }
-
-        let response = try await llmService.generateChatCompletionStreaming(
-            messages: messages,
+        return try await llmService.generateChatCompletionStreaming(
+            messages: [buildSystemMessage(recipe: recipe)] + earlier + [ChatMessage(role: .user, content: question)],
             tools: cookingTools(),
             modelId: provider == .local ? llmService.activeOnDeviceModel?.modelId : nil,
             provider: provider,
             onChunk: onChunk
         )
-
-        conversationHistory.append(ChatMessage(role: .user, content: userMessage))
-        conversationHistory.append(ChatMessage(role: .assistant, content: response))
-
-        if conversationHistory.count > maxHistoryLength {
-            conversationHistory = Array(conversationHistory.suffix(maxHistoryLength))
-        }
-
-        return response
-    }
-
-    func clearHistory() {
-        conversationHistory.removeAll()
-    }
-
-    func reset() {
-        conversationHistory.removeAll()
-        isProcessing = false
     }
 
     // MARK: - Private Methods
@@ -204,11 +149,21 @@ class LocalCookingAgent: ObservableObject {
             prompt += "\n\nActive timers:"
             for timer in activeTimers {
                 let state = timer.status == .new ? "created, not started yet" : timer.status.rawValue
-                prompt += "\n- \(timer.name): \(state), \(timer.remainingMinutes) minutes left"
+                prompt += "\n- \(timer.label): \(state), \(Self.spoken(seconds: timer.remainingSeconds)) left"
             }
         }
 
         return ChatMessage(role: .system, content: prompt)
+    }
+
+    /// "4 minutes and 30 seconds" rather than "4 minutes": a timer with under a minute to go
+    /// used to be described to the model as having none.
+    private static func spoken(seconds: Int) -> String {
+        let minutes = seconds / 60, remainder = seconds % 60
+        let minutePart = "\(minutes) \(minutes == 1 ? "minute" : "minutes")"
+        let secondPart = "\(remainder) \(remainder == 1 ? "second" : "seconds")"
+        if minutes > 0 && remainder > 0 { return "\(minutePart) and \(secondPart)" }
+        return minutes > 0 ? minutePart : secondPart
     }
 
     /// How to use the recipe tools, which differs entirely depending on whether there is a recipe.
@@ -268,11 +223,4 @@ class LocalCookingAgent: ObservableObject {
         not send it again. Once you have recorded what the user said, answer them in words.
         """
     }
-}
-
-// MARK: - ConversationMessage Protocol
-
-protocol ConversationMessage {
-    var content: String { get }
-    var isUser: Bool { get }
 }

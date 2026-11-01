@@ -7,6 +7,12 @@ import Foundation
 import Combine
 import ActivityKit
 
+enum TimerStatusType: String, Codable {
+    case new, running, paused, ended
+}
+
+/// A cooking timer: counts down on screen, on the Lock Screen through a Live Activity, and
+/// through a scheduled notification that fires even if the app is killed.
 class LocalTimer: ObservableObject, Identifiable {
     let id: String
     let createdAt: Date
@@ -21,10 +27,6 @@ class LocalTimer: ObservableObject, Identifiable {
     @Published var startedAt: Date?
     @Published var completedAt: Date?
 
-    // Convenience properties for compatibility
-    var name: String { label }
-    var isRunning: Bool { status == .running }
-    var remainingMinutes: Int { remainingSeconds / 60 }
 
     private var timer: Foundation.Timer?
     private var endDate: Date?
@@ -197,7 +199,7 @@ class LocalTimer: ObservableObject, Identifiable {
     }
 
     var progress: Double {
-        let elapsed = durationSeconds - remainingSeconds
-        return Double(elapsed) / Double(durationSeconds)
+        guard durationSeconds > 0 else { return 0 }
+        return Double(durationSeconds - remainingSeconds) / Double(durationSeconds)
     }
 }

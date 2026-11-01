@@ -2,8 +2,7 @@
 //  OCRService.swift
 //  little-chef
 //
-//  Extracts text from images using Apple Vision framework
-//  Replaces GPT-4 Vision API
+//  Reads the text in recipe photos with Apple's Vision framework, on the device.
 //
 
 import Foundation
@@ -99,8 +98,6 @@ class OCRService {
             }
         }
     }
-
-
 }
 
 // MARK: - Error Types
@@ -109,7 +106,6 @@ enum OCRError: LocalizedError {
     case invalidImage
     case noImagesProvided
     case noTextFound
-    case processingFailed(Error)
 
     var errorDescription: String? {
         switch self {
@@ -119,8 +115,6 @@ enum OCRError: LocalizedError {
             return "No images provided for text extraction"
         case .noTextFound:
             return "No text found in the image(s). Please ensure the image contains readable text."
-        case .processingFailed(let error):
-            return "OCR processing failed: \(error.localizedDescription)"
         }
     }
 }

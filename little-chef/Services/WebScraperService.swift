@@ -8,13 +8,30 @@
 import Foundation
 import WebKit
 
-/// Service for scraping recipe content from web URLs using WKWebView
+/// What a recipe page yielded: its schema.org recipe if it has one, otherwise its visible text.
+enum ScrapedRecipePage {
+    /// The page's schema.org `Recipe` object, as JSON text.
+    case schemaOrg(json: String)
+    /// The page's visible text, one line per line on screen.
+    case text(String)
+
+    /// Whatever came back, as text for a model to read.
+    var text: String {
+        switch self {
+        case .schemaOrg(let json): return json
+        case .text(let text): return text
+        }
+    }
+}
+
+/// Loads recipe pages in an off-screen `WKWebView`, so pages that build their recipe with
+/// JavaScript are read after it has run.
 @MainActor
-class WebScraperService: NSObject {
+final class WebScraperService: NSObject {
     static let shared = WebScraperService()
 
     private var webView: WKWebView?
-    private var continuation: CheckedContinuation<String, Error>?
+    private var continuation: CheckedContinuation<ScrapedRecipePage, Error>?
     private var timeoutTask: Task<Void, Never>?
 
     override private init() {
@@ -23,16 +40,16 @@ class WebScraperService: NSObject {
 
     // MARK: - Public API
 
-    /// Scrape recipe content from a URL. Loads the page in WKWebView to execute JavaScript,
-    /// then extracts text content from the rendered DOM.
-    func scrapeRecipe(from url: String) async throws -> String {
+    /// Loads `url` and reads its recipe: the schema.org JSON-LD if the page has some, otherwise
+    /// the rendered page's text.
+    func scrapeRecipe(from url: String) async throws -> ScrapedRecipePage {
         dprint("🌐 [SCRAPER] Starting scrape for URL: \(url)")
-        guard let urlObj = URL(string: url) else {
-            dprint("🌐 [SCRAPER] ❌ Invalid URL")
-            throw WebScraperError.invalidURL
-        }
+        guard let urlObj = Self.webURL(from: url) else { throw WebScraperError.invalidURL }
+        // One page at a time. A second call would replace the first one's continuation and
+        // leave it waiting forever.
+        guard continuation == nil else { throw WebScraperError.busy }
 
-        let result = try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<String, Error>) in
+        let result = try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<ScrapedRecipePage, Error>) in
             self.continuation = continuation
 
             let config = WKWebViewConfiguration()
@@ -51,14 +68,24 @@ class WebScraperService: NSObject {
             wv.load(URLRequest(url: urlObj))
         }
 
-        dprint("🌐 [SCRAPER] ✅ Got content (\(result.count) chars)")
-        dprint("🌐 [SCRAPER] Content preview:\n\(String(result.prefix(500)))")
+        dprint("🌐 [SCRAPER] ✅ Got content (\(result.text.count) chars)")
         return result
+    }
+
+    /// An http(s) URL from what was typed, assuming https when no scheme was given — people
+    /// paste "www.site.com/recipe" as often as the full link.
+    static func webURL(from text: String) -> URL? {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        let withScheme = trimmed.contains("://") ? trimmed : "https://" + trimmed
+        guard let url = URL(string: withScheme),
+              let scheme = url.scheme?.lowercased(), scheme == "http" || scheme == "https",
+              url.host?.isEmpty == false else { return nil }
+        return url
     }
 
     // MARK: - Private
 
-    private func finish(with result: Result<String, Error>) {
+    private func finish(with result: Result<ScrapedRecipePage, Error>) {
         timeoutTask?.cancel()
         timeoutTask = nil
         webView?.stopLoading()
@@ -115,7 +142,7 @@ class WebScraperService: NSObject {
             if let schemaText = result as? String, schemaText.hasPrefix("SCHEMA_JSON:") {
                 let json = String(schemaText.dropFirst("SCHEMA_JSON:".count))
                 dprint("🌐 [SCRAPER] Found JSON-LD schema (\(json.count) chars)")
-                self.finish(with: .success("Schema.org Recipe JSON:\n\(json)"))
+                self.finish(with: .success(.schemaOrg(json: json)))
                 return
             }
 
@@ -147,7 +174,7 @@ class WebScraperService: NSObject {
                     .joined(separator: "\n")
 
                 dprint("🌐 [SCRAPER] Cleaned body text (\(cleaned.count) chars)")
-                self.finish(with: .success(cleaned))
+                self.finish(with: .success(.text(cleaned)))
             }
         }
     }
@@ -183,6 +210,7 @@ enum WebScraperError: LocalizedError {
     case invalidURL
     case fetchFailed
     case noContentFound
+    case busy
 
     var errorDescription: String? {
         switch self {
@@ -192,6 +220,8 @@ enum WebScraperError: LocalizedError {
             return "Failed to fetch webpage. Please check the URL and your internet connection."
         case .noContentFound:
             return "No recipe content found on the webpage"
+        case .busy:
+            return "Already loading a recipe page. Try again when it has finished."
         }
     }
 }

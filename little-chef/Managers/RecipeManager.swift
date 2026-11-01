@@ -2,7 +2,7 @@
 //  RecipeManager.swift
 //  little-chef
 //
-//  Updated to use local storage (LocalDataManager) instead of APIService
+//  The recipe list, and every write to it.
 //
 
 import Foundation
@@ -19,7 +19,6 @@ class RecipeManager: ObservableObject {
 
     private let dataManager = LocalDataManager.shared
     private let recipeParser: LocalRecipeParser
-    private let llmService: LLMService
     private var cancellables = Set<AnyCancellable>()
 
     convenience init() {
@@ -27,17 +26,10 @@ class RecipeManager: ObservableObject {
     }
 
     init(llmService: LLMService) {
-        self.llmService = llmService
         self.recipeParser = LocalRecipeParser(llmService: llmService)
 
-        // Refetch when the store changes under us — a CloudKit import from another device, or a
-        // bulk delete from Settings.
-        //
-        // A subscription, not the old `dataManager.onRemoteChange = …` assignment. This class is
-        // built twice (`MainView` and `RecipeListView` each hold their own), and assigning to a
-        // single closure property meant the second one to be constructed silently replaced the
-        // first: one of the two lists stopped hearing about remote creates, edits and deletes
-        // entirely, and which one lost depended on view construction order.
+        // Refetch when the store changes under us: a CloudKit import from another device, or
+        // Delete All Data.
         dataManager.storeDidChange
             .sink { [weak self] _ in
                 Task { @MainActor in
@@ -105,23 +97,7 @@ class RecipeManager: ObservableObject {
         return result != nil
     }
 
-    // MARK: - Search & Filter
-
-    func searchRecipes(query: String) async {
-        await withLoading {
-            let recipeEntities = try self.dataManager.searchRecipes(query: query)
-            self.recipes = recipeEntities.map { $0.toRecipe() }
-        }
-    }
-
-    func fetchRecipes(byTag tag: String) async {
-        await withLoading {
-            let recipeEntities = try self.dataManager.fetchRecipes(byTag: tag)
-            self.recipes = recipeEntities.map { $0.toRecipe() }
-        }
-    }
-    
-    // MARK: - Recipe Parsing
+    // MARK: - Helpers
 
     private func withLoading<T>(_ work: () async throws -> T) async -> T? {
         isLoading = true
@@ -150,57 +126,32 @@ class RecipeManager: ObservableObject {
     }
 
     func parseRecipeFromUrl(_ url: String) async -> RecipeParseResponse? {
-        isLoading = true
-        errorMessage = nil
-
-        do {
-            let response = try await withParsingContext {
-                try await self.recipeParser.parseFromURL(url)
-            }
-            isLoading = false
-            return response
-        } catch {
-            errorMessage = "Failed to parse recipe from URL: \(error.localizedDescription)"
-            isLoading = false
-            return nil
-        }
+        await parse("Failed to parse recipe from URL") { try await $0.parseFromURL(url) }
     }
 
     func parseRecipeFromText(_ text: String) async -> RecipeParseResponse? {
-        isLoading = true
-        errorMessage = nil
-
-        do {
-            let response = try await withParsingContext {
-                try await self.recipeParser.parseFromText(text)
-            }
-            isLoading = false
-            return response
-        } catch {
-            errorMessage = "Failed to parse recipe from text: \(error.localizedDescription)"
-            isLoading = false
-            return nil
-        }
+        await parse("Failed to parse recipe from text") { try await $0.parseFromText(text) }
     }
 
     func parseRecipeFromImages(_ images: [UIImage]) async -> RecipeParseResponse? {
+        await parse("Failed to parse recipe from images") { try await $0.parseFromImages(images) }
+    }
+
+    private func parse(
+        _ failure: String,
+        _ work: @escaping (LocalRecipeParser) async throws -> RecipeParseResponse
+    ) async -> RecipeParseResponse? {
         isLoading = true
         errorMessage = nil
-
+        defer { isLoading = false }
         do {
-            let response = try await withParsingContext {
-                try await self.recipeParser.parseFromImages(images)
-            }
-            isLoading = false
-            return response
+            return try await withParsingContext { try await work(self.recipeParser) }
         } catch {
-            errorMessage = "Failed to parse recipe from images: \(error.localizedDescription)"
-            isLoading = false
+            errorMessage = "\(failure): \(error.localizedDescription)"
             return nil
         }
     }
-    
-    // MARK: - Helper Methods
+
     func clearError() {
         errorMessage = nil
     }

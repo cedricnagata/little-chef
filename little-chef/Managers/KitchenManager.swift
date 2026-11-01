@@ -7,6 +7,7 @@
 
 import Foundation
 import Combine
+import BigBroKit
 
 @MainActor
 final class KitchenManager: ObservableObject {
@@ -161,9 +162,19 @@ final class KitchenManager: ObservableObject {
 
         isRankingSuggestions = true
         defer { isRankingSuggestions = false }
-        let ranked = await RecipeSuggester.rank(recipes, availability: availability(of: recipes), llmService: llmService)
+        let ranked = await RecipeSuggester.rank(recipes, availability: availability(of: recipes), ask: rankingModel)
         suggestions = ranked
         suggestionsKey = key
+    }
+
+    /// The active backend, asked for JSON, or nil when there is no AI to rank with.
+    private var rankingModel: RecipeSuggester.Ask? {
+        guard llmService.capability.llmChatEnabled else { return nil }
+        return { [llmService] messages in
+            try await llmService.generateChatCompletion(
+                messages: messages, temperature: 0.2, maxTokens: 300, responseFormat: .json
+            )
+        }
     }
 
     // MARK: - Helpers
