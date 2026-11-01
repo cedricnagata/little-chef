@@ -2,7 +2,8 @@
 //  CookingSessionManager.swift
 //  little-chef
 //
-//  Updated to use local LLM (LLMService) and LocalCookingAgent
+//  The cook in progress: its recipe, its conversation, its timers, and the edits the
+//  assistant makes along the way.
 //
 
 import Foundation
@@ -13,7 +14,6 @@ class CookingSessionManager: ObservableObject, TimerManager {
     @Published var currentSession: CookingSession?
     @Published var isLoading = false
     @Published var error: String?
-    @Published var lastResponse: String = ""
     @Published var localTimers: [LocalTimer] = []
 
     /// The provider this session answers on, captured when it started.
@@ -60,12 +60,11 @@ class CookingSessionManager: ObservableObject, TimerManager {
     // MARK: - Session Management
 
     func startCookingSession(with recipe: Recipe) async {
-        let preferences = await loadLocalPreferences()
         begin(
             CookingSession(
                 sourceRecipeID: recipe.id,
                 recipe: RecipeBase(from: recipe),
-                userPreferences: preferences
+                voiceSettings: storedVoiceSettings()
             )
         )
     }
@@ -78,12 +77,11 @@ class CookingSessionManager: ObservableObject, TimerManager {
     /// also exactly the question the end of the session has to answer: update that recipe, or
     /// make a new one.
     func startFreestyleSession() async {
-        let preferences = await loadLocalPreferences()
         begin(
             CookingSession(
                 sourceRecipeID: nil,
                 recipe: .blank(),
-                userPreferences: preferences
+                voiceSettings: storedVoiceSettings()
             )
         )
     }
@@ -134,15 +132,12 @@ class CookingSessionManager: ObservableObject, TimerManager {
         if !hasWarmedUp { startWarmUp() }
     }
 
-    private func loadLocalPreferences() async -> UserPreferencesDetailed {
+    private func storedVoiceSettings() -> LocalVoiceSettings {
         do {
-            let prefsEntity = try dataManager.fetchPreferences()
-            let localPrefs = prefsEntity.toUserPreferences()
-
-                return UserPreferencesDetailed(from: localPrefs)
+            return try dataManager.fetchPreferences().toUserPreferences().voiceSettings
         } catch {
             dprint("⚠️ Failed to load preferences, using defaults: \(error)")
-            return UserPreferencesDetailed()
+            return .defaultSettings
         }
     }
 
@@ -152,7 +147,6 @@ class CookingSessionManager: ObservableObject, TimerManager {
         hasWarmedUp = false
         isPreparingModel = false
         currentSession = nil
-        lastResponse = ""
         error = nil
         cookingAgent = nil
         clearAllTimers()
@@ -169,136 +163,75 @@ class CookingSessionManager: ObservableObject, TimerManager {
 
     // MARK: - Agent Communication
 
-    func sendQuery(_ query: String) async {
-        guard currentSession != nil else {
+    /// Asks the assistant `query`, streaming the reply into the transcript as it arrives.
+    ///
+    /// Calls `onSentence` with each complete sentence, for speaking. Returns the finished reply,
+    /// or nil if the turn failed — in which case ``error`` says why.
+    @discardableResult
+    func sendQueryStreaming(_ query: String, onSentence: ((String) -> Void)? = nil) async -> String? {
+        guard let session = currentSession else {
             error = "No active cooking session"
-            return
+            return nil
         }
-
         guard let agent = cookingAgent else {
             error = "Cooking agent not initialized"
-            return
+            return nil
         }
 
         error = nil
+        isLoading = true
+        defer { isLoading = false }
+
+        // Read before this turn is added to it: the agent is given the conversation so far,
+        // then the question.
+        let history = session.conversationHistory
+        let recipe = createRecipeFromSession(session)
+
         currentSession?.conversationHistory.append(
             Message(id: UUID(), role: "user", content: query, timestamp: Date())
         )
+        let replyID = UUID()
+        currentSession?.conversationHistory.append(
+            Message(id: replyID, role: "assistant", content: "", timestamp: Date())
+        )
 
-        isLoading = true
-
+        var sentences = SentenceSplitter()
         do {
-            let recipe = createRecipeFromSession(currentSession!)
-            let conversationContext = currentSession!.conversationHistory
+            let response = try await agent.reply(to: query, recipe: recipe, history: history) { [weak self] chunk in
+                guard let self else { return }
+                self.appendToMessage(replyID, chunk)
+                if let onSentence {
+                    sentences.append(chunk).forEach(onSentence)
+                }
+            }
+            if let rest = sentences.flush() { onSentence?(rest) }
 
-            let response = try await agent.processQuery(
-                userMessage: query,
-                recipe: recipe,
-                conversationContext: conversationContext
-            )
-
-            currentSession?.conversationHistory.append(
-                Message(id: UUID(), role: "assistant", content: response, timestamp: Date())
-            )
-            lastResponse = response
-
+            // The finished reply replaces what streamed: tool results and clean-up happen at the
+            // end, so the two can differ.
+            replaceMessage(replyID, with: response)
+            return response
         } catch {
             self.error = "Failed to get response: \(error.localizedDescription)"
             dprint("Agent query error: \(error)")
+            currentSession?.conversationHistory.removeAll { $0.id == replyID }
+            return nil
         }
-
-        isLoading = false
     }
 
-    /// Streaming query — updates the assistant message progressively as chunks arrive.
-    /// Calls `onSentence` each time a complete sentence is ready (for TTS).
-    func sendQueryStreaming(_ query: String, onSentence: ((String) -> Void)? = nil) async {
-        guard currentSession != nil else {
-            error = "No active cooking session"
-            return
-        }
-
-        guard let agent = cookingAgent else {
-            error = "Cooking agent not initialized"
-            return
-        }
-
-        error = nil
-        isLoading = true
-
-        currentSession?.conversationHistory.append(
-            Message(id: UUID(), role: "user", content: query, timestamp: Date())
+    private func appendToMessage(_ id: UUID, _ text: String) {
+        guard let index = currentSession?.conversationHistory.firstIndex(where: { $0.id == id }),
+              let message = currentSession?.conversationHistory[index] else { return }
+        currentSession?.conversationHistory[index] = Message(
+            id: id, role: message.role, content: message.content + text, timestamp: message.timestamp
         )
+    }
 
-        let assistantMessageId = UUID()
-        currentSession?.conversationHistory.append(
-            Message(id: assistantMessageId, role: "assistant", content: "", timestamp: Date())
+    private func replaceMessage(_ id: UUID, with text: String) {
+        guard let index = currentSession?.conversationHistory.firstIndex(where: { $0.id == id }),
+              let message = currentSession?.conversationHistory[index] else { return }
+        currentSession?.conversationHistory[index] = Message(
+            id: id, role: message.role, content: text, timestamp: message.timestamp
         )
-
-        var sentenceBuffer = ""
-
-        do {
-            let recipe = createRecipeFromSession(currentSession!)
-            let conversationContext = currentSession!.conversationHistory
-
-            let response = try await agent.processQueryStreaming(
-                userMessage: query,
-                recipe: recipe,
-                conversationContext: conversationContext
-            ) { [weak self] chunk in
-                guard let self else { return }
-
-                if let index = self.currentSession?.conversationHistory.firstIndex(where: { $0.id == assistantMessageId }) {
-                    let current = self.currentSession?.conversationHistory[index].content ?? ""
-                    self.currentSession?.conversationHistory[index] = Message(
-                        id: assistantMessageId,
-                        role: "assistant",
-                        content: current + chunk,
-                        timestamp: Date()
-                    )
-                }
-
-                if let onSentence {
-                    sentenceBuffer += chunk
-                    // Extract complete sentences (ending with . ! or ?)
-                    // Split on sentence boundaries for streaming TTS
-                    while let range = sentenceBuffer.range(of: "[.!?]\\s+|[.!?]$", options: .regularExpression) {
-                        let sentence = String(sentenceBuffer[sentenceBuffer.startIndex...range.lowerBound])
-                        onSentence(sentence)
-                        sentenceBuffer = String(sentenceBuffer[range.upperBound...])
-                    }
-                }
-            }
-
-            // Flush any remaining text as a final sentence
-            let remainingSentence = sentenceBuffer.trimmingCharacters(in: .whitespacesAndNewlines)
-            if !remainingSentence.isEmpty {
-                onSentence?(remainingSentence)
-            }
-
-            // Update the final message content (cleaned by the agent)
-            if let index = currentSession?.conversationHistory.firstIndex(where: { $0.id == assistantMessageId }) {
-                currentSession?.conversationHistory[index] = Message(
-                    id: assistantMessageId,
-                    role: "assistant",
-                    content: response,
-                    timestamp: Date()
-                )
-            }
-
-            lastResponse = response
-
-        } catch {
-            self.error = "Failed to get response: \(error.localizedDescription)"
-            dprint("Agent query error: \(error)")
-
-            // Remove the empty placeholder on error
-            if let index = currentSession?.conversationHistory.firstIndex(where: { $0.id == assistantMessageId }) {
-                currentSession?.conversationHistory.remove(at: index)
-            }
-        }
-
-        isLoading = false
     }
 
     // MARK: - Hands-free support
@@ -316,9 +249,7 @@ class CookingSessionManager: ObservableObject, TimerManager {
             tools: agent.cookingTools(),
             priorTurns: session.conversationHistory.map { ($0.role, $0.content) },
             answer: { [weak self] question, onSentence in
-                guard let self else { return "" }
-                await self.sendQueryStreaming(question, onSentence: onSentence)
-                return self.lastResponse
+                await self?.sendQueryStreaming(question, onSentence: onSentence) ?? ""
             },
             beginTurn: { [weak self] question in
                 self?.beginSpokenTurn(question: question) ?? UUID()
@@ -350,11 +281,7 @@ class CookingSessionManager: ObservableObject, TimerManager {
     /// cleared session — and an index captured when the turn started would land the text on the
     /// wrong message or on none at all.
     func updateSpokenReply(id: UUID, text: String) {
-        guard let index = currentSession?.conversationHistory.firstIndex(where: { $0.id == id }) else { return }
-        currentSession?.conversationHistory[index] = Message(
-            id: id, role: "assistant", content: text, timestamp: Date()
-        )
-        lastResponse = text
+        replaceMessage(id, with: text)
     }
 
     private func createRecipeFromSession(_ session: CookingSession) -> Recipe {
@@ -376,27 +303,7 @@ class CookingSessionManager: ObservableObject, TimerManager {
         )
     }
 
-    // MARK: - Voice Interaction Helpers
-
-    func getLastMessage() -> String {
-        guard let session = currentSession,
-              let lastMessage = session.conversationHistory.last else {
-            return ""
-        }
-        return lastMessage.content
-    }
-
-    func hasActiveSession() -> Bool {
-        return currentSession != nil
-    }
-
-    func getRecipeTitle() -> String {
-        return currentSession?.recipe.title ?? ""
-    }
-
-    func getConversationHistory() -> [Message] {
-        return currentSession?.conversationHistory ?? []
-    }
+    var conversationHistory: [Message] { currentSession?.conversationHistory ?? [] }
 
     // MARK: - Recipe Servings Management
 
@@ -413,100 +320,10 @@ class CookingSessionManager: ObservableObject, TimerManager {
         let originalServings = session.recipe.servings
         guard originalServings > 0, newServings != originalServings else { return }
 
-        currentSession?.recipe = createScaledRecipe(from: session.recipe, servings: newServings)
-        currentSession?.baselineRecipe = createScaledRecipe(from: session.baselineRecipe, servings: newServings)
+        currentSession?.recipe = IngredientScaler.scaled(session.recipe, toServings: newServings)
+        currentSession?.baselineRecipe = IngredientScaler.scaled(session.baselineRecipe, toServings: newServings)
 
         dprint("🔄 Updated servings from \(originalServings) to \(newServings)")
-    }
-
-    func getCurrentServings() -> Int {
-        return currentSession?.recipe.servings ?? 0
-    }
-
-    private func createScaledRecipe(from recipe: RecipeBase, servings: Int) -> RecipeBase {
-        let originalServings = recipe.servings
-        let multiplier = Float(servings) / Float(originalServings)
-
-        if multiplier == 1.0 {
-            return recipe
-        }
-
-        // Scale ingredients
-        let scaledIngredients = recipe.ingredients.map { ingredient in
-            scaleIngredient(ingredient, multiplier: multiplier)
-        }
-
-        // Create new RecipeBase with scaled data
-        return RecipeBase(
-            title: recipe.title,
-            description: recipe.description,
-            servings: servings,
-            prepTime: recipe.prepTime,
-            cookTime: recipe.cookTime,
-            ingredients: scaledIngredients,
-            instructions: recipe.instructions,
-            tags: recipe.tags,
-            sourceUrl: recipe.sourceUrl,
-            cuisineType: recipe.cuisineType,
-            difficulty: recipe.difficulty
-        )
-    }
-
-    private static let ingredientRegexes: [NSRegularExpression] = [
-        (try? NSRegularExpression(pattern: "([0-9]+\\.?[0-9]*\\/[0-9]+)\\s+(\\w+)", options: []))!,
-        (try? NSRegularExpression(pattern: "([0-9]+\\.?[0-9]*)\\s+(\\w+)", options: []))!
-    ]
-
-    private func scaleIngredient(_ ingredient: String, multiplier: Float) -> String {
-        if multiplier == 1.0 {
-            return ingredient
-        }
-
-        for regex in Self.ingredientRegexes {
-            if let match = regex.firstMatch(in: ingredient, options: [], range: NSRange(location: 0, length: ingredient.count)) {
-
-                let amountRange = Range(match.range(at: 1), in: ingredient)!
-                let amountStr = String(ingredient[amountRange])
-
-                var amount: Float
-
-                // Handle fractions like "1/2"
-                if amountStr.contains("/") {
-                    let parts = amountStr.split(separator: "/")
-                    if parts.count == 2,
-                       let numerator = Float(parts[0]),
-                       let denominator = Float(parts[1]),
-                       denominator != 0 {
-                        amount = numerator / denominator
-                    } else {
-                        continue
-                    }
-                } else {
-                    guard let parsed = Float(amountStr) else { continue }
-                    amount = parsed
-                }
-
-                // Scale the amount
-                let scaledAmount = amount * multiplier
-
-                // Format the scaled amount nicely
-                let scaledStr: String
-                if scaledAmount == Float(Int(scaledAmount)) {
-                    scaledStr = "\(Int(scaledAmount))"
-                } else {
-                    scaledStr = String(format: "%.2f", scaledAmount).replacingOccurrences(of: "\\.?0+$", with: "", options: .regularExpression)
-                }
-
-                // Replace in the original string
-                return ingredient.replacingOccurrences(of: amountStr, with: scaledStr)
-            }
-        }
-
-        // If no number pattern found, return original ingredient with note
-        if multiplier != 1.0 {
-            return "\(ingredient) (scale by \(String(format: "%.1f", multiplier))x)"
-        }
-        return ingredient
     }
 
     // MARK: - TimerManager Protocol Implementation
@@ -571,20 +388,14 @@ class CookingSessionManager: ObservableObject, TimerManager {
         return true
     }
 
+    /// Falls back to the only timer when the name matches nothing, through `findTimer` — which
+    /// is why `inferTimerAction` only ever acts on replies that mention a timer.
     @discardableResult
     func deleteTimer(name: String) -> Bool {
-        if let index = findTimerIndex(named: name) {
-            localTimers[index].stopLiveActivity()
-            localTimers.remove(at: index)
-            return true
-        }
-        // Fallback: if only one timer exists, delete it
-        if localTimers.count == 1 {
-            localTimers[0].stopLiveActivity()
-            localTimers.removeAll()
-            return true
-        }
-        return false
+        guard let index = findTimerIndex(named: name) else { return false }
+        localTimers[index].stopLiveActivity()
+        localTimers.remove(at: index)
+        return true
     }
 
     func getTimer(name: String) -> LocalTimer? {
@@ -628,8 +439,18 @@ class CookingSessionManager: ObservableObject, TimerManager {
     /// Same rule as the assistant's `create_timer`: creating a timer and running it are two
     /// decisions, and a timer that starts the moment it is added gives no chance to fix a
     /// mistyped duration.
+    ///
+    /// A label already in use gets a number rather than being refused: the assistant has to be
+    /// told about a duplicate, but someone tapping Add has asked for a second timer and should
+    /// get one, not a sheet that closes having done nothing.
     func addManualTimer(label: String, durationSeconds: Int) {
-        createTimer(name: label, durationSeconds: durationSeconds)
+        var name = label
+        var suffix = 2
+        while localTimers.contains(where: { $0.label.caseInsensitiveCompare(name) == .orderedSame }) {
+            name = "\(label) \(suffix)"
+            suffix += 1
+        }
+        createTimer(name: name, durationSeconds: durationSeconds)
     }
 
     func deleteManualTimer(id: String) {
@@ -699,13 +520,13 @@ extension CookingSessionManager: RecipeEditing {
         guard !recipe.ingredients.contains(where: { $0.caseInsensitiveCompare(line) == .orderedSame }) else {
             return .alreadyPresent
         }
-        currentSession?.recipe.ingredients.insert(line, at: Self.insertionIndex(position, count: recipe.ingredients.count))
+        currentSession?.recipe.ingredients.insert(line, at: RecipeLineMatcher.insertionIndex(position, count: recipe.ingredients.count))
         return .added
     }
 
     func replaceIngredient(matching query: String, with text: String) -> String? {
         guard let recipe = currentSession?.recipe,
-              let index = Self.indexOfLine(matching: query, in: recipe.ingredients, allowingNumbers: false)
+              let index = RecipeLineMatcher.index(matching: query, in: recipe.ingredients, allowingNumbers: false)
         else { return nil }
         let line = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !line.isEmpty else { return nil }
@@ -716,7 +537,7 @@ extension CookingSessionManager: RecipeEditing {
 
     func removeIngredient(matching query: String) -> String? {
         guard let recipe = currentSession?.recipe,
-              let index = Self.indexOfLine(matching: query, in: recipe.ingredients, allowingNumbers: false)
+              let index = RecipeLineMatcher.index(matching: query, in: recipe.ingredients, allowingNumbers: false)
         else { return nil }
         return currentSession?.recipe.ingredients.remove(at: index)
     }
@@ -730,13 +551,13 @@ extension CookingSessionManager: RecipeEditing {
         guard !recipe.instructions.contains(where: { $0.caseInsensitiveCompare(line) == .orderedSame }) else {
             return .alreadyPresent
         }
-        currentSession?.recipe.instructions.insert(line, at: Self.insertionIndex(position, count: recipe.instructions.count))
+        currentSession?.recipe.instructions.insert(line, at: RecipeLineMatcher.insertionIndex(position, count: recipe.instructions.count))
         return .added
     }
 
     func replaceStep(matching query: String, with text: String) -> String? {
         guard let recipe = currentSession?.recipe,
-              let index = Self.indexOfLine(matching: query, in: recipe.instructions, allowingNumbers: true)
+              let index = RecipeLineMatcher.index(matching: query, in: recipe.instructions, allowingNumbers: true)
         else { return nil }
         let line = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !line.isEmpty else { return nil }
@@ -747,7 +568,7 @@ extension CookingSessionManager: RecipeEditing {
 
     func removeStep(matching query: String) -> String? {
         guard let recipe = currentSession?.recipe,
-              let index = Self.indexOfLine(matching: query, in: recipe.instructions, allowingNumbers: true)
+              let index = RecipeLineMatcher.index(matching: query, in: recipe.instructions, allowingNumbers: true)
         else { return nil }
         return currentSession?.recipe.instructions.remove(at: index)
     }
@@ -821,73 +642,5 @@ extension CookingSessionManager: RecipeEditing {
             return nil
         }
         return trimmed
-    }
-
-    // MARK: Resolving what the model meant
-
-    /// Where a 1-based `position` lands, clamped. Nil, zero and anything past the end all append,
-    /// because "add it at the end" is what a model means by leaving the argument off and what it
-    /// means by an out-of-range guess.
-    private static func insertionIndex(_ position: Int?, count: Int) -> Int {
-        guard let position, position >= 1 else { return count }
-        return min(position - 1, count)
-    }
-
-    /// The line the model meant.
-    ///
-    /// It will quote the line back exactly, quote part of it, paraphrase it, or — for steps —
-    /// just give the number. Matching only on an exact quote fails often enough that the
-    /// assistant would look broken; matching too loosely deletes the wrong ingredient, which is
-    /// worse. So: exact, then substring either way round, then the line sharing the most
-    /// distinctive words, and nothing at all if that finds none.
-    ///
-    /// Numbers are only accepted where the UI shows them. Steps are numbered on screen, so "step
-    /// 3" and "3" mean the third one. Ingredients are not, and there a bare "2" is far more
-    /// likely to be the start of an amount the model truncated than a position.
-    private static func indexOfLine(matching query: String, in lines: [String], allowingNumbers: Bool) -> Int? {
-        let needle = query.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-        guard !needle.isEmpty, !lines.isEmpty else { return nil }
-
-        if allowingNumbers {
-            let digits = needle
-                .replacingOccurrences(of: "step", with: "")
-                .replacingOccurrences(of: "#", with: "")
-                .trimmingCharacters(in: .whitespacesAndNewlines)
-            if let number = Int(digits), number >= 1, number <= lines.count {
-                return number - 1
-            }
-        }
-
-        if let exact = lines.firstIndex(where: { $0.lowercased() == needle }) {
-            return exact
-        }
-        if let overlapping = lines.firstIndex(where: {
-            let line = $0.lowercased()
-            return line.contains(needle) || needle.contains(line)
-        }) {
-            return overlapping
-        }
-
-        // Last resort: "the garlic" against "2 cloves of garlic, minced". Short words are
-        // dropped so that "the" and "of" can't carry a match on their own.
-        let words = needle
-            .split(whereSeparator: { !$0.isLetter && !$0.isNumber })
-            .filter { $0.count >= 3 }
-        guard !words.isEmpty else { return nil }
-
-        let scored = lines.enumerated().map { index, line -> (index: Int, score: Int) in
-            let haystack = line.lowercased()
-            return (index, words.filter { haystack.contains($0) }.count)
-        }
-        guard let best = scored.max(by: { $0.score < $1.score }), best.score > 0 else { return nil }
-        return best.index
-    }
-}
-
-// MARK: - Message conforms to ConversationMessage protocol
-
-extension Message: ConversationMessage {
-    var isUser: Bool {
-        return role == "user"
     }
 }

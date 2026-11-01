@@ -25,6 +25,14 @@ Available on [TestFlight](https://testflight.apple.com/join/Rz11FzNk)
 - **Images**: Extract recipes from photos of cookbooks or handwritten cards via OCR
 - **Text**: Paste or type any recipe and have it structured automatically
 
+### Kitchen: Inventory and Shopping List
+- Keep a list of the ingredients you have, with a Staples section (salt, oil, flour…) that counts as always on hand
+- A shopping list: add items by hand or a recipe's missing ingredients in one tap, then tick them off and move them into the inventory with **Done Shopping**
+- Recipes show what you have and what's missing, and you're warned before starting a cook that needs something you don't have
+- Filter recipes to those you **Can Make Now** or are **Missing a Few** ingredients for
+- **Suggested** ranks your recipes with AI for the time of day (breakfast, lunch or dinner) and what's in your kitchen, with a non-AI fallback
+- Synced through iCloud with your recipes
+
 ### Timer Management
 - Set multiple timers via voice or text
 - Native iOS notifications when timers complete
@@ -96,14 +104,15 @@ Turn-taking is the same on both paths: the microphone endpoints on signal energy
 
 **Key components:**
 - `LLMService` — manages inference backend selection, model download/loading, and chat completions
-- `LocalCookingAgent` — maintains conversation history and builds prompts for the cooking session
-- `LocalRecipeParser` — parses recipes from URLs (schema.org + LLM cleanup), images (OCR), and text
+- `LocalCookingAgent` — builds the system prompt and tool list for the cooking session, and runs each turn from the session's transcript
+- `LocalRecipeParser` — imports recipes from URLs (schema.org + LLM cleanup), images (OCR), and text; the parsing itself is `RecipeExtraction`
+- `KitchenManager` — the ingredient inventory and shopping list, and what each recipe is missing (`IngredientMatcher`)
 - `VoiceAssistant` — the voice front end; owns permissions, the shared `VoicePhase` state the UI renders, and which of the two sessions below is running
 - `LocalVoiceSession` — the on-device hands-free loop: listen, transcribe, answer, speak, repeat, with no Mac in the loop. Mirrors `BigBroVoiceSession` in BigBroKit, which does the same on the Mac path
 - `OnDeviceSpeaker` — `AVSpeechSynthesizer` wrapped so an utterance can be awaited, and so a cancelled one exits the same way a finished one does
 - `BigBroClient` (BigBroKit) — handles pairing, connection, and streaming chat with the Mac companion
-- `TimerManager` — manages multiple concurrent cooking timers with iOS notifications
-- `LocalDataManager` — SwiftData persistence for recipes and user preferences, with optional iCloud sync
+- `CookingSessionManager` — the cook in progress: its recipe, conversation and timers (`LocalTimer`, with notifications and Live Activities), and the assistant's edits
+- `LocalDataManager` — SwiftData persistence for recipes, preferences, inventory and shopping list, with optional iCloud sync
 
 ## Tech Stack
 
@@ -112,3 +121,13 @@ Turn-taking is the same on both paths: the microphone endpoints on signal energy
 - **Mac inference & speech**: BigBroKit (local network pairing, Parakeet STT, Kokoro TTS)
 - **Recipe parsing**: WebScraperService, OCRService, schema.org extraction
 - **Storage**: SwiftData (CloudKit-backed, falling back to a local-only store)
+
+## Tests
+
+Unit tests live in `little-chefTests` and use Swift Testing. Run them in Xcode with ⌘U, or without a simulator:
+
+```sh
+swift test --package-path tools/linux-tests
+```
+
+That package links the app's Foundation-only files and the same test folder, so it runs anywhere Swift does. It runs on Linux for every pull request. See CLAUDE.md, "Testing", for which files it covers and how to add one.

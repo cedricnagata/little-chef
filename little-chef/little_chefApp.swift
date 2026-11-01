@@ -2,7 +2,7 @@
 //  little_chefApp.swift
 //  little-chef
 //
-//  Local-only operation with on-device Bonsai 8B model
+//  App entry point: the shared services, and the notification and push setup.
 //
 
 import SwiftUI
@@ -65,8 +65,8 @@ extension Notification.Name {
 @main
 struct little_chefApp: App {
     @UIApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
-    @StateObject private var llmService = LLMService.shared
-    @StateObject private var voiceAssistant = VoiceAssistant()
+    @StateObject private var llmService: LLMService
+    @StateObject private var voiceAssistant: VoiceAssistant
     @StateObject private var cookingSessionManager: CookingSessionManager
 
     init() {
@@ -78,7 +78,7 @@ struct little_chefApp: App {
 
     var body: some Scene {
         WindowGroup {
-            ContentView()
+            MainView()
                 .environmentObject(cookingSessionManager)
                 .environmentObject(voiceAssistant)
                 .environmentObject(llmService)

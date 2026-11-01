@@ -2,7 +2,7 @@
 //  CookingSessionView.swift
 //  little-chef
 //
-//  Created by Cedric Nagata on 9/12/25.
+//  The Cook tab: starting a cook, and the cook itself — recipe, timers, chat.
 //
 
 import SwiftUI
@@ -16,7 +16,7 @@ struct CookingSessionView: View {
     var body: some View {
         NavigationStack {
             ZStack {
-                if cookingSessionManager.hasActiveSession() {
+                if cookingSessionManager.currentSession != nil {
                     ActiveCookingView()
                 } else {
                     StartCookingView(showingRecipeSelector: $showingRecipeSelector)
@@ -121,6 +121,8 @@ struct StartCookingView: View {
 struct ActiveCookingView: View {
     @EnvironmentObject var cookingSessionManager: CookingSessionManager
     @EnvironmentObject var voiceAssistant: VoiceAssistant
+    /// Observed so the screen redraws when the Mac connects or drops: `chatEnabled` depends on
+    /// it, and `LLMService` doesn't republish its client's changes.
     @ObservedObject private var bigBroClient = LLMService.shared.bigBroClient
     @State private var textInput = ""
     @State private var showingEndSessionAlert = false
@@ -211,7 +213,7 @@ struct ActiveCookingView: View {
             voiceAssistant.stopHandsFree()
             voiceAssistant.stopSpeaking()
         }
-        .onChange(of: cookingSessionManager.currentSession?.userPreferences.voiceSettings) {
+        .onChange(of: cookingSessionManager.currentSession?.voiceSettings) {
             updateVoiceAssistantSettings()
         }
     }
@@ -260,7 +262,7 @@ struct ActiveCookingView: View {
 
     private func updateVoiceAssistantSettings() {
         if let session = cookingSessionManager.currentSession {
-            voiceAssistant.updateVoiceSettings(session.userPreferences.voiceSettings)
+            voiceAssistant.updateVoiceSettings(session.voiceSettings)
         }
     }
 }
@@ -357,8 +359,8 @@ struct RecipeDetailsView: View {
                     InlineRecipeMetadata(
                         prepTime: session.recipe.prepTime,
                         cookTime: session.recipe.cookTime,
-                        originalServings: session.recipe.servings,
-                        currentServings: cookingSessionManager.getCurrentServings(),
+                        originalServings: session.startingServings,
+                        currentServings: session.recipe.servings,
                         difficulty: session.recipe.difficulty,
                         onServingsChange: { newServings in
                             cookingSessionManager.updateServings(newServings: newServings)
@@ -593,113 +595,37 @@ private struct InlineServingsControl: View {
     }
 }
 
-// MARK: - Compact Info Card
-
-struct CompactInfoCard: View {
-    let title: String
-    let value: String
-    let icon: String
-
-    var body: some View {
-        VStack(spacing: 2) {
-            Image(systemName: icon)
-                .font(.caption)
-                .foregroundColor(.orange)
-            Text(value)
-                .font(.caption)
-                .fontWeight(.semibold)
-            Text(title)
-                .font(.caption2)
-                .foregroundColor(.secondary)
-        }
-        .frame(maxWidth: .infinity)
-        .padding(.vertical, 6)
-        .padding(.horizontal, 4)
-        .background(Color(.systemBackground))
-        .cornerRadius(8)
-    }
-}
-
-// MARK: - Editable Servings Card
-
-struct EditableServingsCard: View {
-    let originalServings: Int
-    let currentServings: Int
-    let onServingsChange: (Int) -> Void
-
-    var body: some View {
-        VStack(spacing: 4) {
-            Image(systemName: "person.2")
-                .font(.caption)
-                .foregroundColor(.orange)
-
-            HStack(spacing: 4) {
-                Button(action: {
-                    if currentServings > 1 { onServingsChange(currentServings - 1) }
-                }) {
-                    Image(systemName: "minus.circle.fill")
-                        .font(.caption)
-                        .foregroundColor(currentServings > 1 ? .orange : .gray)
-                }
-                .disabled(currentServings <= 1)
-
-                VStack(spacing: 1) {
-                    Text("\(currentServings)")
-                        .font(.headline)
-                        .fontWeight(.semibold)
-                        .foregroundColor(.primary)
-                        .frame(minWidth: 30)
-
-                    if currentServings != originalServings {
-                        Text("(was \(originalServings))")
-                            .font(.caption2)
-                            .foregroundColor(.orange)
-                    }
-                }
-
-                Button(action: {
-                    if currentServings < 50 { onServingsChange(currentServings + 1) }
-                }) {
-                    Image(systemName: "plus.circle.fill")
-                        .font(.caption)
-                        .foregroundColor(currentServings < 50 ? .orange : .gray)
-                }
-                .disabled(currentServings >= 50)
-            }
-
-            Text("Serves")
-                .font(.caption)
-                .foregroundColor(.secondary)
-        }
-        .frame(maxWidth: .infinity)
-        .padding()
-        .background(Color(.systemGray6))
-        .cornerRadius(12)
-        .overlay(
-            RoundedRectangle(cornerRadius: 12)
-                .stroke(currentServings != originalServings ? Color.orange.opacity(0.5) : Color.clear, lineWidth: 1)
-        )
-    }
-}
-
 // MARK: - Recipe Selector View
 
 struct RecipeSelectorView: View {
     @EnvironmentObject var recipeManager: RecipeManager
     @EnvironmentObject var cookingSessionManager: CookingSessionManager
+    @EnvironmentObject var kitchenManager: KitchenManager
     @Environment(\.dismiss) private var dismiss
+    @State private var missingCheck: MissingIngredientsCheck?
+
+    private func choose(_ recipe: Recipe) {
+        if let check = kitchenManager.checkBeforeCooking(recipe) {
+            missingCheck = check
+        } else {
+            cook(recipe)
+        }
+    }
+
+    private func cook(_ recipe: Recipe) {
+        Task { await cookingSessionManager.startCookingSession(with: recipe) }
+        dismiss()
+    }
 
     var body: some View {
         NavigationStack {
             List(recipeManager.recipes) { recipe in
-                Button(action: {
-                    Task { await cookingSessionManager.startCookingSession(with: recipe) }
-                    dismiss()
-                }) {
+                Button(action: { choose(recipe) }) {
                     RecipeRowView(recipe: recipe)
                 }
                 .buttonStyle(PlainButtonStyle())
             }
+            .missingIngredientsDialog($missingCheck) { cook($0) }
             .navigationTitle("Choose Recipe")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -719,5 +645,6 @@ struct RecipeSelectorView: View {
         .environmentObject(CookingSessionManager())
         .environmentObject(VoiceAssistant())
         .environmentObject(RecipeManager())
+        .environmentObject(KitchenManager())
         .environmentObject(LLMService.shared)
 }

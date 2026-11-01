@@ -4,7 +4,7 @@ title: LittleChef Privacy Policy
 
 # LittleChef Privacy Policy
 
-**Last updated: October 28, 2026**
+**Last updated: October 30, 2026**
 
 LittleChef ("we", "the app") is designed with privacy as a core principle. This policy explains what data the app handles and how.
 
@@ -15,6 +15,8 @@ LittleChef does not collect, transmit, sell, or share any personal information. 
 ## What data the app handles
 
 **Recipes you import or create.** Stored locally on your device using Apple's SwiftData framework. If you have iCloud enabled, recipes also sync to your personal private iCloud database so they appear on your other devices. We have no access to this data — it is encrypted and visible only to you.
+
+**Ingredient inventory and shopping list.** The ingredients you record as having, and your shopping list, are stored and synced exactly like your recipes: on your device and, with iCloud enabled, in your private iCloud database.
 
 **Voice and speech.** When you use voice input, audio is captured by the microphone and converted to text. Where that conversion happens depends on which AI mode the cooking session is using:
 
@@ -29,6 +31,8 @@ In neither case is audio sent to LittleChef or to any third-party server.
 
 - *On-device mode (default):* A PrismML Bonsai model runs entirely on your iPhone or iPad using Apple's MLX framework. Which model depends on your device's memory, and devices with enough memory can choose the larger Bonsai 27B in Settings. No prompts or responses leave the device. Model weights are downloaded from Hugging Face's public model repository when you choose to download them in Settings. As with any download, Hugging Face can see the request, including your IP address. Nothing about you or your recipes is sent.
 - *BigBro mode (optional):* If you choose to pair LittleChef with a Mac running the BigBro companion app on your local network, prompts and responses — and, when you use voice, the recorded audio — are sent over your local Wi-Fi network to that Mac for processing. They do not leave your local network.
+
+The **Suggested** recipe filter works the same way: to rank your recipes it gives the AI their titles, tags and cooking times, what each is missing from your inventory, and the current time of day. That goes to the on-device model or your paired Mac, depending on the mode, and nowhere else.
 
 The mode is fixed for the duration of a cooking session: it is chosen before you start cooking and cannot change partway through.
 
@@ -57,7 +61,7 @@ LittleChef is not directed at children under 13 and does not knowingly collect a
 
 ## Data deletion
 
-You can delete your data at any time from **Settings → Delete All Data** in the app. This removes your recipes and settings, downloaded AI models, and paired Macs. If iCloud sync is on, your recipes and settings are also deleted from iCloud and from your other devices signed in to the same iCloud account. Deletion can't be undone.
+You can delete your data at any time from **Settings → Delete All Data** in the app. This removes your recipes, ingredient inventory, shopping list and settings, downloaded AI models, and paired Macs. If iCloud sync is on, your recipes, inventory, shopping list and settings are also deleted from iCloud and from your other devices signed in to the same iCloud account. Deletion can't be undone.
 
 Uninstalling the app removes everything stored on that device. Data already synced to iCloud stays there until you delete it in the app, or remove it from iOS Settings → [your name] → iCloud → Manage Storage.
 

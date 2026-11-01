@@ -78,14 +78,6 @@ struct ProfileSettingsView: View {
     /// mode can be refused up front rather than starting a loop that answers nothing.
     private var wakePhraseIsUsable: Bool { !WakeWord(wakePhrase).isEmpty }
 
-    /// Speaking through the Mac is not a separate opt-in — it follows the provider.
-    ///
-    /// Kokoro lives on the Mac, so the on-device provider cannot reach it whatever the user
-    /// picked, and a user who deliberately routed inference through BigBro has no reason to
-    /// want the system voice back. The stored preference is still written so older sessions
-    /// and `VoiceAssistant` keep reading a consistent value.
-    private var useBigBroSpeech: Bool { llmProvider == .bigBro }
-
     var body: some View {
         Form {
             // MARK: - AI Provider
@@ -196,7 +188,7 @@ struct ProfileSettingsView: View {
             } header: {
                 Text("Your Data")
             } footer: {
-                Text("Removes your recipes and settings, downloaded AI models, and paired Macs.")
+                Text("Removes your recipes, inventory, shopping list and settings, downloaded AI models, and paired Macs.")
             }
 
             // MARK: - About
@@ -239,8 +231,8 @@ struct ProfileSettingsView: View {
             // Mirrored deletes reach iCloud, so a syncing user loses the recipes everywhere —
             // and has to be told that before, not after.
             Text(dataManager.cloudSyncStatus.isSyncing
-                 ? "Your recipes and settings will be deleted from this device, from iCloud, and from your other devices signed in to the same iCloud account. Downloaded AI models and paired Macs are removed from this device. This can't be undone."
-                 : "Your recipes and settings, downloaded AI models, and paired Macs will be deleted from this device. This can't be undone.")
+                 ? "Your recipes, inventory, shopping list and settings will be deleted from this device, from iCloud, and from your other devices signed in to the same iCloud account. Downloaded AI models and paired Macs are removed from this device. This can't be undone."
+                 : "Your recipes, inventory, shopping list and settings, downloaded AI models, and paired Macs will be deleted from this device. This can't be undone.")
         }
         .alert(item: $downloadAlertKind) { kind in
             downloadAlert(for: kind)
@@ -541,67 +533,44 @@ struct ProfileSettingsView: View {
     }
 
     private func loadPreferences() {
-        Task {
-            do {
-                let prefs = try LocalDataManager.shared.fetchPreferences().toUserPreferences()
-                await MainActor.run {
-                    // Restore what was saved, rather than resetting to `.local` on every
-                    // appearance. Forcing the default here meant a user who chose BigBro was
-                    // switched back to on-device inference the next time they opened Settings,
-                    // silently and without the picker appearing to change.
-                    //
-                    // A device with no on-device model can only be `.bigBro`, whatever is
-                    // stored.
-                    let provider: LLMProvider = LLMService.deviceSupportsLocalModels
-                        ? prefs.llmProvider
-                        : .bigBro
-                    llmProvider = provider
-                    speechRate = prefs.voiceSettings.speechRate
-                    voiceIdentifier = prefs.voiceSettings.voiceIdentifier
-                    autoSpeakResponses = prefs.voiceSettings.autoSpeakResponses
-                    wakePhrase = prefs.voiceSettings.wakePhrase
-                    bigBroVoice = prefs.voiceSettings.bigBroVoice
-                    LLMService.shared.currentProvider = provider
-                    hasLoaded = true
-                }
-            } catch {
-                dprint("Failed to load preferences: \(error)")
-            }
+        do {
+            let prefs = try LocalDataManager.shared.fetchPreferences().toUserPreferences()
+            // Restore what was saved, rather than resetting to `.local` on every appearance.
+            // Forcing the default here meant a user who chose BigBro was switched back to
+            // on-device inference the next time they opened Settings, silently and without the
+            // picker appearing to change.
+            //
+            // A device with no on-device model can only be `.bigBro`, whatever is stored.
+            let provider: LLMProvider = LLMService.deviceSupportsLocalModels ? prefs.llmProvider : .bigBro
+            llmProvider = provider
+            speechRate = prefs.voiceSettings.speechRate
+            voiceIdentifier = prefs.voiceSettings.voiceIdentifier
+            autoSpeakResponses = prefs.voiceSettings.autoSpeakResponses
+            wakePhrase = prefs.voiceSettings.wakePhrase
+            bigBroVoice = prefs.voiceSettings.bigBroVoice
+            llmService.currentProvider = provider
+            hasLoaded = true
+        } catch {
+            dprint("Failed to load preferences: \(error)")
         }
     }
 
     private func savePreferences() {
-        // Push straight to the assistant as well as persisting.
-        //
-        // VoiceAssistant.voiceSettings is otherwise only ever fed from
-        // CookingSession.userPreferences, which is a `let` snapshot taken once when a cooking
-        // session starts and never refreshed from SwiftData. Without this, an edit here would
-        // not take effect until the session was ended and restarted.
-        voiceAssistant.updateVoiceSettings(
-            LocalVoiceSettings(
-                speechRate: speechRate,
-                voiceIdentifier: voiceIdentifier,
-                autoSpeakResponses: autoSpeakResponses,
-                useBigBroSpeech: useBigBroSpeech,
-                wakePhrase: wakePhrase,
-                bigBroVoice: bigBroVoice
-            )
+        let voiceSettings = LocalVoiceSettings(
+            speechRate: speechRate,
+            voiceIdentifier: voiceIdentifier,
+            autoSpeakResponses: autoSpeakResponses,
+            wakePhrase: wakePhrase,
+            bigBroVoice: bigBroVoice
         )
+        // Pushed straight to the assistant as well as saved. A cooking session only reads the
+        // stored settings when it starts, so without this an edit would wait for the next cook.
+        voiceAssistant.updateVoiceSettings(voiceSettings)
 
-        Task {
-            do {
-                try LocalDataManager.shared.updatePreferences(
-                    speechRate: speechRate,
-                    voiceIdentifier: voiceIdentifier,
-                    autoSpeakResponses: autoSpeakResponses,
-                    useBigBroSpeech: useBigBroSpeech,
-                    wakePhrase: wakePhrase,
-                    bigBroVoice: bigBroVoice,
-                    llmProvider: llmProvider
-                )
-            } catch {
-                dprint("Failed to save preferences: \(error)")
-            }
+        do {
+            try LocalDataManager.shared.updatePreferences(voiceSettings: voiceSettings, llmProvider: llmProvider)
+        } catch {
+            dprint("Failed to save preferences: \(error)")
         }
     }
 

@@ -8,7 +8,6 @@
 
 import Foundation
 import AVFoundation
-import Speech
 import Combine
 import BigBroKit
 
@@ -123,7 +122,6 @@ final class LocalVoiceSession: NSObject, ObservableObject {
 
     private let microphone: BigBroMicrophone
     private let speaker = OnDeviceSpeaker()
-    private let recognizer = SFSpeechRecognizer(locale: Locale(identifier: "en-US"))
 
     private var loopTask: Task<Void, Never>?
     private var rearmTask: Task<Void, Never>?
@@ -196,7 +194,7 @@ final class LocalVoiceSession: NSObject, ObservableObject {
         // Both permissions before the audio session is touched. Configuring `.playAndRecord`
         // reaches for an input the app may not be allowed to open yet, and the failure that
         // produces is a silent microphone rather than an error.
-        guard await Self.requestSpeechAuthorization() else {
+        guard await OnDeviceTranscriber.requestAuthorization() else {
             error = "Speech recognition permission is off — turn it on in Settings."
             phase = .idle
             return
@@ -206,16 +204,11 @@ final class LocalVoiceSession: NSObject, ObservableObject {
             phase = .idle
             return
         }
-        guard let recognizer, recognizer.isAvailable else {
-            error = "Speech recognition is unavailable on this device."
-            phase = .idle
-            return
-        }
-        // Up front, because the per-turn check in `transcribe` fails quietly by design — a
-        // device that can only recognize on Apple's servers would otherwise sit there armed,
-        // hearing everything and answering nothing.
-        guard recognizer.supportsOnDeviceRecognition else {
-            error = LocalVoiceError.onDeviceRecognitionUnsupported.localizedDescription
+        // Up front, because a failed transcription is skipped quietly by design — a device that
+        // can only recognize on Apple's servers would otherwise sit there armed, hearing
+        // everything and answering nothing.
+        guard OnDeviceTranscriber.isSupported else {
+            error = OnDeviceTranscriber.TranscriptionError.onDeviceRecognitionUnsupported.localizedDescription
             phase = .idle
             return
         }
@@ -311,7 +304,9 @@ final class LocalVoiceSession: NSObject, ObservableObject {
 
         let heard: String
         do {
-            heard = try await transcribe(audio).trimmingCharacters(in: .whitespacesAndNewlines)
+            // `BigBroMicrophone` hands over a self-contained 16 kHz WAV.
+            heard = try await OnDeviceTranscriber.transcribe(audio, fileExtension: "wav")
+                .trimmingCharacters(in: .whitespacesAndNewlines)
         } catch {
             // A single utterance failing to transcribe is the common case in a kitchen — a
             // pan, a tap, somebody laughing — not a session-ending fault.
@@ -461,91 +456,6 @@ final class LocalVoiceSession: NSObject, ObservableObject {
         phase = summoned ? .listening : restingPhase
     }
 
-    // MARK: - Transcription
-
-    /// Turns one captured utterance into text, on-device.
-    ///
-    /// File-based rather than streaming because the microphone has already decided where the
-    /// utterance ends. `SFSpeechURLRecognitionRequest` wants a URL, and `BigBroMicrophone`
-    /// hands over a self-contained 16 kHz WAV, so the round trip through the temporary
-    /// directory is the whole adaptation.
-    private func transcribe(_ wav: Data) async throws -> String {
-        guard let recognizer, recognizer.isAvailable else {
-            throw LocalVoiceError.recognizerUnavailable
-        }
-        // Refused rather than sent to Apple's servers: the privacy policy says audio never
-        // leaves the device in on-device mode, and a server fallback would make that untrue.
-        guard recognizer.supportsOnDeviceRecognition else {
-            throw LocalVoiceError.onDeviceRecognitionUnsupported
-        }
-
-        let url = FileManager.default.temporaryDirectory
-            .appendingPathComponent("littlechef-utterance-\(UUID().uuidString).wav")
-        try wav.write(to: url)
-        defer { try? FileManager.default.removeItem(at: url) }
-
-        let request = SFSpeechURLRecognitionRequest(url: url)
-        request.shouldReportPartialResults = false
-        request.requiresOnDeviceRecognition = true
-
-        return try await withCheckedThrowingContinuation { continuation in
-            // `recognitionTask` can call back more than once — a result and then an error, or
-            // a final result after a partial. Resuming a continuation twice traps, so the
-            // first call wins and the rest are dropped.
-            let settled = Settled()
-            recognizer.recognitionTask(with: request) { result, error in
-                if let result, result.isFinal {
-                    if settled.claim() {
-                        continuation.resume(returning: result.bestTranscription.formattedString)
-                    }
-                    return
-                }
-                if let error {
-                    // "No speech detected" is what a cough or a closing cupboard transcribes
-                    // to. It is the ordinary outcome in a kitchen, not a failure worth
-                    // surfacing, so it comes back as an empty transcript like any other
-                    // utterance with nothing in it.
-                    if settled.claim() {
-                        if Self.isNoSpeechDetected(error) {
-                            continuation.resume(returning: "")
-                        } else {
-                            continuation.resume(throwing: error)
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    /// One-shot latch guarding a continuation against a callback that fires more than once.
-    private final class Settled: @unchecked Sendable {
-        private var done = false
-        private let lock = NSLock()
-        func claim() -> Bool {
-            lock.lock()
-            defer { lock.unlock() }
-            if done { return false }
-            done = true
-            return true
-        }
-    }
-
-    /// `kAFAssistantErrorDomain` 1110 is "no speech detected"; 203 is an empty recognition.
-    private static func isNoSpeechDetected(_ error: Error) -> Bool {
-        let nsError = error as NSError
-        guard nsError.domain == "kAFAssistantErrorDomain" else { return false }
-        return nsError.code == 1110 || nsError.code == 203
-    }
-
-    private static func requestSpeechAuthorization() async -> Bool {
-        if SFSpeechRecognizer.authorizationStatus() == .authorized { return true }
-        return await withCheckedContinuation { continuation in
-            SFSpeechRecognizer.requestAuthorization { status in
-                continuation.resume(returning: status == .authorized)
-            }
-        }
-    }
-
     // MARK: - Speech
 
     /// Speaks one sentence and returns when it has finished — or been cut off.
@@ -588,18 +498,5 @@ final class LocalVoiceSession: NSObject, ObservableObject {
     private func releaseAudioSession() {
         try? AVAudioSession.sharedInstance()
             .setActive(false, options: .notifyOthersOnDeactivation)
-    }
-
-    private enum LocalVoiceError: LocalizedError {
-        case recognizerUnavailable
-        case onDeviceRecognitionUnsupported
-
-        var errorDescription: String? {
-            switch self {
-            case .recognizerUnavailable: return "Speech recognition is unavailable right now."
-            case .onDeviceRecognitionUnsupported:
-                return "On-device speech recognition isn't available on this device, so voice input is off. Type your question instead."
-            }
-        }
     }
 }

@@ -2,7 +2,7 @@
 //  AddRecipeView.swift
 //  little-chef
 //
-//  Created by Cedric Nagata on 9/5/25.
+//  Importing a recipe from a URL, pasted text or photos, then reviewing it before saving.
 //
 
 import SwiftUI
@@ -26,10 +26,9 @@ struct AddRecipeView: View {
     @State private var isParsingRecipe = false
     @State private var showingErrorAlert = false
     @State private var errorAlertMessage = ""
-    @State private var lastProcessedError: String?
-    
+
     var body: some View {
-        NavigationView {
+        NavigationStack {
             ScrollView {
                 VStack(spacing: 24) {
                     // Input type selector
@@ -157,7 +156,6 @@ struct AddRecipeView: View {
                 Button("OK") {
                     showingErrorAlert = false
                     errorAlertMessage = ""
-                    lastProcessedError = nil
                     recipeManager.clearError()
                 }
             } message: {
@@ -166,13 +164,11 @@ struct AddRecipeView: View {
             .onAppear {
                 // Only clear stale error state when first appearing
                 if !showingErrorAlert && !isParsingRecipe {
-                    lastProcessedError = nil
                     errorAlertMessage = ""
                     recipeManager.clearError()
                 }
             }
         }
-        .navigationViewStyle(.stack)
     }
     
     /// Text and image import both require on-device/remote LLM parsing; URL import works via
@@ -191,7 +187,7 @@ struct AddRecipeView: View {
             return !urlInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         case .text:
             let trimmedText = textInput.trimmingCharacters(in: .whitespacesAndNewlines)
-            return trimmedText.count >= 10 && trimmedText.count <= 50000
+            return (10...RecipeExtraction.maxSourceCharacters).contains(trimmedText.count)
         case .image:
             return !imageDataArray.isEmpty
         }
@@ -236,7 +232,6 @@ struct AddRecipeView: View {
                 // Handle parsing failure directly here
                 if let errorMessage = recipeManager.errorMessage {
                     errorAlertMessage = errorMessage
-                    lastProcessedError = errorMessage
                     showingErrorAlert = true
                     // Clear the manager's error immediately so it doesn't interfere
                     recipeManager.clearError()
@@ -309,17 +304,19 @@ struct TextInputView: View {
         trimmedText.count
     }
     
+    private let limit = RecipeExtraction.maxSourceCharacters
+
     private var isValid: Bool {
-        characterCount >= 10 && characterCount <= 50000
+        (10...limit).contains(characterCount)
     }
-    
+
     private var validationMessage: String? {
         if trimmedText.isEmpty {
             return nil
         } else if characterCount < 10 {
             return "Text must be at least 10 characters long"
-        } else if characterCount > 50000 {
-            return "Text must be less than 50,000 characters"
+        } else if characterCount > limit {
+            return "Text must be at most \(limit.formatted()) characters"
         }
         return nil
     }
@@ -332,7 +329,7 @@ struct TextInputView: View {
                 
                 Spacer()
                 
-                Text("\(characterCount)/50,000")
+                Text("\(characterCount.formatted())/\(limit.formatted())")
                     .font(.caption)
                     .foregroundColor(isValid || trimmedText.isEmpty ? .secondary : .red)
             }
@@ -370,7 +367,10 @@ struct TextInputView: View {
 struct MultiImageInputView: View {
     @Binding var selectedPhotos: [PhotosPickerItem]
     @Binding var imageDataArray: [Data]
-    
+    /// The picker items `imageDataArray` was loaded from, index for index. A photo that fails to
+    /// load is skipped, so the selection and the images can't be assumed to line up.
+    @State private var loadedItems: [PhotosPickerItem] = []
+
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack {
@@ -425,34 +425,39 @@ struct MultiImageInputView: View {
                             }
                         }
                         
+                        // Plain content, not a Button: inside the picker's label, an empty button
+                        // swallowed the tap and the picker never opened.
                         if imageDataArray.count < 5 {
-                            Button(action: {}) {
-                                VStack {
-                                    Image(systemName: "plus")
-                                        .font(.title2)
-                                        .foregroundColor(.orange)
-                                    Text("Add More")
-                                        .font(.caption)
-                                        .foregroundColor(.secondary)
-                                }
-                                .frame(height: 100)
-                                .frame(maxWidth: .infinity)
-                                .background(Color(.systemGray6))
-                                .cornerRadius(8)
+                            VStack {
+                                Image(systemName: "plus")
+                                    .font(.title2)
+                                    .foregroundColor(.orange)
+                                Text("Add More")
+                                    .font(.caption)
+                                    .foregroundColor(.secondary)
                             }
+                            .frame(height: 100)
+                            .frame(maxWidth: .infinity)
+                            .background(Color(.systemGray6))
+                            .cornerRadius(8)
                         }
                     }
                 }
             }
             .onChange(of: selectedPhotos) { _, newPhotos in
                 Task {
-                    var newImageData: [Data] = []
+                    var items: [PhotosPickerItem] = []
+                    var data: [Data] = []
                     for photo in newPhotos {
-                        if let data = try? await photo.loadTransferable(type: Data.self) {
-                            newImageData.append(data)
+                        if let loaded = try? await photo.loadTransferable(type: Data.self) {
+                            items.append(photo)
+                            data.append(loaded)
                         }
                     }
-                    imageDataArray = newImageData
+                    // A newer selection may have finished first; its result stands.
+                    guard newPhotos == selectedPhotos else { return }
+                    loadedItems = items
+                    imageDataArray = data
                 }
             }
             
@@ -463,8 +468,11 @@ struct MultiImageInputView: View {
     }
     
     private func removeImage(at index: Int) {
+        guard loadedItems.indices.contains(index) else { return }
+        let item = loadedItems.remove(at: index)
         imageDataArray.remove(at: index)
-        selectedPhotos.remove(at: index)
+        // The selection is what the picker shows; it reloads the rest through `onChange`.
+        selectedPhotos.removeAll { $0 == item }
     }
 }
 

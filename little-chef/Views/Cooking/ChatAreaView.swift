@@ -8,14 +8,20 @@ import SwiftUI
 struct ChatAreaView: View {
     @EnvironmentObject var cookingSessionManager: CookingSessionManager
 
+    /// The transcript without the empty reply a turn opens before its first word arrives — that
+    /// rendered as a blank grey bubble next to "Thinking…".
+    private var messages: [Message] {
+        cookingSessionManager.conversationHistory.filter { $0.isUser || !$0.content.isEmpty }
+    }
+
     var body: some View {
         ScrollViewReader { proxy in
             ScrollView {
                 LazyVStack(spacing: 12) {
-                    if cookingSessionManager.getConversationHistory().isEmpty {
+                    if messages.isEmpty && !cookingSessionManager.isLoading {
                         WelcomeMessageView()
                     } else {
-                        ForEach(cookingSessionManager.getConversationHistory()) { message in
+                        ForEach(messages) { message in
                             MessageBubbleView(message: message)
                                 .id(message.id)
                         }
@@ -37,8 +43,10 @@ struct ChatAreaView: View {
             // Dragging the transcript is the other natural "I'm done typing" gesture, and
             // interactive dismissal follows the finger instead of snapping.
             .scrollDismissesKeyboard(.interactively)
-            .onChange(of: cookingSessionManager.getConversationHistory().count) {
-                if let lastMessage = cookingSessionManager.getConversationHistory().last {
+            // Follows the reply as it grows, not only when a message is added: a long answer
+            // streams in below the fold otherwise.
+            .onChange(of: messages.last.map { "\($0.id):\($0.content.count)" }) {
+                if let lastMessage = messages.last {
                     withAnimation(.easeOut(duration: 0.3)) {
                         proxy.scrollTo(lastMessage.id, anchor: .bottom)
                     }
@@ -79,7 +87,7 @@ struct MessageBubbleView: View {
 
     var body: some View {
         HStack {
-            if message.role == "user" {
+            if message.isUser {
                 Spacer(minLength: 60)
                 VStack(alignment: .trailing, spacing: 4) {
                     Text(message.content)

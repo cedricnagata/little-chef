@@ -139,12 +139,11 @@ Store).
 The bundle IDs are plain `env:` in the workflow, not secrets — they ship inside every
 copy of the app.
 
-### No test gate, on purpose
+### No test gate on the deploy, on purpose
 
-The deploy path does not run tests. `little-chefTests` is a placeholder (`@Test
-func example()` asserting nothing), and `little-chefUITests` needs a booted
-simulator and touches the app's gated model-download paths — slow and flaky ahead
-of an archive. Gate correctness in a separate PR-check workflow if you want one.
+The deploy path does not run tests; pull requests do (see **Testing** below). The deploy
+only runs after a PR has merged, and `little-chefUITests` needs a booted simulator and
+touches the app's gated model-download paths — slow and flaky ahead of an archive.
 
 ### Invariants — change these only with a reason
 
@@ -277,9 +276,9 @@ The other device deleting it first, with the import landing before the user conf
 ordinary — surfacing `recipeNotFound` for it just puts "Recipe with ID <uuid> not found" in
 front of someone whose recipe is, in fact, gone.
 
-**`storeDidChange` is how anything holding a cached copy finds out.** Subscribers are refetch
-triggers for the two cases a caller can't see for itself: a CloudKit import, and a bulk local
-write (`deleteRecipes(ids:)`) made from a screen that doesn't own the list.
+**`storeDidChange` is how anything holding a cached copy finds out.** Subscribers
+(`RecipeManager`, `KitchenManager`) are refetch triggers for the two cases a caller can't see for
+itself: a CloudKit import, and Delete All Data.
 
 It is a `PassthroughSubject`, not a closure property, because there is more than one
 subscriber and a single `var onRemoteChange: (() -> Void)?` silently let the last assignment
@@ -318,9 +317,60 @@ the code and the policy together.
 - **Models download only when the user chooses.** The chat paths go through
   `downloadedModelContainer`, which throws `modelNotDownloaded` rather than fetching. Only
   Settings' download button, behind its size and cellular prompts, calls `downloadModel`.
-- **Settings → Delete All Data deletes everything.** That means recipes and preferences, row by
-  row so the deletes mirror to iCloud and the user's other devices, plus every downloaded model,
-  the model settings and every paired Mac. Anything new the app persists has to be added to it.
+- **Settings → Delete All Data deletes everything.** That means recipes, preferences, inventory
+  and shopping list, row by row so the deletes mirror to iCloud and the user's other devices, plus
+  every downloaded model, the model settings and every paired Mac. Anything new the app persists
+  has to be added to it.
+
+## Inventory, shopping list and suggestions
+
+The Kitchen tab keeps two SwiftData models, `PantryItemEntity` and `ShoppingItemEntity`, mirrored to
+iCloud with the recipes. **They are new CloudKit record types, so they need Deploy Schema to
+Production too.** Until then TestFlight and App Store builds keep them on the device only.
+
+`KitchenManager` is the one instance `MainView` owns, like `RecipeManager`. It is the inventory the
+recipe filters and the pre-cook check read.
+
+### Matching is deterministic, not AI
+
+`IngredientMatcher` decides what a recipe is missing. It runs for every recipe on every redraw of
+the list, with or without an AI backend, so it has to be instant and give the same answer twice.
+
+- **Reducing a line to names.** A line is cut at its first comma (the rest is preparation), and
+  asides, quantities, units and size or preparation words are stripped. "2 cloves garlic, minced"
+  becomes `garlic`.
+- **Several ingredients, or a choice.** "Salt and pepper" is two ingredients. "Butter or oil" is
+  one ingredient with two acceptable alternatives.
+- **What is skipped.** Optional, garnish and serving lines are never counted as missing. Water and
+  section headers ("For the sauce:") are dropped.
+- **When two names match.** One side's words must be a subset of the other's. "Garlic" covers
+  "garlic cloves", but "black pepper" doesn't cover "bell pepper". This is lenient on purpose:
+  "cinnamon" also covers "ground cinnamon". A wrong "you have it" costs a substitution, while a
+  wrong "missing" hides a recipe the user could have made.
+
+### Staples and duplicates
+
+- **Staples.** Common staples are seeded once per device (`KitchenManager.staplesSeededKey`, which
+  Delete All Data clears), in the inventory's Staples section, and count as always on hand.
+- **Why duplicates happen.** A second device seeds the staples again before iCloud has delivered
+  the first device's, so duplicate names are expected.
+- **How they're collapsed.** `fetchPantryItems()` and `fetchShoppingItems()` collapse them the way
+  `fetchPreferences()` does: oldest row wins, ties broken on `id`, so every device converges.
+- **No warnings until the inventory is in use.** Recipes only show have and missing, and the pre-cook
+  warning only appears, once the user has added an item beyond the staples
+  (`isTrackingInventory`). Before that, every recipe would report everything missing.
+
+### Suggested ranking
+
+`RecipeSuggester` asks the active AI provider to order recipes for the current meal period
+(breakfast, lunch, dinner or late night), given what each is missing.
+
+- **Numbers, not UUIDs.** Recipes are given to the model by number, so it never has to reproduce a
+  UUID. `parseOrder` accepts `{"order": [...]}` or a bare list of numbers.
+- **Never an error.** No AI, a model that isn't downloaded, or an unusable answer all fall back to a
+  deterministic order: fewest missing, then meal keywords, then title. The header says when that
+  happened.
+- **Cached.** The ranking is reused until the meal period, inventory or recipe list changes.
 
 ## Editing the recipe mid-cook
 
@@ -412,9 +462,74 @@ LLMService BigBro paths catch it rather than rethrowing: the tools already ran, 
 in the working copy and will be offered for saving at the end of the cook. Rethrowing would put
 "Failed to get response" in front of someone whose recipe did change.
 
-### `inferTimerAction` is guarded on the word "timer"
+### Timer inference is guarded on the word "timer"
 
-It reads verbs out of ordinary prose and acts on them, and `deleteTimer` falls back to "the
-only timer" when the name doesn't match. Once the assistant could talk about recipes,
-"Removed 'garlic' from the ingredients" was one sentence away from cancelling the timer on the
-oven. Do not loosen that guard.
+`TimerActionInference` (in `ModelReplyText.swift`) reads verbs out of ordinary prose and acts on
+them, and `deleteTimer` falls back to "the only timer" when the name doesn't match. Once the
+assistant could talk about recipes, "Removed 'garlic' from the ingredients" was one sentence
+away from cancelling the timer on the oven. Do not loosen that guard; `ReplyTextTests` holds it.
+
+### What streams is what the user sees
+
+On-device replies stream through `StreamingReplyFilter`, which keeps `<think>` reasoning and
+`<tool_call>` text out of the chat bubble and the speech queue while they generate. The finished
+reply (`ModelReplyText.strippingThinking`, then the tool calls run) replaces the streamed text,
+and whatever it adds at the end, typically tool results, is streamed too so it is also spoken.
+Spoken text is cut into sentences by `SentenceSplitter`, which never splits at the end of a chunk:
+"Use 1." followed by "5 cups" is one sentence.
+
+### The agent keeps no history of its own
+
+`LocalCookingAgent.reply(to:recipe:history:)` builds every prompt from the session's transcript.
+That transcript includes turns a hands-free loop on the Mac mirrored in, which a private copy in
+the agent never saw.
+
+## Ingredient scaling
+
+`IngredientScaler` scales the **leading** amount of a line and nothing else. In "1 (14 oz) can
+tomatoes" the 1 is a count and the 14 a package size. A line with no leading amount ("salt to
+taste") is left exactly as it is. Mixed numbers, unicode fractions, ranges and number words are
+read; results snap to kitchen fractions below 10 and whole numbers above.
+
+It must stay a pure function. `CookingSessionManager.updateServings` scales the working copy and
+the baseline separately, and identical inputs giving identical outputs is what makes a serving
+change cancel out instead of showing as unsaved recipe edits.
+
+## Recipe import
+
+`RecipeExtraction` reads schema.org JSON-LD and the import prompt's JSON, leniently: numbers as
+strings, lists as one string, missing lists as empty, trailing commas. A strict decoder used to
+throw the whole recipe away over any one of those.
+
+- **Yields.** Servings come from the first number in a yield, so "4-6 servings" is 4. Joining
+  every digit read it as 46.
+- **One size limit.** `RecipeExtraction.maxSourceCharacters` caps both the text box and the prompt.
+- **Typed scraper result.** `WebScraperService` returns a `ScrapedRecipePage`, not a string with a
+  magic prefix.
+
+## Testing
+
+`little-chefTests` holds the unit tests, written with Swift Testing. They run two ways.
+
+- **In Xcode:** ⌘U, against the app target.
+- **On Linux, on every pull request:** `.github/workflows/unit-tests.yml` runs
+  `swift test --package-path tools/linux-tests`. This also works locally on a Mac with a Swift
+  toolchain, no simulator needed.
+
+`tools/linux-tests` is a SwiftPM package whose sources are **symlinks** into the app target and
+whose test target is a symlink to `little-chefTests`. So it is the same code and the same tests,
+with no copies to keep in step. `Shims/` stands in for the two things those files borrow from
+iOS-only code: a minimal `LocalTimer`, and MLX's `ToolSpec` typealias.
+
+Only Foundation-only files can be linked. That is why the testable logic lives in files of its
+own: `IngredientMatcher`, `IngredientScaler`, `RecipeExtraction`, `RecipeLineMatcher`,
+`ModelReplyText`, `SpeechText`, `RecipeSuggester`, `RecipeDiff`, `HTMLText` and `ToolDefinition`.
+
+- **Adding a test for an existing linked file** needs nothing extra.
+- **Linking a new file:** keep it Foundation-only, and add its symlink under
+  `tools/linux-tests/Sources/little_chef/`.
+- **Test files** must import only Foundation and Testing, or the Linux job can't build them.
+
+Linux's ICU is stricter than Apple's. An unescaped `}` in a regex is a syntax error there, and
+`replacingOccurrences(…, options: .regularExpression)` then returns an **empty string**. Escape
+`{` and `}` in patterns; the Linux job catches it if you don't.

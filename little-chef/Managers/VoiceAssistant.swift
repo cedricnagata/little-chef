@@ -2,11 +2,11 @@
 //  VoiceAssistant.swift
 //  little-chef
 //
-//  Created by Cedric Nagata on 9/12/25.
+//  Voice in and out for the cooking assistant: hands-free loops, push-to-talk, and speaking
+//  typed replies, over whichever backend the cook is on.
 //
 
 import Foundation
-import Speech
 import AVFoundation
 import SwiftUI
 import Combine
@@ -116,6 +116,9 @@ final class VoiceAssistant: NSObject, ObservableObject {
     // Typed-reply speech queue.
     private var speechSink: AsyncStream<String>.Continuation?
     private var speakerTask: Task<Void, Never>?
+    /// Which queue is current. A cancelled queue can still be winding down when the next one
+    /// starts, and must not clear the new one's state when it finishes.
+    private var speechQueueID = UUID()
 
     // Push-to-talk recording.
     private var recorder: AVAudioRecorder?
@@ -180,17 +183,15 @@ final class VoiceAssistant: NSObject, ObservableObject {
     // MARK: - Permissions
 
     private func requestPermissions() {
-        SFSpeechRecognizer.requestAuthorization { [weak self] status in
-            Task { @MainActor [weak self] in
-                guard let self else { return }
-                guard status == .authorized else {
-                    self.error = "Speech recognition permission denied"
-                    self.isAvailable = false
-                    return
-                }
-                self.isAvailable = await AVAudioApplication.requestRecordPermission()
-                if !self.isAvailable { self.error = "Microphone permission denied" }
+        Task { [weak self] in
+            guard await OnDeviceTranscriber.requestAuthorization() else {
+                self?.error = "Speech recognition permission denied"
+                self?.isAvailable = false
+                return
             }
+            let microphone = await AVAudioApplication.requestRecordPermission()
+            self?.isAvailable = microphone
+            if !microphone { self?.error = "Microphone permission denied" }
         }
     }
 
@@ -467,7 +468,7 @@ final class VoiceAssistant: NSObject, ObservableObject {
                     Data(contentsOf: url), format: "m4a"
                 )
             } else {
-                transcript = try await Self.transcribeOnDevice(url)
+                transcript = try await OnDeviceTranscriber.transcribe(fileAt: url)
             }
             let trimmed = transcript.trimmingCharacters(in: .whitespacesAndNewlines)
             guard !trimmed.isEmpty else {
@@ -478,60 +479,6 @@ final class VoiceAssistant: NSObject, ObservableObject {
         } catch {
             self.error = "Transcription failed: \(error.localizedDescription)"
             return nil
-        }
-    }
-
-    /// Transcribes a recording with Apple's on-device recognizer.
-    private static func transcribeOnDevice(_ url: URL) async throws -> String {
-        guard let recognizer = SFSpeechRecognizer(locale: Locale(identifier: "en-US")),
-              recognizer.isAvailable else {
-            throw VoiceError.recognizerUnavailable
-        }
-        // Refused rather than sent to Apple's servers, which the privacy policy rules out.
-        guard recognizer.supportsOnDeviceRecognition else {
-            throw VoiceError.onDeviceRecognitionUnsupported
-        }
-        let request = SFSpeechURLRecognitionRequest(url: url)
-        request.shouldReportPartialResults = false
-        request.requiresOnDeviceRecognition = true
-        return try await withCheckedThrowingContinuation { continuation in
-            let settled = OnceFlag()
-            recognizer.recognitionTask(with: request) { result, error in
-                if let result, result.isFinal {
-                    if settled.claim() {
-                        continuation.resume(returning: result.bestTranscription.formattedString)
-                    }
-                    return
-                }
-                if let error, settled.claim() {
-                    continuation.resume(throwing: error)
-                }
-            }
-        }
-    }
-
-    /// One-shot latch guarding a continuation against a callback that fires more than once.
-    private final class OnceFlag: @unchecked Sendable {
-        private var done = false
-        private let lock = NSLock()
-        func claim() -> Bool {
-            lock.lock()
-            defer { lock.unlock() }
-            if done { return false }
-            done = true
-            return true
-        }
-    }
-
-    private enum VoiceError: LocalizedError {
-        case recognizerUnavailable
-        case onDeviceRecognitionUnsupported
-        var errorDescription: String? {
-            switch self {
-            case .recognizerUnavailable: return "Speech recognition is unavailable right now."
-            case .onDeviceRecognitionUnsupported:
-                return "On-device speech recognition isn't available on this device, so voice input is off. Type your question instead."
-            }
         }
     }
 
@@ -560,6 +507,8 @@ final class VoiceAssistant: NSObject, ObservableObject {
 
     private func startSpeechQueue() {
         let (stream, sink) = AsyncStream<String>.makeStream()
+        let queueID = UUID()
+        speechQueueID = queueID
         speechSink = sink
         isSpeaking = true
         speakerTask = Task { [weak self] in
@@ -567,7 +516,7 @@ final class VoiceAssistant: NSObject, ObservableObject {
                 guard let self, !Task.isCancelled else { break }
                 await self.speakOne(sentence)
             }
-            guard let self else { return }
+            guard let self, self.speechQueueID == queueID else { return }
             self.isSpeaking = false
             self.speakerTask = nil
             // The engine stays up between utterances on purpose — restarting it per sentence

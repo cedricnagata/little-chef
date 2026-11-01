@@ -80,26 +80,6 @@ final class RecipeEntity {
         )
     }
 
-    /// Create from Recipe struct
-    static func from(_ recipe: Recipe) -> RecipeEntity {
-        return RecipeEntity(
-            id: recipe.id,
-            title: recipe.title,
-            description: recipe.description,
-            servings: recipe.servings,
-            prepTime: recipe.prepTime,
-            cookTime: recipe.cookTime,
-            ingredients: recipe.ingredients,
-            instructions: recipe.instructions,
-            tags: recipe.tags,
-            sourceUrl: recipe.sourceUrl,
-            cuisineType: recipe.cuisineType,
-            difficulty: recipe.difficulty,
-            createdAt: recipe.createdAt,
-            updatedAt: recipe.updatedAt
-        )
-    }
-
     /// Create from RecipeData (from parsing)
     static func from(_ recipeData: RecipeData) -> RecipeEntity {
         return RecipeEntity(
@@ -131,45 +111,5 @@ final class RecipeEntity {
         self.cuisineType = recipeData.cuisineType
         self.difficulty = recipeData.difficulty
         self.updatedAt = Date()
-    }
-}
-
-// MARK: - Helper Extensions
-
-extension RecipeEntity {
-    /// Get total time (prep + cook) in minutes
-    var totalTime: Int? {
-        guard let prep = prepTime, let cook = cookTime else {
-            return prepTime ?? cookTime
-        }
-        return prep + cook
-    }
-
-    /// Get formatted time string
-    var formattedTime: String? {
-        guard let total = totalTime else { return nil }
-
-        if total < 60 {
-            return "\(total) min"
-        } else {
-            let hours = total / 60
-            let minutes = total % 60
-            if minutes == 0 {
-                return "\(hours) hr"
-            } else {
-                return "\(hours) hr \(minutes) min"
-            }
-        }
-    }
-
-    /// Check if recipe matches search query
-    func matches(query: String) -> Bool {
-        let lowercaseQuery = query.lowercased()
-
-        return title.lowercased().contains(lowercaseQuery) ||
-               recipeDescription?.lowercased().contains(lowercaseQuery) == true ||
-               tags.contains(where: { $0.lowercased().contains(lowercaseQuery) }) ||
-               cuisineType?.lowercased().contains(lowercaseQuery) == true ||
-               ingredients.contains(where: { $0.lowercased().contains(lowercaseQuery) })
     }
 }

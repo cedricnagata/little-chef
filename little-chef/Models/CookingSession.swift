@@ -2,7 +2,8 @@
 //  CookingSession.swift
 //  little-chef
 //
-//  Created by Cedric Nagata on 9/12/25.
+//  A cook in progress: the recipe being cooked, the conversation about it, and the
+//  baseline that saving would be measured against.
 //
 
 import Foundation
@@ -33,7 +34,13 @@ struct CookingSession: Codable, Identifiable {
     var baselineRecipe: RecipeBase
 
     var conversationHistory: [Message]
-    let userPreferences: UserPreferencesDetailed
+    /// The voice settings in force when the cook started. Settings pushes later changes to the
+    /// voice assistant directly, so this is only the starting point.
+    let voiceSettings: LocalVoiceSettings
+    /// What the recipe served when the cook started, so the servings control can show when it
+    /// has been changed. `recipe` and `baselineRecipe` both move with the control, so neither
+    /// can answer that.
+    let startingServings: Int
     let startedAt: Date
 
     /// Whether this cook is writing a recipe rather than following one.
@@ -44,16 +51,18 @@ struct CookingSession: Codable, Identifiable {
         case sourceRecipeID = "source_recipe_id"
         case baselineRecipe = "baseline_recipe"
         case conversationHistory = "conversation_history"
-        case userPreferences = "user_preferences"
+        case voiceSettings = "voice_settings"
+        case startingServings = "starting_servings"
         case startedAt = "started_at"
     }
 
-    init(sourceRecipeID: UUID?, recipe: RecipeBase, userPreferences: UserPreferencesDetailed) {
+    init(sourceRecipeID: UUID?, recipe: RecipeBase, voiceSettings: LocalVoiceSettings) {
         self.sourceRecipeID = sourceRecipeID
         self.recipe = recipe
         self.baselineRecipe = recipe
         self.conversationHistory = []
-        self.userPreferences = userPreferences
+        self.voiceSettings = voiceSettings
+        self.startingServings = recipe.servings
         self.startedAt = Date()
     }
 }
@@ -163,55 +172,15 @@ struct RecipeBase: Codable, Equatable {
     }
 }
 
-// MARK: - Timer Status Type
-
-enum TimerStatusType: String, Codable {
-    case new, running, paused, ended
-}
-
 // MARK: - Message
 
+/// One turn of the cooking conversation, as the transcript shows it.
 struct Message: Codable, Identifiable {
     let id: UUID
-    let role: String  // "user" or "assistant"
+    /// "user" or "assistant".
+    let role: String
     let content: String
     let timestamp: Date
-}
 
-// MARK: - User Preferences
-
-struct UserPreferencesDetailed: Codable {
-    let llmModel: String
-    let measurementSystem: String
-    let dietaryRestrictions: [String]
-    let voiceSettings: LocalVoiceSettings
-    let cookingModel: CookingModelChoice
-    let llmProvider: LLMProvider
-
-    enum CodingKeys: String, CodingKey {
-        case llmModel = "llm_model"
-        case measurementSystem = "measurement_system"
-        case dietaryRestrictions = "dietary_restrictions"
-        case voiceSettings = "voice_settings"
-        case cookingModel = "cooking_model"
-        case llmProvider = "llm_provider"
-    }
-
-    init() {
-        self.llmModel = "bonsai-8b-1bit"
-        self.measurementSystem = "imperial"
-        self.dietaryRestrictions = []
-        self.voiceSettings = LocalVoiceSettings.defaultSettings
-        self.cookingModel = .bonsai8B
-        self.llmProvider = .local
-    }
-
-    init(from userPreferences: LocalUserPreferences) {
-        self.llmModel = userPreferences.cookingModel.modelId
-        self.measurementSystem = userPreferences.measurementSystem
-        self.dietaryRestrictions = userPreferences.dietaryRestrictions
-        self.voiceSettings = userPreferences.voiceSettings
-        self.cookingModel = userPreferences.cookingModel
-        self.llmProvider = userPreferences.llmProvider
-    }
+    var isUser: Bool { role == "user" }
 }

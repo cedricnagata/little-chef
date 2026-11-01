@@ -25,6 +25,9 @@ struct MainView: View {
     @EnvironmentObject var cookingSessionManager: CookingSessionManager
     @EnvironmentObject var voiceAssistant: VoiceAssistant
     @StateObject private var recipeManager = RecipeManager()
+    /// One for the whole app, like `recipeManager`: the Kitchen tab edits the inventory the
+    /// recipe filters and the pre-cook check read.
+    @StateObject private var kitchenManager = KitchenManager()
     @State private var selectedTab = 0
 
     var body: some View {
@@ -36,6 +39,7 @@ struct MainView: View {
             }
         }
         .environmentObject(recipeManager)
+        .environmentObject(kitchenManager)
         .environment(\.selectedTab, $selectedTab)
     }
 
@@ -46,6 +50,13 @@ struct MainView: View {
                     Label("Recipes", systemImage: "book.fill")
                 }
                 .tag(0)
+
+            // Tag 3, not 1: tags identify tabs, and `RecipeDetailView` switches to Cook by its tag.
+            KitchenView()
+                .tabItem {
+                    Label("Kitchen", systemImage: "refrigerator.fill")
+                }
+                .tag(3)
 
             CookingSessionView()
                 .tabItem {

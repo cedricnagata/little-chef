@@ -127,7 +127,7 @@ struct AddTimerView: View {
     private let secondOptions = Array(0...59)
 
     var body: some View {
-        NavigationView {
+        NavigationStack {
             VStack(spacing: 20) {
                 VStack(alignment: .leading, spacing: 8) {
                     Text("Timer Label")
@@ -216,7 +216,6 @@ struct AddTimerView: View {
     }
 
     private var formattedDuration: String {
-        let totalSeconds = selectedMinutes * 60 + selectedSeconds
         let minutes = totalSeconds / 60
         let seconds = totalSeconds % 60
 
