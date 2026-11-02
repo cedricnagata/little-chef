@@ -50,12 +50,14 @@ if [ -n "$(git status --porcelain)" ]; then
 fi
 
 git fetch --prune --quiet origin
-before="$(git hash-object tools/mac-test)"
+before="$(git hash-object tools/mac-test 2>/dev/null || true)"
 git checkout --detach --quiet "origin/$branch"
 
 # This file is part of what was just checked out. Running on would test the branch with the
 # previous checkout's script, so start again with the branch's own, once.
-if [ "$(git hash-object tools/mac-test)" != "$before" ] && [ -z "${MAC_TEST_REEXEC:-}" ]; then
+# A branch from before the script existed has none, and is tested with this one.
+after="$(git hash-object tools/mac-test 2>/dev/null || true)"
+if [ -n "$after" ] && [ "$after" != "$before" ] && [ -z "${MAC_TEST_REEXEC:-}" ]; then
     MAC_TEST_REEXEC=1 exec tools/mac-test "${args[@]}"
 fi
 echo "== testing $branch at $(git log --oneline -1)"
