@@ -2,6 +2,8 @@
 //  TimerNotificationManager.swift
 //  little-chef
 //
+//  The local notification that announces a finished timer, scheduled when the timer starts.
+//
 
 import UserNotifications
 import Foundation

@@ -2,6 +2,9 @@
 //  ProfileSettingsView.swift
 //  little-chef
 //
+//  The Settings tab: AI provider and models, voice, hands-free, iCloud status, and Delete All
+//  Data.
+//
 
 import SwiftUI
 import AVFoundation
@@ -499,8 +502,9 @@ struct ProfileSettingsView: View {
 
     // MARK: - Data Operations
 
-    /// Everything the app keeps about the user, gone: recipes and preferences (and their iCloud
-    /// copies), downloaded models and model settings, and every paired Mac.
+    /// Everything the app keeps about the user, gone: recipes, preferences, inventory and
+    /// shopping list (and their iCloud copies), downloaded models and model settings, and every
+    /// paired Mac.
     ///
     /// Models first, because it is the step that can refuse — mid-answer or mid-download — and
     /// refusing before anything is deleted beats deleting the recipes and then reporting that

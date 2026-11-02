@@ -2,8 +2,9 @@
 //  TimerActivityAttributes.swift
 //  little-chef
 //
-//  Shared between the main app target and the TimerWidget extension.
-//  Add this file to both targets in Xcode's file inspector.
+//  What a timer's Live Activity shows. Compiled into both the app, which starts and updates the
+//  activity, and the TimerWidget extension, which draws it. The app picks it up from its synced
+//  folder; the widget target lists it explicitly in its Sources phase.
 //
 
 #if canImport(ActivityKit)

@@ -2,7 +2,9 @@
 //  LocalDataManager.swift
 //  little-chef
 //
-//  Manages local data persistence using SwiftData
+//  The SwiftData store: recipes, preferences, inventory and shopping list, mirrored to the
+//  user's private iCloud database, with a local-only fallback when mirroring can't start.
+//  See CLAUDE.md, "CloudKit sync".
 //
 
 import Combine

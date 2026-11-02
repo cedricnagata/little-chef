@@ -2,6 +2,8 @@
 //  ChatAreaView.swift
 //  little-chef
 //
+//  The conversation during a cook, following the newest message as it streams.
+//
 
 import SwiftUI
 

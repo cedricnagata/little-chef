@@ -156,7 +156,7 @@ class LLMService: ObservableObject {
     private static let onDeviceModelKey = "little-chef.on-device-model"
 
     // MARK: - Private State
-    /// Containers keyed by model ID — allows both 8B and 4B to be loaded
+    /// Containers keyed by model ID, so more than one model can be resident at once
     private var modelContainers: [String: MLXLMCommon.ModelContainer] = [:]
     /// Which model ID is currently being loaded (to prevent double-loads)
     @Published var currentlyLoadingModelId: String?

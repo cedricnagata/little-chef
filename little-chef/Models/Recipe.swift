@@ -2,6 +2,9 @@
 //  Recipe.swift
 //  little-chef
 //
+//  A saved recipe (`Recipe`), a recipe before it is saved (`RecipeData`), and what an import
+//  hands back.
+//
 //  Created by Cedric Nagata on 9/5/25.
 //
 

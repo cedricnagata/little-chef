@@ -5,8 +5,9 @@
 // The sources are symlinks into the app target and the tests are a symlink to
 // little-chefTests, so this runs the same suite Xcode does without the iOS SDK — on any
 // machine, and on every pull request (see .github/workflows/unit-tests.yml). Only files that
-// need nothing beyond Foundation can be listed here; Shims/ stands in for the two types they
-// borrow from code that does.
+// need nothing beyond Foundation can be linked into Sources/little_chef. The two types they
+// borrow from code that does are stood in for by Shims/LocalTimerStub.swift (linked in like the
+// rest) and the one-file MLXLMCommon target below.
 
 import PackageDescription
 

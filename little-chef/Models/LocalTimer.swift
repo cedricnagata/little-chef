@@ -2,6 +2,8 @@
 //  LocalTimer.swift
 //  little-chef
 //
+//  A cooking timer and its countdown, notification and Live Activity.
+//
 
 import Foundation
 import Combine

@@ -4,7 +4,7 @@ title: LittleChef Privacy Policy
 
 # LittleChef Privacy Policy
 
-**Last updated: October 30, 2026**
+**Last updated: November 2, 2026**
 
 LittleChef ("we", "the app") is designed with privacy as a core principle. This policy explains what data the app handles and how.
 
@@ -30,9 +30,9 @@ In neither case is audio sent to LittleChef or to any third-party server.
 **AI inference.**
 
 - *On-device mode (default):* A PrismML Bonsai model runs entirely on your iPhone or iPad using Apple's MLX framework. Which model depends on your device's memory, and devices with enough memory can choose the larger Bonsai 27B in Settings. No prompts or responses leave the device. Model weights are downloaded from Hugging Face's public model repository when you choose to download them in Settings. As with any download, Hugging Face can see the request, including your IP address. Nothing about you or your recipes is sent.
-- *BigBro mode (optional):* If you choose to pair LittleChef with a Mac running the BigBro companion app on your local network, prompts and responses — and, when you use voice, the recorded audio — are sent over your local Wi-Fi network to that Mac for processing. They do not leave your local network.
+- *BigBro mode (optional):* If you choose to pair LittleChef with a Mac running the BigBro companion app on your local network, prompts and responses — and, when you use voice, the recorded audio — are sent over your local Wi-Fi network to that Mac for processing. That includes the text of a recipe you import when the app uses AI to structure it. None of it leaves your local network.
 
-The **Suggested** recipe filter works the same way: to rank your recipes it gives the AI their titles, tags and cooking times, what each is missing from your inventory, and the current time of day. That goes to the on-device model or your paired Mac, depending on the mode, and nowhere else.
+The **Suggested** recipe filter works the same way: to rank your recipes it gives the AI their titles, tags and cooking times, what each is missing from your inventory, and the current day and time. That goes to the on-device model or your paired Mac, depending on the mode, and nowhere else.
 
 The mode is fixed for the duration of a cooking session: it is chosen before you start cooking and cannot change partway through.
 

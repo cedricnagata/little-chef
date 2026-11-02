@@ -2,6 +2,8 @@
 //  MainView.swift
 //  little-chef
 //
+//  The tabs, and the shared managers every tab reads. A cook in progress takes over the screen.
+//
 //  Created by Cedric Nagata on 9/5/25.
 //
 
