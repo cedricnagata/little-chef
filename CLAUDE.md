@@ -603,7 +603,11 @@ Control session there that the Linux session messages: push a branch, ask the Ma
   detached, so it runs from a `git worktree` rather than the clone open in Xcode:
   `git worktree add --detach ../little-chef-test` from the main clone, and Remote Control serves
   that folder. It refuses to run in a checkout with uncommitted changes.
-- **What it runs.** `little-chefTests` on the newest iPhone Simulator (a "Pro" if there is one;
+- **The Mac needs the Metal Toolchain.** MLX compiles Metal kernels, and since Xcode 26 the Metal
+  compiler is a separate component: `xcodebuild -downloadComponent MetalToolchain`, once per Xcode.
+  The script checks for it before building rather than failing on the first `.metal` file.
+- **What it runs.** `little-chefTests` on an iPhone Pro Simulator, from the newest iOS that has one (else the newest
+  iPhone;
   `MAC_TEST_SIMULATOR=<name>` picks another), in Debug; `--ui` adds `little-chefUITests`. It prints
   the pass and fail counts and each failure from the result bundle, and on a failed build the
   `error:` lines from the log. The log and result bundle are kept under

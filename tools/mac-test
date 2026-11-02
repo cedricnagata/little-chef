@@ -9,7 +9,7 @@
 # CLAUDE.md, "Testing on the Mac"), because it checks out whatever it is asked to test.
 #
 # Without --ui it runs little-chefTests only; with it, the UI smoke tests as well.
-# MAC_TEST_SIMULATOR=<name> picks a simulator by name instead of the newest iPhone.
+# MAC_TEST_SIMULATOR=<name> picks a simulator by name instead of the newest iPhone Pro.
 #
 # Written for macOS's bash 3.2: no associative arrays, no `mapfile`.
 
@@ -47,7 +47,17 @@ git checkout --detach --quiet "origin/$branch"
 echo "== testing $branch at $(git log --oneline -1)"
 echo "== $(xcodebuild -version | head -1)"
 
-# The newest iOS runtime's first iPhone with "Pro" in its name, else its first iPhone.
+# MLX compiles Metal kernels, and since Xcode 26 the Metal compiler is a separate download.
+# Without it the build fails minutes in, on the first .metal file; finding out here is instant.
+if ! xcrun metal --version >/dev/null 2>&1; then
+    echo "mac-test: no Metal Toolchain in this Xcode; install it with" >&2
+    echo "    xcodebuild -downloadComponent MetalToolchain" >&2
+    exit 1
+fi
+
+# An iPhone "Pro" on the newest iOS runtime that has one, else the newest runtime's first
+# iPhone. A new runtime can ship with only an odd model or two, so a Pro on an older runtime is
+# preferred to the first iPhone on the newest.
 udid="$(MAC_TEST_SIMULATOR="${MAC_TEST_SIMULATOR:-}" xcrun simctl list devices available -j | /usr/bin/python3 -c '
 import json, os, re, sys
 devices = json.load(sys.stdin)["devices"]
@@ -56,17 +66,18 @@ def version(runtime):
     m = re.search(r"iOS-(\d+)-(\d+)", runtime)
     return (int(m.group(1)), int(m.group(2))) if m else None
 runtimes = sorted((r for r in devices if version(r)), key=version, reverse=True)
-for runtime in runtimes:
-    phones = [d for d in devices[runtime] if d["name"].startswith("iPhone")]
-    if wanted:
-        phones = [d for d in devices[runtime] if d["name"] == wanted]
-    if not phones:
-        continue
-    pros = [d for d in phones if "Pro" in d["name"]]
-    pick = (pros or phones)[0]
-    print(pick["udid"])
-    print("== simulator: %s, %s" % (pick["name"], runtime.split(".")[-1]), file=sys.stderr)
-    break
+if wanted:
+    tests = [lambda d: d["name"] == wanted]
+else:
+    tests = [lambda d: d["name"].startswith("iPhone") and " Pro" in d["name"],
+             lambda d: d["name"].startswith("iPhone")]
+for test in tests:
+    found = [(r, d) for r in runtimes for d in devices[r] if test(d)]
+    if found:
+        runtime, pick = found[0]
+        print(pick["udid"])
+        print("== simulator: %s, %s" % (pick["name"], runtime.split(".")[-1]), file=sys.stderr)
+        break
 ')"
 [ -n "$udid" ] || { echo "mac-test: no available iPhone simulator${MAC_TEST_SIMULATOR:+ named $MAC_TEST_SIMULATOR}" >&2; exit 1; }
 
