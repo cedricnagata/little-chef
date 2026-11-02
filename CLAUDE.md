@@ -606,11 +606,10 @@ Control session there that the Linux session messages: push a branch, ask the Ma
 - **The Mac needs the Metal Toolchain.** MLX compiles Metal kernels, and since Xcode 26 the Metal
   compiler is a separate component: `xcodebuild -downloadComponent MetalToolchain`, once per Xcode.
   The script checks for it before building rather than failing on the first `.metal` file.
-- **What it runs.** `little-chefTests` on an iPhone Pro Simulator, from the newest iOS that has one (else the newest
-  iPhone;
-  `MAC_TEST_SIMULATOR=<name>` picks another), in Debug; `--ui` adds `little-chefUITests`. It prints
-  the pass and fail counts and each failure from the result bundle, and on a failed build the
-  `error:` lines from the log. The log and result bundle are kept under
+- **What it runs.** `little-chefTests` on an iPhone Pro Simulator, from the newest iOS that has one
+  (else the newest iPhone; `MAC_TEST_SIMULATOR=<name>` picks another), in Debug; `--ui` adds
+  `little-chefUITests`. It prints the pass and fail counts and each failure from the result bundle,
+  and on a failed build the `error:` lines from the log. The log and result bundle are kept under
   `~/Library/Caches/little-chef-mac-test/`, with a DerivedData of its own there, so rebuilds are
   incremental and never disturb Xcode's.
 - **What it cannot see.** The Simulator runs no MLX, so on-device inference, speech and Live
