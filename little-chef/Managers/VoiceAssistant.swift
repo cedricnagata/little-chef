@@ -58,7 +58,9 @@ final class VoiceAssistant: NSObject, ObservableObject {
 
     // MARK: - Availability
 
-    @Published private(set) var isAvailable = false
+    /// False only once the user has refused the microphone. Before they have been asked, voice
+    /// is offered, and the first use asks: see ``refreshAvailability()``.
+    @Published private(set) var isAvailable = true
     @Published var error: String?
 
     // MARK: - Hands-free
@@ -131,7 +133,12 @@ final class VoiceAssistant: NSObject, ObservableObject {
     init(llmService: LLMService) {
         self.llmService = llmService
         super.init()
-        requestPermissions()
+        refreshAvailability()
+        // A permission turned back on in iOS Settings shows up when the app returns to the front.
+        NotificationCenter.default.publisher(for: UIApplication.didBecomeActiveNotification)
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in self?.refreshAvailability() }
+            .store(in: &connectionCancellables)
 
         // A hands-free loop on the Mac path has nothing to talk to once the Mac goes away:
         // every turn would fail, and leaving the microphone open would burn battery
@@ -182,17 +189,19 @@ final class VoiceAssistant: NSObject, ObservableObject {
 
     // MARK: - Permissions
 
-    private func requestPermissions() {
-        Task { [weak self] in
-            guard await OnDeviceTranscriber.requestAuthorization() else {
-                self?.error = "Speech recognition permission denied"
-                self?.isAvailable = false
-                return
-            }
-            let microphone = await AVAudioApplication.requestRecordPermission()
-            self?.isAvailable = microphone
-            if !microphone { self?.error = "Microphone permission denied" }
-        }
+    /// Reads the microphone permission without asking for it.
+    ///
+    /// Nothing is requested at launch. The app already asks for notifications there, and iOS
+    /// doesn't queue prompts from separate requests: speech recognition and the microphone
+    /// asked for at the same moment put three prompts on screen at once, on top of each other.
+    /// Each voice path asks for what it needs when the user first uses it instead (push-to-talk
+    /// in ``startRecording()``, the loops in `LocalVoiceSession.start()` and BigBroKit's
+    /// session), which is also when the prompt makes sense to them.
+    ///
+    /// Speech recognition isn't part of this: the Mac path doesn't use it, and the on-device
+    /// paths report a refusal when they ask.
+    func refreshAvailability() {
+        isAvailable = AVAudioApplication.shared.recordPermission != .denied
     }
 
     // MARK: - Hands-free
@@ -411,8 +420,16 @@ final class VoiceAssistant: NSObject, ObservableObject {
 
     private func startRecording() async {
         error = nil
+        // Speech recognition first when this utterance will be transcribed on the device, so the
+        // prompts come one after the other rather than after a recording that can't be used.
+        let transcribesOnDevice = !(provider == .bigBro && llmService.bigBroClient.isConnected)
+        if transcribesOnDevice, !(await OnDeviceTranscriber.requestAuthorization()) {
+            error = "Speech recognition permission is off — turn it on in Settings."
+            return
+        }
         guard await AVAudioApplication.requestRecordPermission() else {
-            error = "Microphone permission denied."
+            refreshAvailability()
+            error = "Microphone permission is off — turn it on in Settings."
             return
         }
         // Same rule as starting hands-free: whoever takes the route gets it to itself. A
