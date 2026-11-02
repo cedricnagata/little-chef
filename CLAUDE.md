@@ -348,6 +348,17 @@ the code and the policy together.
   every downloaded model, the model settings and every paired Mac. Anything new the app persists
   has to be added to it.
 
+## Permission prompts: one at launch, the rest when first used
+
+Launch asks for notifications (timer alerts) and nothing else. iOS does not queue prompts from
+separate requests, so asking for speech recognition and the microphone at the same moment put all
+three on screen at once, each answered before the one beneath it. Speech recognition and the
+microphone are asked for when voice is first used: push-to-talk in `VoiceAssistant.startRecording()`
+(speech only when the utterance will be transcribed on the device), the on-device loop in
+`LocalVoiceSession.start()`, and the Mac loop inside BigBroKit. `VoiceAssistant.isAvailable` only
+goes false once the microphone has been refused, and is re-read when the app comes back to the
+front. Do not add a permission request to an `init` or a launch `.task`.
+
 ## Inventory, shopping list and suggestions
 
 The Kitchen tab keeps two SwiftData models, `PantryItemEntity` and `ShoppingItemEntity`, mirrored to
