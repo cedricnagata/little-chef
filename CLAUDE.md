@@ -591,3 +591,28 @@ Linux's ICU is stricter than Apple's. An unescaped `}` in a regex is a syntax er
 `little-chefUITests` is separate: UI smoke tests (launch, a URL import from start to finish, the
 Cook and Settings tabs) that need a simulator and run from Xcode only. They find controls by their
 visible text, so renaming a button or a section header can break them.
+
+## Testing on the Mac
+
+Development can happen on a Linux machine (beepboop), which runs the Linux unit tests above and
+nothing iOS. The build, the Simulator and the UI tests run on a Mac, through a Claude Code Remote
+Control session there that the Linux session messages: push a branch, ask the Mac session to run
+`tools/mac-test <branch>`, read back its summary.
+
+- **A checkout kept for testing only.** `tools/mac-test` checks out whatever it is asked to test,
+  detached, so it runs from a `git worktree` rather than the clone open in Xcode:
+  `git worktree add --detach ../little-chef-test` from the main clone, and Remote Control serves
+  that folder. It refuses to run in a checkout with uncommitted changes.
+- **The Mac needs the Metal Toolchain.** MLX compiles Metal kernels, and since Xcode 26 the Metal
+  compiler is a separate component: `xcodebuild -downloadComponent MetalToolchain`, once per Xcode.
+  The script checks for it before building rather than failing on the first `.metal` file.
+- **What it runs.** `little-chefTests` on an iPhone Pro Simulator, from the newest iOS that has one
+  (else the newest iPhone; `MAC_TEST_SIMULATOR=<name>` picks another), in Debug; `--ui` adds
+  `little-chefUITests`. It prints the pass and fail counts and each failure from the result bundle,
+  and on a failed build the `error:` lines from the log. The log and result bundle are kept under
+  `~/Library/Caches/little-chef-mac-test/`, with a DerivedData of its own there, so rebuilds are
+  incremental and never disturb Xcode's.
+- **What it cannot see.** The Simulator runs no MLX, so on-device inference, speech and Live
+  Activities still need a real iPhone. It also signs nothing for distribution: signing changes are
+  still proven by the deploy (see **Pull request checks**).
+- **The Mac must be awake** and the Claude app running; an unanswered message means it isn't.
