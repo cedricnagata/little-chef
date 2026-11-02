@@ -35,6 +35,12 @@ done
 
 cd "$(git rev-parse --show-toplevel)"
 
+# Package resolution rewrites this when the committed pins are stale or a different Xcode formats
+# it differently. In a test checkout that is the build's own output, not anyone's work, so it is
+# put back rather than allowed to block the next run.
+resolved=little-chef.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved
+git checkout --quiet -- "$resolved"
+
 # A checkout with edits in it is someone's work, not a test bed.
 if [ -n "$(git status --porcelain)" ]; then
     echo "mac-test: this checkout has uncommitted changes; refusing to check anything out" >&2
@@ -114,6 +120,28 @@ print("== result: %s, %s passed, %s failed, %s skipped" % (
 for f in s.get("testFailures", []):
     print("FAIL %s: %s" % (f.get("testName"), f.get("failureText")))
 ' || echo "== (could not read the result bundle: $result)"
+fi
+
+# Said out loud, because it means the committed file is out of step with what Xcode resolves.
+if ! git diff --quiet -- "$resolved"; then
+    echo "== note: package resolution changed Package.resolved; compared with the committed one:"
+    git show "HEAD:$resolved" >"$cache/Package.resolved.committed"
+    /usr/bin/python3 - "$cache/Package.resolved.committed" "$resolved" <<'PY' || true
+import json, sys
+def pins(path):
+    with open(path) as f:
+        return {p["identity"]: p["state"].get("version") or p["state"].get("revision", "")[:12]
+                for p in json.load(f)["pins"]}
+old, new = pins(sys.argv[1]), pins(sys.argv[2])
+for name in sorted(set(old) | set(new)):
+    if old.get(name) != new.get(name):
+        print("   %s: %s -> %s" % (name, old.get(name, "(none)"), new.get(name, "(none)")))
+if old == new:
+    print("   (the same pins, only reformatted)")
+PY
+    cp "$resolved" "$cache/Package.resolved"
+    echo "   (Xcode's version saved to $cache/Package.resolved; the checkout's is put back)"
+    git checkout --quiet -- "$resolved"
 fi
 
 if [ "$status" -ne 0 ]; then
