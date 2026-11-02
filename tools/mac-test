@@ -1,0 +1,112 @@
+#!/bin/bash
+#
+# Builds a pushed branch on this Mac and runs its tests on an iOS Simulator.
+#
+#   tools/mac-test <branch> [--ui]
+#
+# The Mac half of developing on beepboop: there the code is written and pushed, here it is
+# built and tested. Run it from a checkout kept for nothing else (a `git worktree`, see
+# CLAUDE.md, "Testing on the Mac"), because it checks out whatever it is asked to test.
+#
+# Without --ui it runs little-chefTests only; with it, the UI smoke tests as well.
+# MAC_TEST_SIMULATOR=<name> picks a simulator by name instead of the newest iPhone.
+#
+# Written for macOS's bash 3.2: no associative arrays, no `mapfile`.
+
+set -euo pipefail
+
+usage() {
+    echo "usage: tools/mac-test <branch> [--ui]" >&2
+    exit 2
+}
+
+[ $# -ge 1 ] || usage
+branch="$1"
+shift
+ui=0
+for arg in "$@"; do
+    case "$arg" in
+        --ui) ui=1 ;;
+        *) usage ;;
+    esac
+done
+
+[ "$(uname -s)" = "Darwin" ] || { echo "mac-test: needs macOS and Xcode" >&2; exit 1; }
+
+cd "$(git rev-parse --show-toplevel)"
+
+# A checkout with edits in it is someone's work, not a test bed.
+if [ -n "$(git status --porcelain)" ]; then
+    echo "mac-test: this checkout has uncommitted changes; refusing to check anything out" >&2
+    git status --short >&2
+    exit 1
+fi
+
+git fetch --prune --quiet origin
+git checkout --detach --quiet "origin/$branch"
+echo "== testing $branch at $(git log --oneline -1)"
+echo "== $(xcodebuild -version | head -1)"
+
+# The newest iOS runtime's first iPhone with "Pro" in its name, else its first iPhone.
+udid="$(MAC_TEST_SIMULATOR="${MAC_TEST_SIMULATOR:-}" xcrun simctl list devices available -j | /usr/bin/python3 -c '
+import json, os, re, sys
+devices = json.load(sys.stdin)["devices"]
+wanted = os.environ.get("MAC_TEST_SIMULATOR")
+def version(runtime):
+    m = re.search(r"iOS-(\d+)-(\d+)", runtime)
+    return (int(m.group(1)), int(m.group(2))) if m else None
+runtimes = sorted((r for r in devices if version(r)), key=version, reverse=True)
+for runtime in runtimes:
+    phones = [d for d in devices[runtime] if d["name"].startswith("iPhone")]
+    if wanted:
+        phones = [d for d in devices[runtime] if d["name"] == wanted]
+    if not phones:
+        continue
+    pros = [d for d in phones if "Pro" in d["name"]]
+    pick = (pros or phones)[0]
+    print(pick["udid"])
+    print("== simulator: %s, %s" % (pick["name"], runtime.split(".")[-1]), file=sys.stderr)
+    break
+')"
+[ -n "$udid" ] || { echo "mac-test: no available iPhone simulator${MAC_TEST_SIMULATOR:+ named $MAC_TEST_SIMULATOR}" >&2; exit 1; }
+
+# Its own DerivedData, kept between runs so a rebuild is incremental, and apart from Xcode's
+# so a test run never invalidates the build of the project open in the IDE.
+cache="$HOME/Library/Caches/little-chef-mac-test"
+mkdir -p "$cache"
+result="$cache/last.xcresult"
+log="$cache/last.log"
+rm -rf "$result"
+
+only=(-only-testing:little-chefTests)
+[ "$ui" = 1 ] && only=()
+
+echo "== building and testing (log: $log)"
+status=0
+xcodebuild test \
+    -project little-chef.xcodeproj \
+    -scheme little-chef \
+    -configuration Debug \
+    -destination "id=$udid" \
+    -derivedDataPath "$cache/DerivedData" \
+    -resultBundlePath "$result" \
+    ${only[@]+"${only[@]}"} \
+    >"$log" 2>&1 || status=$?
+
+if [ -d "$result" ]; then
+    xcrun xcresulttool get test-results summary --path "$result" --compact 2>/dev/null \
+        | /usr/bin/python3 -c '
+import json, sys
+s = json.load(sys.stdin)
+print("== result: %s, %s passed, %s failed, %s skipped" % (
+    s.get("result"), s.get("passedTests"), s.get("failedTests"), s.get("skippedTests")))
+for f in s.get("testFailures", []):
+    print("FAIL %s: %s" % (f.get("testName"), f.get("failureText")))
+' || echo "== (could not read the result bundle: $result)"
+fi
+
+if [ "$status" -ne 0 ]; then
+    echo "== xcodebuild exited $status; the errors in the log:"
+    grep -E "error:|\*\* (BUILD|TEST) FAILED" "$log" | head -40 || tail -40 "$log"
+fi
+exit "$status"
