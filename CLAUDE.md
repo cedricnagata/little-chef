@@ -230,8 +230,9 @@ older profile, fails the archive with the row in the table above.
   `.none` means no model or no Mac. Ask `capability(of:)` with the provider a cook pinned, not
   `capability`, which follows the app-wide setting.
 - **DEBUG overrides the RAM check and the tiers**, though not the 27B's memory gate. A debug build
-  reports the 8B and `.full` on every device, so every feature can be exercised on any phone. The limited and none paths can only be seen in a Release
-  build: TestFlight, or a local Release run with the manual profiles installed.
+  reports the 8B and `.full` on every device, so every feature can be exercised on any phone.
+  The limited and none paths can only be seen in a Release build: TestFlight, or a local Release
+  run with the manual profiles installed.
 - **The on-device model is per device; the provider syncs.** The chosen on-device model lives
   only in `UserDefaults` (`little-chef.on-device-model`), because what a device can run and has
   downloaded are facts about that device. The provider is in the synced preferences, and Settings
