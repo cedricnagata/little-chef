@@ -2,6 +2,8 @@
 //  RecipeDetailView.swift
 //  little-chef
 //
+//  One recipe: what's missing from the kitchen, editing, deleting, and starting a cook.
+//
 //  Created by Cedric Nagata on 9/5/25.
 //
 

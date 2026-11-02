@@ -2,6 +2,8 @@
 //  BigBroPairingView.swift
 //  little-chef
 //
+//  Finding, pairing and connecting to a BigBro Mac, and its model downloads.
+//
 
 import SwiftUI
 import BigBroKit

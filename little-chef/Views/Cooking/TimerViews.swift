@@ -2,6 +2,8 @@
 //  TimerViews.swift
 //  little-chef
 //
+//  Timer cards for the cook in progress, and the sheet for adding a timer by hand.
+//
 
 import SwiftUI
 

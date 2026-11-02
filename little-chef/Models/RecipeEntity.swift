@@ -2,7 +2,7 @@
 //  RecipeEntity.swift
 //  little-chef
 //
-//  SwiftData model for local recipe storage
+//  The stored form of a recipe, mirrored to iCloud. Everything else reads it as `Recipe`.
 //
 
 import Foundation

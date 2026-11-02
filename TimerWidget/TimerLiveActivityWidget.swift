@@ -2,6 +2,8 @@
 //  TimerLiveActivityWidget.swift
 //  TimerWidget
 //
+//  A running timer's Live Activity, on the Lock Screen and in the Dynamic Island.
+//
 
 import WidgetKit
 import SwiftUI

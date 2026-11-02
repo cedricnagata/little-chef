@@ -141,8 +141,8 @@ copy of the app.
 
 ### No test gate on the deploy, on purpose
 
-The deploy path does not run tests; pull requests do (see **Testing** below). The deploy
-only runs after a PR has merged, and `little-chefUITests` needs a booted simulator and
+The deploy path does not run tests; pull requests do (see **Pull request checks** below). The
+deploy only runs after a PR has merged, and `little-chefUITests` needs a booted simulator and
 touches the app's gated model-download paths — slow and flaky ahead of an archive.
 
 ### Invariants — change these only with a reason
@@ -217,6 +217,28 @@ entitlement is what makes the option appear at all, on devices that grant it. It
 
 The entitlement has to be granted by the profile. Removing it from the App ID, or restoring an
 older profile, fails the archive with the row in the table above.
+
+### Which model a device gets, and what it can do
+
+- **The default model goes by installed RAM.** `LLMService.supportedOnDeviceModel` reads
+  `ProcessInfo.physicalMemory` in GiB: 6 or more gets the 8B, 4 or more the 4B, 3 or more the
+  1.7B, and below that there is no on-device model and the provider is forced to BigBro.
+- **The 27B goes by the measured app limit** (above), and is offered alongside the default rather
+  than replacing it.
+- **What the backend can do is `AICapability`.** `.full` (chat, timer and recipe tools, AI recipe
+  parsing) needs the 27B, the 8B or a connected Mac. `.limited` (chat only) is the 4B and 1.7B.
+  `.none` means no model or no Mac. Ask `capability(of:)` with the provider a cook pinned, not
+  `capability`, which follows the app-wide setting.
+- **DEBUG overrides the RAM check and the tiers**, though not the 27B's memory gate. A debug build
+  reports the 8B and `.full` on every device, so every feature can be exercised on any phone.
+  The limited and none paths can only be seen in a Release build: TestFlight, or a local Release
+  run with the manual profiles installed.
+- **The on-device model is per device; the provider syncs.** The chosen on-device model lives
+  only in `UserDefaults` (`little-chef.on-device-model`), because what a device can run and has
+  downloaded are facts about that device. The provider is in the synced preferences, and Settings
+  applies it when it appears. `little-chef.llm-provider` in `UserDefaults` is the last provider
+  used on this device, read at launch, so a cook started before Settings has been opened runs
+  where the user asked.
 
 ## CloudKit sync
 
@@ -311,12 +333,16 @@ network. The two look identical from the recipe list and have nothing in common.
 `docs/privacy.md` is the published policy, and three things in it are enforced in code. Change
 the code and the policy together.
 
-- **Audio stays on the device in on-device mode.** Both speech paths set
-  `requiresOnDeviceRecognition` and refuse outright when `supportsOnDeviceRecognition` is
-  false. Falling back to Apple's servers would make the policy untrue.
-- **Models download only when the user chooses.** The chat paths go through
-  `downloadedModelContainer`, which throws `modelNotDownloaded` rather than fetching. Only
-  Settings' download button, behind its size and cellular prompts, calls `downloadModel`.
+- **Audio stays on the device in on-device mode.** Both speech paths, the hands-free loop and
+  push-to-talk, transcribe through `OnDeviceTranscriber`. It sets `requiresOnDeviceRecognition`
+  and throws `onDeviceRecognitionUnsupported` when `supportsOnDeviceRecognition` is false, and
+  `LocalVoiceSession` checks `isSupported` before it starts. Falling back to Apple's servers would
+  make the policy untrue.
+- **Models download only when the user chooses.** Every on-device generation (chat, recipe
+  import, the Suggested ranking) goes through `downloadedModelContainer`, which throws
+  `modelNotDownloaded` rather than fetching, and the session warm-up skips a model that isn't on
+  disk. Only Settings' download button, behind its size and cellular prompts, calls
+  `downloadModel`.
 - **Settings → Delete All Data deletes everything.** That means recipes, preferences, inventory
   and shopping list, row by row so the deletes mirror to iCloud and the user's other devices, plus
   every downloaded model, the model settings and every paired Mac. Anything new the app persists
@@ -354,10 +380,12 @@ the list, with or without an AI backend, so it has to be instant and give the sa
   Delete All Data clears), in the inventory's Staples section, and count as always on hand.
 - **Why duplicates happen.** A second device seeds the staples again before iCloud has delivered
   the first device's, so duplicate names are expected.
-- **How they're collapsed.** `fetchPantryItems()` and `fetchShoppingItems()` collapse them the way
-  `fetchPreferences()` does: oldest row wins, ties broken on `id`, so every device converges.
-- **No warnings until the inventory is in use.** Recipes only show have and missing, and the pre-cook
-  warning only appears, once the user has added an item beyond the staples
+- **How they're collapsed.** `fetchPantryItems()` and `fetchShoppingItems()` delete the losers as
+  `fetchPreferences()` does, but keep the **oldest** row where preferences keep the newest. Ties
+  break on `id`, so every device deletes the same rows and the store converges. Names are compared
+  with `IngredientMatcher.sameItem`, so "Eggs" and "egg" are one item.
+- **No warnings until the inventory is in use.** Recipes show have and missing, and the pre-cook
+  warning appears, only once the user has added an item beyond the staples
   (`isTrackingInventory`). Before that, every recipe would report everything missing.
 
 ### Suggested ranking
@@ -507,6 +535,20 @@ throw the whole recipe away over any one of those.
 - **Typed scraper result.** `WebScraperService` returns a `ScrapedRecipePage`, not a string with a
   magic prefix.
 
+## Pull request checks
+
+Two workflows run on every pull request to `main`. Neither uses a secret.
+
+- **`pr-build.yml`** builds the `little-chef` scheme in Release for `generic/platform=iOS`, with
+  `CODE_SIGNING_ALLOWED=NO`, on `macos-26` with Xcode 26 picked the same way the deploy picks it.
+  It is a device build rather than a simulator one because that is what the archive compiles, and
+  MLX's Metal kernels are built for the device GPU. It catches a package bump or a missing import
+  before merge.
+  - **It cannot catch signing problems.** Nothing is signed, so a broken profile, a missing
+    capability or a lost entitlement only shows at the deploy's Archive or Export. Prove a signing
+    or entitlement change with the deploy itself (`workflow_dispatch` works without a merge).
+- **`unit-tests.yml`** runs the unit tests on Linux (below). It also runs on every push to `main`.
+
 ## Testing
 
 `little-chefTests` holds the unit tests, written with Swift Testing. They run two ways.
@@ -518,8 +560,9 @@ throw the whole recipe away over any one of those.
 
 `tools/linux-tests` is a SwiftPM package whose sources are **symlinks** into the app target and
 whose test target is a symlink to `little-chefTests`. So it is the same code and the same tests,
-with no copies to keep in step. `Shims/` stands in for the two things those files borrow from
-iOS-only code: a minimal `LocalTimer`, and MLX's `ToolSpec` typealias.
+with no copies to keep in step. Two stand-ins cover what those files borrow from iOS-only code:
+`Shims/LocalTimerStub.swift`, a minimal `LocalTimer` linked in like the app's files, and the
+`MLXLMCommon` target, whose one file is MLX's `ToolSpec` typealias.
 
 Only Foundation-only files can be linked. That is why the testable logic lives in files of its
 own: `IngredientMatcher`, `IngredientScaler`, `RecipeExtraction`, `RecipeLineMatcher`,
@@ -533,3 +576,7 @@ own: `IngredientMatcher`, `IngredientScaler`, `RecipeExtraction`, `RecipeLineMat
 Linux's ICU is stricter than Apple's. An unescaped `}` in a regex is a syntax error there, and
 `replacingOccurrences(…, options: .regularExpression)` then returns an **empty string**. Escape
 `{` and `}` in patterns; the Linux job catches it if you don't.
+
+`little-chefUITests` is separate: UI smoke tests (launch, a URL import from start to finish, the
+Cook and Settings tabs) that need a simulator and run from Xcode only. They find controls by their
+visible text, so renaming a button or a section header can break them.

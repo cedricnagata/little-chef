@@ -389,7 +389,7 @@ class CookingSessionManager: ObservableObject, TimerManager {
     }
 
     /// Falls back to the only timer when the name matches nothing, through `findTimer` — which
-    /// is why `inferTimerAction` only ever acts on replies that mention a timer.
+    /// is why `TimerActionInference` only ever acts on replies that mention a timer.
     @discardableResult
     func deleteTimer(name: String) -> Bool {
         guard let index = findTimerIndex(named: name) else { return false }

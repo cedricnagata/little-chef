@@ -2,6 +2,8 @@
 //  InputAreaView.swift
 //  little-chef
 //
+//  The bar under the chat: typing, push-to-talk, the hands-free loop and its status.
+//
 
 import SwiftUI
 

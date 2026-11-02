@@ -2,6 +2,8 @@
 //  EditRecipeView.swift
 //  little-chef
 //
+//  Reviewing and editing an imported recipe before it is saved.
+//
 //  Created by Cedric Nagata on 9/5/25.
 //
 

@@ -2,6 +2,9 @@
 //  DebugLog.swift
 //  little-chef
 //
+//  `dprint`, which prints in DEBUG and compiles to nothing in Release. Anything a TestFlight
+//  build must report goes through `Logger` instead.
+//
 
 import Foundation
 

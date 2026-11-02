@@ -2,6 +2,8 @@
 //  TimerAlertPlayer.swift
 //  little-chef
 //
+//  The chime when a timer ends while the app is open.
+//
 
 import AudioToolbox
 import UIKit

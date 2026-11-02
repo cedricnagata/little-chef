@@ -2,6 +2,8 @@
 //  RecipeListView.swift
 //  little-chef
 //
+//  The Recipes tab: search, the kitchen filters and Suggested, and adding a recipe.
+//
 //  Created by Cedric Nagata on 9/5/25.
 //
 
