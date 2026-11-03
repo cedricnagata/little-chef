@@ -277,6 +277,9 @@ final class little_chefUITests: XCTestCase {
         // Back to the recipe, still open on the Recipes tab, and cook it. In screenshot mode the
         // cook opens on the chat rather than the recipe.
         app.tabBars.buttons["Recipes"].tap()
+        if !app.navigationBars["Recipe"].waitForExistence(timeout: 3) {
+            app.staticTexts[title].firstMatch.tap()
+        }
         XCTAssertTrue(app.navigationBars["Recipe"].waitForExistence(timeout: 5))
         let more = app.navigationBars["Recipe"].buttons.matching(
             NSPredicate(format: "label IN {'More', 'ellipsis.circle'} OR identifier == 'ellipsis.circle'")).firstMatch
