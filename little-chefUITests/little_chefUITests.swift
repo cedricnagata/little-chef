@@ -42,8 +42,9 @@ final class little_chefUITests: XCTestCase {
         }
 
         app.launch()
-        // Interruption monitors only fire on a subsequent interaction with the app.
-        app.tap()
+        // Interruption monitors only fire on a subsequent interaction with the app. At the top
+        // edge, not app.tap()'s centre: with recipes listed, the centre is a row, and opens it.
+        app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.01)).tap()
         return app
     }
 
