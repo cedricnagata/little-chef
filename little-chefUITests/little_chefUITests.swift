@@ -265,23 +265,7 @@ final class little_chefUITests: XCTestCase {
         XCTAssertTrue(app.navigationBars["Recipe"].waitForExistence(timeout: 5))
         storeShot(app, "02-recipe")
 
-        // Start Cooking is in the detail view's ••• menu.
-        let more = app.navigationBars["Recipe"].buttons.matching(
-            NSPredicate(format: "label IN {'More', 'ellipsis.circle'} OR identifier == 'ellipsis.circle'")).firstMatch
-        XCTAssertTrue(more.waitForExistence(timeout: 5))
-        more.tap()
-        app.buttons["Start Cooking"].firstMatch.tap()
-        let cookAnyway = app.buttons["Cook Anyway"]
-        if cookAnyway.waitForExistence(timeout: 2) { cookAnyway.tap() }
-        // A cook opens on the recipe; the chat shows once the header (titled with the recipe)
-        // collapses it.
-        let header = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", title)).firstMatch
-        XCTAssertTrue(header.waitForExistence(timeout: 10))
-        header.tap()
-        XCTAssertTrue(app.staticTexts.containing(NSPredicate(format: "label BEGINSWITH 'Can I use half-and-half'"))
-            .firstMatch.waitForExistence(timeout: 10))
-        storeShot(app, "03-cooking")
-
+        // The Kitchen before the cook: a cook is full screen, with no tab bar to leave it by.
         app.tabBars.buttons["Kitchen"].tap()
         XCTAssertTrue(app.navigationBars["Kitchen"].waitForExistence(timeout: 5))
         storeShot(app, "04-inventory")
@@ -289,6 +273,21 @@ final class little_chefUITests: XCTestCase {
         app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Shopping List'")).firstMatch.tap()
         XCTAssertTrue(app.staticTexts["Bananas"].waitForExistence(timeout: 5))
         storeShot(app, "05-shopping")
+
+        // Back to the recipe, still open on the Recipes tab, and cook it. In screenshot mode the
+        // cook opens on the chat rather than the recipe.
+        app.tabBars.buttons["Recipes"].tap()
+        XCTAssertTrue(app.navigationBars["Recipe"].waitForExistence(timeout: 5))
+        let more = app.navigationBars["Recipe"].buttons.matching(
+            NSPredicate(format: "label IN {'More', 'ellipsis.circle'} OR identifier == 'ellipsis.circle'")).firstMatch
+        XCTAssertTrue(more.waitForExistence(timeout: 5))
+        more.tap()
+        app.buttons["Start Cooking"].firstMatch.tap()
+        let cookAnyway = app.buttons["Cook Anyway"]
+        if cookAnyway.waitForExistence(timeout: 2) { cookAnyway.tap() }
+        XCTAssertTrue(app.staticTexts.containing(NSPredicate(format: "label BEGINSWITH 'Can I use half-and-half'"))
+            .firstMatch.waitForExistence(timeout: 10))
+        storeShot(app, "03-cooking")
     }
 
     /// A full-resolution screenshot of the whole screen, kept with the result bundle.

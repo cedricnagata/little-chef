@@ -130,7 +130,8 @@ class CookingSessionManager: ObservableObject, TimerManager {
     /// The conversation and running timer the App Store's cooking screenshot shows. The Simulator
     /// runs no model, so the replies are written out rather than generated.
     private func stageScreenshotConversation() {
-        let start = Date().addingTimeInterval(-120)
+        // 9:39 today, two minutes before the 9:41 the screenshots' status bar shows.
+        let start = Calendar.current.date(bySettingHour: 9, minute: 39, second: 0, of: Date()) ?? Date()
         currentSession?.conversationHistory = ScreenshotFixtures.conversation.enumerated().map { i, turn in
             Message(id: UUID(), role: turn.role, content: turn.text, timestamp: start.addingTimeInterval(Double(i) * 15))
         }
