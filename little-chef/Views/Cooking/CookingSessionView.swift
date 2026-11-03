@@ -127,7 +127,14 @@ struct ActiveCookingView: View {
     @State private var textInput = ""
     @State private var showingEndSessionAlert = false
     @State private var showingSessionChanges = false
-    @State private var isRecipeExpanded = true
+    @State private var isRecipeExpanded: Bool = {
+        #if DEBUG
+        // The App Store's cooking screenshot shows the conversation.
+        return !ScreenshotFixtures.isActive
+        #else
+        return true
+        #endif
+    }()
     @FocusState private var isTextFieldFocused: Bool
 
     /// When no LLM is available (no on-device model + BigBro not connected), the cooking

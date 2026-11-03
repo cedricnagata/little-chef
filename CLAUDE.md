@@ -612,6 +612,14 @@ Control session there that the Linux session messages: push a branch, ask the Ma
   and on a failed build the `error:` lines from the log. The log and result bundle are kept under
   `~/Library/Caches/little-chef-mac-test/`, with a DerivedData of its own there, so rebuilds are
   incremental and never disturb Xcode's.
+- **App Store screenshots.** `tools/mac-test <branch> --screenshots` runs only `testScreenshots`
+  (skipped in every other run): a Debug launch with `-ui-screenshots` puts the sample content in
+  `ScreenshotFixtures.swift` in an in-memory store, never the Simulator's own or iCloud, and stages
+  the cooking screen's conversation and timer, since the Simulator runs no model. It picks the
+  newest iPhone Pro Max (6.9", Apple's required iPhone size); `MAC_TEST_SIMULATOR="iPad Pro
+  13-inch (M5)"` gives the iPad set. The status bar is set to 9:41, and the PNGs land in
+  `~/Library/Caches/little-chef-mac-test/screenshots/<simulator>/`. They are uploaded with
+  apple-dev's `upload_screenshot`, from beepboop's `~/.local/state/beep/apple-dev/uploads/`.
 - **What it cannot see.** The Simulator runs no MLX, so on-device inference, speech and Live
   Activities still need a real iPhone. It also signs nothing for distribution: signing changes are
   still proven by the deploy (see **Pull request checks**).

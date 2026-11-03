@@ -21,10 +21,11 @@ final class little_chefUITests: XCTestCase {
     /// in place for the whole test (XCTest removes it at teardown): the prompt can
     /// appear after the first tap, and only a later interaction dismisses it.
     @MainActor
-    private func launchAndDismissSystemAlerts() -> XCUIApplication {
+    private func launchAndDismissSystemAlerts(arguments: [String] = []) -> XCUIApplication {
         let app = XCUIApplication()
         // Lets the URL import take the offline data: fixture (see fixtureRecipeURL()).
         app.launchArguments.append("-ui-testing")
+        app.launchArguments += arguments
 
         _ = addUIInterruptionMonitor(withDescription: "System Alert") { alert in
             let allow = alert.buttons["Allow"]
@@ -41,8 +42,9 @@ final class little_chefUITests: XCTestCase {
         }
 
         app.launch()
-        // Interruption monitors only fire on a subsequent interaction with the app.
-        app.tap()
+        // Interruption monitors only fire on a subsequent interaction with the app. At the top
+        // edge, not app.tap()'s centre: with recipes listed, the centre is a row, and opens it.
+        app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.01)).tap()
         return app
     }
 
@@ -242,6 +244,75 @@ final class little_chefUITests: XCTestCase {
             app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.8)).tap()
         }
         XCTAssertTrue(dialog.waitForNonExistence(timeout: 3))
+    }
+
+    // MARK: - App Store screenshots
+
+    /// The App Store screenshots, from sample content (ScreenshotFixtures) in an in-memory store.
+    /// Each is an attachment named `appstore-NN-…`; run on a 6.9" iPhone and a 13" iPad
+    /// Simulator for Apple's required sizes. Skipped unless SCREENSHOTS=1, so ordinary runs
+    /// don't spend time on it.
+    @MainActor
+    func testScreenshots() throws {
+        try XCTSkipUnless(ProcessInfo.processInfo.environment["SCREENSHOTS"] == "1",
+                          "set SCREENSHOTS=1 to take the App Store screenshots")
+        var app = launchAndDismissSystemAlerts(arguments: ["-ui-screenshots"])
+        let title = "Creamy Tuscan Chicken"
+        // Once on the iPad Simulator the app came up on its real, empty store, as if launched
+        // without the argument; a second launch has always had it.
+        if !app.staticTexts[title].waitForExistence(timeout: 10) {
+            app.terminate()
+            app = launchAndDismissSystemAlerts(arguments: ["-ui-screenshots"])
+        }
+        XCTAssertTrue(app.staticTexts[title].waitForExistence(timeout: 10))
+        storeShot(app, "01-recipes")
+
+        app.staticTexts[title].firstMatch.tap()
+        XCTAssertTrue(app.navigationBars["Recipe"].waitForExistence(timeout: 5))
+        storeShot(app, "02-recipe")
+
+        // The Kitchen before the cook: a cook is full screen, with no tab bar to leave it by.
+        tab("Kitchen", in: app).tap()
+        XCTAssertTrue(app.navigationBars["Kitchen"].waitForExistence(timeout: 5))
+        storeShot(app, "04-inventory")
+
+        app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Shopping List'")).firstMatch.tap()
+        XCTAssertTrue(app.staticTexts["Bananas"].waitForExistence(timeout: 5))
+        storeShot(app, "05-shopping")
+
+        // Back to the recipe, still open on the Recipes tab, and cook it. In screenshot mode the
+        // cook opens on the chat rather than the recipe.
+        tab("Recipes", in: app).tap()
+        if !app.navigationBars["Recipe"].waitForExistence(timeout: 3) {
+            app.staticTexts[title].firstMatch.tap()
+        }
+        XCTAssertTrue(app.navigationBars["Recipe"].waitForExistence(timeout: 5))
+        let more = app.navigationBars["Recipe"].buttons.matching(
+            NSPredicate(format: "label IN {'More', 'ellipsis.circle'} OR identifier == 'ellipsis.circle'")).firstMatch
+        XCTAssertTrue(more.waitForExistence(timeout: 5))
+        more.tap()
+        app.buttons["Start Cooking"].firstMatch.tap()
+        let cookAnyway = app.buttons["Cook Anyway"]
+        if cookAnyway.waitForExistence(timeout: 2) { cookAnyway.tap() }
+        XCTAssertTrue(app.staticTexts.containing(NSPredicate(format: "label BEGINSWITH 'Can I use half-and-half'"))
+            .firstMatch.waitForExistence(timeout: 10))
+        storeShot(app, "03-cooking")
+    }
+
+    /// A tab's button. On iPad, iOS 26 draws the tabs as a floating bar at the top, which is not
+    /// a TabBar to XCUITest, so fall back to the button by its label.
+    private func tab(_ name: String, in app: XCUIApplication) -> XCUIElement {
+        let bar = app.tabBars.buttons[name]
+        return bar.exists ? bar : app.buttons[name].firstMatch
+    }
+
+    /// A full-resolution screenshot of the whole screen, kept with the result bundle.
+    private func storeShot(_ app: XCUIApplication, _ name: String) {
+        sleep(1)  // let animations settle
+        let attachment = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        attachment.name = "appstore-\(name)"
+        attachment.lifetime = .keepAlways
+        add(attachment)
     }
 
     @MainActor
