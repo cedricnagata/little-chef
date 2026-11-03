@@ -18,7 +18,7 @@ Questions, problems or ideas: email **the.cedster@gmail.com**, or open an issue 
 
 **Voice isn't working.** LittleChef asks for the microphone and speech recognition the first time you use voice. If you declined, turn them on in iOS **Settings → LittleChef**.
 
-**My recipes aren't on my other device.** Recipes, preferences, inventory and the shopping list sync through your private iCloud database. Check that both devices are signed in to the same iCloud account with iCloud Drive on, and give it a few minutes.
+**My recipes aren't on my other device.** Recipes, preferences, inventory and the shopping list sync through your private iCloud database. Check that both devices are signed in to the same iCloud account, with iCloud allowed for LittleChef (iOS **Settings → [your name] → iCloud**), and give it a few minutes.
 
 **The Mac doesn't show up.** BigBro must be running, and macOS must have been allowed Local Network access for it (asked on first launch). On the iPhone, check **Settings → LittleChef → Local Network**.
 
