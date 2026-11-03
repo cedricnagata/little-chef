@@ -17,12 +17,16 @@ final class little_chefUITests: XCTestCase {
     // MARK: - Helpers
 
     /// Launches the app and dismisses the first-run notification permission
-    /// prompt (or any other system alert) so tests can proceed.
+    /// prompt (or any other system alert) so tests can proceed. The monitor stays
+    /// in place for the whole test (XCTest removes it at teardown): the prompt can
+    /// appear after the first tap, and only a later interaction dismisses it.
     @MainActor
     private func launchAndDismissSystemAlerts() -> XCUIApplication {
         let app = XCUIApplication()
+        // Lets the URL import take the offline data: fixture (see fixtureRecipeURL()).
+        app.launchArguments.append("-ui-testing")
 
-        let interruption = addUIInterruptionMonitor(withDescription: "System Alert") { alert in
+        _ = addUIInterruptionMonitor(withDescription: "System Alert") { alert in
             let allow = alert.buttons["Allow"]
             if allow.exists {
                 allow.tap()
@@ -39,8 +43,12 @@ final class little_chefUITests: XCTestCase {
         app.launch()
         // Interruption monitors only fire on a subsequent interaction with the app.
         app.tap()
-        removeUIInterruptionMonitor(interruption)
         return app
+    }
+
+    /// A Form section header, whatever capitals the iOS version renders it in.
+    private func sectionHeader(_ title: String, in app: XCUIApplication) -> XCUIElement {
+        app.staticTexts.matching(NSPredicate(format: "label ==[c] %@", title)).firstMatch
     }
 
     private func attach(_ app: XCUIApplication, name: String) {
@@ -206,16 +214,34 @@ final class little_chefUITests: XCTestCase {
 
         app.tabBars.buttons["Settings"].tap()
         XCTAssertTrue(app.navigationBars["Settings"].waitForExistence(timeout: 10))
-        // Form section headers render their accessibility label uppercased.
-        XCTAssertTrue(app.staticTexts["AI PROVIDER"].waitForExistence(timeout: 5))
-        XCTAssertTrue(app.staticTexts["VOICE"].exists)
-        XCTAssertTrue(app.buttons["Delete All Data"].exists)
+        // Older iOS upper-cases Form section headers ("AI PROVIDER"); iOS 26 shows them as
+        // written ("AI Provider"). Match either.
+        XCTAssertTrue(sectionHeader("AI Provider", in: app).waitForExistence(timeout: 5))
+        XCTAssertTrue(sectionHeader("Voice", in: app).exists)
+        // The Form is lazy: Delete All Data, in the last section, is not in the
+        // accessibility tree until it is scrolled into view.
+        let deleteAll = app.buttons["Delete All Data"]
+        for _ in 0..<6 where !(deleteAll.exists && deleteAll.isHittable) {
+            app.swipeUp()
+        }
+        XCTAssertTrue(deleteAll.exists && deleteAll.isHittable)
         attach(app, name: "09-settings-tab")
 
-        // Exercise (but don't confirm) the destructive delete-all-data alert.
-        app.buttons["Delete All Data"].tap()
-        XCTAssertTrue(app.alerts["Delete All Data"].waitForExistence(timeout: 3))
-        app.alerts["Delete All Data"].buttons["Cancel"].tap()
+        // Exercise (but don't confirm) the destructive delete-all-data dialog. It is a
+        // confirmationDialog, so XCUITest sees a Sheet titled with its question. Older iOS
+        // shows an action sheet with Cancel; iOS 26 a popover with no Cancel, which a tap
+        // outside it dismisses.
+        deleteAll.tap()
+        let dialog = app.sheets["Delete all data?"]
+        XCTAssertTrue(dialog.waitForExistence(timeout: 3))
+        XCTAssertTrue(dialog.buttons["Delete All Data"].exists)
+        let cancel = dialog.buttons["Cancel"]
+        if cancel.exists {
+            cancel.tap()
+        } else {
+            app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.8)).tap()
+        }
+        XCTAssertTrue(dialog.waitForNonExistence(timeout: 3))
     }
 
     @MainActor
