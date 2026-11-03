@@ -17,14 +17,16 @@ final class little_chefUITests: XCTestCase {
     // MARK: - Helpers
 
     /// Launches the app and dismisses the first-run notification permission
-    /// prompt (or any other system alert) so tests can proceed.
+    /// prompt (or any other system alert) so tests can proceed. The monitor stays
+    /// in place for the whole test (XCTest removes it at teardown): the prompt can
+    /// appear after the first tap, and only a later interaction dismisses it.
     @MainActor
     private func launchAndDismissSystemAlerts() -> XCUIApplication {
         let app = XCUIApplication()
         // Lets the URL import take the offline data: fixture (see fixtureRecipeURL()).
         app.launchArguments.append("-ui-testing")
 
-        let interruption = addUIInterruptionMonitor(withDescription: "System Alert") { alert in
+        _ = addUIInterruptionMonitor(withDescription: "System Alert") { alert in
             let allow = alert.buttons["Allow"]
             if allow.exists {
                 allow.tap()
@@ -41,7 +43,6 @@ final class little_chefUITests: XCTestCase {
         app.launch()
         // Interruption monitors only fire on a subsequent interaction with the app.
         app.tap()
-        removeUIInterruptionMonitor(interruption)
         return app
     }
 
@@ -217,11 +218,17 @@ final class little_chefUITests: XCTestCase {
         // written ("AI Provider"). Match either.
         XCTAssertTrue(sectionHeader("AI Provider", in: app).waitForExistence(timeout: 5))
         XCTAssertTrue(sectionHeader("Voice", in: app).exists)
-        XCTAssertTrue(app.buttons["Delete All Data"].exists)
+        // The Form is lazy: Delete All Data, in the last section, is not in the
+        // accessibility tree until it is scrolled into view.
+        let deleteAll = app.buttons["Delete All Data"]
+        for _ in 0..<6 where !(deleteAll.exists && deleteAll.isHittable) {
+            app.swipeUp()
+        }
+        XCTAssertTrue(deleteAll.exists && deleteAll.isHittable)
         attach(app, name: "09-settings-tab")
 
         // Exercise (but don't confirm) the destructive delete-all-data alert.
-        app.buttons["Delete All Data"].tap()
+        deleteAll.tap()
         XCTAssertTrue(app.alerts["Delete All Data"].waitForExistence(timeout: 3))
         app.alerts["Delete All Data"].buttons["Cancel"].tap()
     }
