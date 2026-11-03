@@ -76,6 +76,14 @@ final class WebScraperService: NSObject {
     /// paste "www.site.com/recipe" as often as the full link.
     static func webURL(from text: String) -> URL? {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        #if DEBUG
+        // The UI tests import an offline fixture page written into a data: URL. Only a Debug
+        // build launched by them (-ui-testing) takes one; what can be pasted into the app is unchanged.
+        if ProcessInfo.processInfo.arguments.contains("-ui-testing"),
+           trimmed.hasPrefix("data:text/html,"), let url = URL(string: trimmed) {
+            return url
+        }
+        #endif
         let withScheme = trimmed.contains("://") ? trimmed : "https://" + trimmed
         guard let url = URL(string: withScheme),
               let scheme = url.scheme?.lowercased(), scheme == "http" || scheme == "https",

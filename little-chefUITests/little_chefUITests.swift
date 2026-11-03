@@ -21,6 +21,8 @@ final class little_chefUITests: XCTestCase {
     @MainActor
     private func launchAndDismissSystemAlerts() -> XCUIApplication {
         let app = XCUIApplication()
+        // Lets the URL import take the offline data: fixture (see fixtureRecipeURL()).
+        app.launchArguments.append("-ui-testing")
 
         let interruption = addUIInterruptionMonitor(withDescription: "System Alert") { alert in
             let allow = alert.buttons["Allow"]
@@ -41,6 +43,11 @@ final class little_chefUITests: XCTestCase {
         app.tap()
         removeUIInterruptionMonitor(interruption)
         return app
+    }
+
+    /// A Form section header, whatever capitals the iOS version renders it in.
+    private func sectionHeader(_ title: String, in app: XCUIApplication) -> XCUIElement {
+        app.staticTexts.matching(NSPredicate(format: "label ==[c] %@", title)).firstMatch
     }
 
     private func attach(_ app: XCUIApplication, name: String) {
@@ -206,9 +213,10 @@ final class little_chefUITests: XCTestCase {
 
         app.tabBars.buttons["Settings"].tap()
         XCTAssertTrue(app.navigationBars["Settings"].waitForExistence(timeout: 10))
-        // Form section headers render their accessibility label uppercased.
-        XCTAssertTrue(app.staticTexts["AI PROVIDER"].waitForExistence(timeout: 5))
-        XCTAssertTrue(app.staticTexts["VOICE"].exists)
+        // Older iOS upper-cases Form section headers ("AI PROVIDER"); iOS 26 shows them as
+        // written ("AI Provider"). Match either.
+        XCTAssertTrue(sectionHeader("AI Provider", in: app).waitForExistence(timeout: 5))
+        XCTAssertTrue(sectionHeader("Voice", in: app).exists)
         XCTAssertTrue(app.buttons["Delete All Data"].exists)
         attach(app, name: "09-settings-tab")
 
