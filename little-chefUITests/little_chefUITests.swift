@@ -273,6 +273,11 @@ final class little_chefUITests: XCTestCase {
         app.buttons["Start Cooking"].firstMatch.tap()
         let cookAnyway = app.buttons["Cook Anyway"]
         if cookAnyway.waitForExistence(timeout: 2) { cookAnyway.tap() }
+        // A cook opens on the recipe; the chat shows once the header (titled with the recipe)
+        // collapses it.
+        let header = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", title)).firstMatch
+        XCTAssertTrue(header.waitForExistence(timeout: 10))
+        header.tap()
         XCTAssertTrue(app.staticTexts.containing(NSPredicate(format: "label BEGINSWITH 'Can I use half-and-half'"))
             .firstMatch.waitForExistence(timeout: 10))
         storeShot(app, "03-cooking")

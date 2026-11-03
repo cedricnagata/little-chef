@@ -10,7 +10,7 @@
 #
 # Without --ui it runs little-chefTests only; with it, the UI smoke tests as well.
 # --screenshots runs only the App Store screenshot test (testScreenshots), on the newest iPhone
-# Pro Max unless told otherwise, with the status bar set to 9:41 and full signal and battery, and
+# Pro Max unless told otherwise, with the status bar set to 9:41 on Fri Jan 9 (the iPad shows the date) and full signal and battery, and
 # exports its images to ~/Library/Caches/little-chef-mac-test/screenshots/<simulator>/.
 # MAC_TEST_SIMULATOR=<name> picks a simulator by name instead of the newest iPhone Pro, for
 # example "iPad Pro 13-inch (M5)" for the iPad screenshots.
@@ -129,7 +129,7 @@ if [ "$screenshots" = 1 ]; then
     export TEST_RUNNER_SCREENSHOTS=1
     xcrun simctl boot "$udid" 2>/dev/null || true
     xcrun simctl bootstatus "$udid" >/dev/null
-    xcrun simctl status_bar "$udid" override --time 9:41 --dataNetwork wifi --wifiMode active \
+    xcrun simctl status_bar "$udid" override --time 2026-01-09T09:41:00-08:00 --dataNetwork wifi --wifiMode active \
         --wifiBars 3 --cellularMode active --cellularBars 4 --batteryState charged --batteryLevel 100
 fi
 
