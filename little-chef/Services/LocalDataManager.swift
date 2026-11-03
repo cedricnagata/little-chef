@@ -87,27 +87,41 @@ class LocalDataManager: ObservableObject {
         let container: ModelContainer
         let status: CloudSyncStatus
 
-        do {
-            container = try ModelContainer(for: schema, configurations: [cloudConfiguration])
+        #if DEBUG
+        let screenshots = ScreenshotFixtures.isActive
+        #else
+        let screenshots = false
+        #endif
+
+        if screenshots {
+            // The App Store screenshots: sample content in memory, nothing near iCloud or the
+            // Simulator's own store.
+            container = try ModelContainer(
+                for: schema, configurations: [ModelConfiguration(schema: schema, isStoredInMemoryOnly: true)])
             status = .syncing
-            Self.log.notice("Store opened with CloudKit mirroring (iCloud.com.littlechef.app)")
-        } catch {
-            // CloudKit can be unavailable at runtime (no iCloud account signed in,
-            // restricted iCloud, provisioning/entitlement issues during review, etc.).
-            // Fall back to a local-only store so the app still launches and works
-            // rather than crashing on first run.
-            //
-            // This branch is a silent data-loss trap — writes look like they worked and then
-            // die with the app — so it is recorded rather than shrugged off, and surfaced in
-            // Settings. Log at `error` so it shows up in a device console without a debugger.
-            Self.log.error(
-                "CloudKit-backed ModelContainer failed; falling back to a LOCAL-ONLY store. Recipes saved on this device will not reach iCloud and will not survive reinstalling. Error: \(error.localizedDescription, privacy: .public)")
-            status = .localOnly(reason: error.localizedDescription)
-            let localConfiguration = ModelConfiguration(
-                schema: schema,
-                isStoredInMemoryOnly: false
-            )
-            container = try ModelContainer(for: schema, configurations: [localConfiguration])
+        } else {
+            do {
+                container = try ModelContainer(for: schema, configurations: [cloudConfiguration])
+                status = .syncing
+                Self.log.notice("Store opened with CloudKit mirroring (iCloud.com.littlechef.app)")
+            } catch {
+                // CloudKit can be unavailable at runtime (no iCloud account signed in,
+                // restricted iCloud, provisioning/entitlement issues during review, etc.).
+                // Fall back to a local-only store so the app still launches and works
+                // rather than crashing on first run.
+                //
+                // This branch is a silent data-loss trap — writes look like they worked and then
+                // die with the app — so it is recorded rather than shrugged off, and surfaced in
+                // Settings. Log at `error` so it shows up in a device console without a debugger.
+                Self.log.error(
+                    "CloudKit-backed ModelContainer failed; falling back to a LOCAL-ONLY store. Recipes saved on this device will not reach iCloud and will not survive reinstalling. Error: \(error.localizedDescription, privacy: .public)")
+                status = .localOnly(reason: error.localizedDescription)
+                let localConfiguration = ModelConfiguration(
+                    schema: schema,
+                    isStoredInMemoryOnly: false
+                )
+                container = try ModelContainer(for: schema, configurations: [localConfiguration])
+            }
         }
 
         modelContainer = container
@@ -118,6 +132,10 @@ class LocalDataManager: ObservableObject {
         // behind the explicit `save()` calls.
         modelContext = container.mainContext
         cloudSyncStatus = status
+
+        #if DEBUG
+        if screenshots { seedScreenshotContent() }
+        #endif
 
         // Reload when a remote CloudKit change arrives from another device
         NotificationCenter.default.addObserver(
@@ -130,6 +148,22 @@ class LocalDataManager: ObservableObject {
             }
         }
     }
+
+    #if DEBUG
+    /// Fills the in-memory store for the screenshots. Recipes are listed newest first, so they
+    /// go in last to first.
+    private func seedScreenshotContent() {
+        do {
+            for recipe in ScreenshotFixtures.recipes.reversed() { try createRecipe(recipe) }
+            for item in ScreenshotFixtures.pantry { _ = try addPantryItem(name: item.name, isStaple: item.isStaple) }
+            for item in ScreenshotFixtures.shoppingList {
+                _ = try addShoppingItem(name: item.name, recipeTitle: item.recipeTitle)
+            }
+        } catch {
+            Self.log.error("Seeding the screenshot content failed: \(error.localizedDescription, privacy: .public)")
+        }
+    }
+    #endif
 
     // MARK: - Recipe Operations
 

@@ -2,21 +2,25 @@
 #
 # Builds a pushed branch on this Mac and runs its tests on an iOS Simulator.
 #
-#   tools/mac-test <branch> [--ui]
+#   tools/mac-test <branch> [--ui | --screenshots]
 #
 # The Mac half of developing on beepboop: there the code is written and pushed, here it is
 # built and tested. Run it from a checkout kept for nothing else (a `git worktree`, see
 # CLAUDE.md, "Testing on the Mac"), because it checks out whatever it is asked to test.
 #
 # Without --ui it runs little-chefTests only; with it, the UI smoke tests as well.
-# MAC_TEST_SIMULATOR=<name> picks a simulator by name instead of the newest iPhone Pro.
+# --screenshots runs only the App Store screenshot test (testScreenshots), on the newest iPhone
+# Pro Max unless told otherwise, with the status bar set to 9:41 and full signal and battery, and
+# exports its images to ~/Library/Caches/little-chef-mac-test/screenshots/<simulator>/.
+# MAC_TEST_SIMULATOR=<name> picks a simulator by name instead of the newest iPhone Pro, for
+# example "iPad Pro 13-inch (M5)" for the iPad screenshots.
 #
 # Written for macOS's bash 3.2: no associative arrays, no `mapfile`.
 
 set -euo pipefail
 
 usage() {
-    echo "usage: tools/mac-test <branch> [--ui]" >&2
+    echo "usage: tools/mac-test <branch> [--ui | --screenshots]" >&2
     exit 2
 }
 
@@ -25,9 +29,11 @@ args=("$@")
 branch="$1"
 shift
 ui=0
+screenshots=0
 for arg in "$@"; do
     case "$arg" in
         --ui) ui=1 ;;
+        --screenshots) screenshots=1 ;;
         *) usage ;;
     esac
 done
@@ -74,7 +80,7 @@ fi
 # An iPhone "Pro" on the newest iOS runtime that has one, else the newest runtime's first
 # iPhone. A new runtime can ship with only an odd model or two, so a Pro on an older runtime is
 # preferred to the first iPhone on the newest.
-udid="$(MAC_TEST_SIMULATOR="${MAC_TEST_SIMULATOR:-}" xcrun simctl list devices available -j | /usr/bin/python3 -c '
+udid="$(MAC_TEST_SIMULATOR="${MAC_TEST_SIMULATOR:-}" SCREENSHOTS="$screenshots" xcrun simctl list devices available -j | /usr/bin/python3 -c '
 import json, os, re, sys
 devices = json.load(sys.stdin)["devices"]
 wanted = os.environ.get("MAC_TEST_SIMULATOR")
@@ -84,6 +90,9 @@ def version(runtime):
 runtimes = sorted((r for r in devices if version(r)), key=version, reverse=True)
 if wanted:
     tests = [lambda d: d["name"] == wanted]
+elif os.environ.get("SCREENSHOTS") == "1":
+    # The required iPhone screenshot size is 6.9 inches.
+    tests = [lambda d: d["name"].startswith("iPhone") and d["name"].endswith("Pro Max")]
 else:
     tests = [lambda d: d["name"].startswith("iPhone") and " Pro" in d["name"],
              lambda d: d["name"].startswith("iPhone")]
@@ -107,6 +116,15 @@ rm -rf "$result"
 
 only=(-only-testing:little-chefTests)
 [ "$ui" = 1 ] && only=()
+if [ "$screenshots" = 1 ]; then
+    only=(-only-testing:little-chefUITests/little_chefUITests/testScreenshots)
+    # xcodebuild hands TEST_RUNNER_-prefixed variables to the test runner, prefix removed.
+    export TEST_RUNNER_SCREENSHOTS=1
+    xcrun simctl boot "$udid" 2>/dev/null || true
+    xcrun simctl bootstatus "$udid" >/dev/null
+    xcrun simctl status_bar "$udid" override --time 9:41 --dataNetwork wifi --wifiMode active \
+        --wifiBars 3 --cellularMode active --cellularBars 4 --batteryState charged --batteryLevel 100
+fi
 
 echo "== building and testing (log: $log)"
 status=0
@@ -152,6 +170,30 @@ PY
     cp "$resolved" "$cache/Package.resolved"
     echo "   (Xcode's version saved to $cache/Package.resolved; the checkout's is put back)"
     git checkout --quiet -- "$resolved"
+fi
+
+if [ "$screenshots" = 1 ] && [ -d "$result" ]; then
+    xcrun simctl status_bar "$udid" clear || true
+    name="$(xcrun simctl list devices -j | /usr/bin/python3 -c '
+import json, sys
+print(next(d["name"] for ds in json.load(sys.stdin)["devices"].values() for d in ds if d["udid"] == sys.argv[1]))
+' "$udid")"
+    out="$cache/screenshots/$name"
+    rm -rf "$out" "$cache/attachments"
+    mkdir -p "$out"
+    xcrun xcresulttool export attachments --path "$result" --output-path "$cache/attachments" >/dev/null
+    /usr/bin/python3 - "$cache/attachments" "$out" <<'PY'
+import json, os, shutil, sys
+src, out = sys.argv[1], sys.argv[2]
+for test in json.load(open(os.path.join(src, "manifest.json"))):
+    for a in test.get("attachments", []):
+        name = a.get("suggestedHumanReadableName", "")
+        if name.startswith("appstore-"):
+            base = name.split("_")[0] if "_" in name else name
+            dest = os.path.join(out, base.removeprefix("appstore-").rsplit(".", 1)[0] + ".png")
+            shutil.copy(os.path.join(src, a["exportedFileName"]), dest)
+            print("== screenshot: %s" % dest)
+PY
 fi
 
 if [ "$status" -ne 0 ]; then

@@ -95,6 +95,9 @@ class CookingSessionManager: ObservableObject, TimerManager {
 
         error = nil
         startWarmUp()
+        #if DEBUG
+        if ScreenshotFixtures.isActive { stageScreenshotConversation() }
+        #endif
         dprint("🔵 Started new cooking session on \(sessionProvider.rawValue)")
     }
 
@@ -122,6 +125,20 @@ class CookingSessionManager: ObservableObject, TimerManager {
             self.isPreparingModel = false
         }
     }
+
+    #if DEBUG
+    /// The conversation and running timer the App Store's cooking screenshot shows. The Simulator
+    /// runs no model, so the replies are written out rather than generated.
+    private func stageScreenshotConversation() {
+        let start = Date().addingTimeInterval(-120)
+        currentSession?.conversationHistory = ScreenshotFixtures.conversation.enumerated().map { i, turn in
+            Message(id: UUID(), role: turn.role, content: turn.text, timestamp: start.addingTimeInterval(Double(i) * 15))
+        }
+        if createTimer(name: ScreenshotFixtures.timer.name, durationSeconds: ScreenshotFixtures.timer.seconds) {
+            _ = startTimer(name: ScreenshotFixtures.timer.name)
+        }
+    }
+    #endif
 
     func initAgentForSession() {
         cookingAgent = LocalCookingAgent(timerManager: self, recipeEditor: self, provider: sessionProvider)
