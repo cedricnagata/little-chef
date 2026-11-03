@@ -30,11 +30,14 @@ branch="$1"
 shift
 ui=0
 screenshots=0
+unknown=0
 for arg in "$@"; do
     case "$arg" in
         --ui) ui=1 ;;
         --screenshots) screenshots=1 ;;
-        *) usage ;;
+        # Refused only after the branch's own copy of this script has had its say (below): a
+        # flag added on the branch is unknown to the copy that happens to be checked out now.
+        *) unknown=1 ;;
     esac
 done
 
@@ -66,6 +69,7 @@ after="$(git hash-object tools/mac-test 2>/dev/null || true)"
 if [ -n "$after" ] && [ "$after" != "$before" ] && [ -z "${MAC_TEST_REEXEC:-}" ]; then
     MAC_TEST_REEXEC=1 exec tools/mac-test "${args[@]}"
 fi
+[ "$unknown" = 0 ] || usage
 echo "== testing $branch at $(git log --oneline -1)"
 echo "== $(xcodebuild -version | head -1)"
 
@@ -80,7 +84,7 @@ fi
 # An iPhone "Pro" on the newest iOS runtime that has one, else the newest runtime's first
 # iPhone. A new runtime can ship with only an odd model or two, so a Pro on an older runtime is
 # preferred to the first iPhone on the newest.
-udid="$(MAC_TEST_SIMULATOR="${MAC_TEST_SIMULATOR:-}" SCREENSHOTS="$screenshots" xcrun simctl list devices available -j | /usr/bin/python3 -c '
+udid="$(xcrun simctl list devices available -j | MAC_TEST_SIMULATOR="${MAC_TEST_SIMULATOR:-}" SCREENSHOTS="$screenshots" /usr/bin/python3 -c '
 import json, os, re, sys
 devices = json.load(sys.stdin)["devices"]
 wanted = os.environ.get("MAC_TEST_SIMULATOR")
@@ -117,7 +121,10 @@ rm -rf "$result"
 only=(-only-testing:little-chefTests)
 [ "$ui" = 1 ] && only=()
 if [ "$screenshots" = 1 ]; then
-    only=(-only-testing:little-chefUITests/little_chefUITests/testScreenshots)
+    # On the booted device itself: parallel testing runs on clones, which the status bar
+    # override below never reaches.
+    only=(-only-testing:little-chefUITests/little_chefUITests/testScreenshots
+          -parallel-testing-enabled NO -disable-concurrent-destination-testing)
     # xcodebuild hands TEST_RUNNER_-prefixed variables to the test runner, prefix removed.
     export TEST_RUNNER_SCREENSHOTS=1
     xcrun simctl boot "$udid" 2>/dev/null || true

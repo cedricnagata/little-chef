@@ -95,9 +95,12 @@ class LocalDataManager: ObservableObject {
 
         if screenshots {
             // The App Store screenshots: sample content in memory, nothing near iCloud or the
-            // Simulator's own store.
+            // Simulator's own store. `.none` is required: left at its default, a configuration in
+            // an app with the iCloud entitlement mirrors to CloudKit, and the first save of an
+            // in-memory store then aborts with an Objective-C exception no `catch` can see.
             container = try ModelContainer(
-                for: schema, configurations: [ModelConfiguration(schema: schema, isStoredInMemoryOnly: true)])
+                for: schema,
+                configurations: [ModelConfiguration(schema: schema, isStoredInMemoryOnly: true, cloudKitDatabase: .none)])
             status = .syncing
         } else {
             do {
