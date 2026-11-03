@@ -256,8 +256,14 @@ final class little_chefUITests: XCTestCase {
     func testScreenshots() throws {
         try XCTSkipUnless(ProcessInfo.processInfo.environment["SCREENSHOTS"] == "1",
                           "set SCREENSHOTS=1 to take the App Store screenshots")
-        let app = launchAndDismissSystemAlerts(arguments: ["-ui-screenshots"])
+        var app = launchAndDismissSystemAlerts(arguments: ["-ui-screenshots"])
         let title = "Creamy Tuscan Chicken"
+        // Once on the iPad Simulator the app came up on its real, empty store, as if launched
+        // without the argument; a second launch has always had it.
+        if !app.staticTexts[title].waitForExistence(timeout: 10) {
+            app.terminate()
+            app = launchAndDismissSystemAlerts(arguments: ["-ui-screenshots"])
+        }
         XCTAssertTrue(app.staticTexts[title].waitForExistence(timeout: 10))
         storeShot(app, "01-recipes")
 
@@ -266,7 +272,7 @@ final class little_chefUITests: XCTestCase {
         storeShot(app, "02-recipe")
 
         // The Kitchen before the cook: a cook is full screen, with no tab bar to leave it by.
-        app.tabBars.buttons["Kitchen"].tap()
+        tab("Kitchen", in: app).tap()
         XCTAssertTrue(app.navigationBars["Kitchen"].waitForExistence(timeout: 5))
         storeShot(app, "04-inventory")
 
@@ -276,7 +282,7 @@ final class little_chefUITests: XCTestCase {
 
         // Back to the recipe, still open on the Recipes tab, and cook it. In screenshot mode the
         // cook opens on the chat rather than the recipe.
-        app.tabBars.buttons["Recipes"].tap()
+        tab("Recipes", in: app).tap()
         if !app.navigationBars["Recipe"].waitForExistence(timeout: 3) {
             app.staticTexts[title].firstMatch.tap()
         }
@@ -291,6 +297,13 @@ final class little_chefUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts.containing(NSPredicate(format: "label BEGINSWITH 'Can I use half-and-half'"))
             .firstMatch.waitForExistence(timeout: 10))
         storeShot(app, "03-cooking")
+    }
+
+    /// A tab's button. On iPad, iOS 26 draws the tabs as a floating bar at the top, which is not
+    /// a TabBar to XCUITest, so fall back to the button by its label.
+    private func tab(_ name: String, in app: XCUIApplication) -> XCUIElement {
+        let bar = app.tabBars.buttons[name]
+        return bar.exists ? bar : app.buttons[name].firstMatch
     }
 
     /// A full-resolution screenshot of the whole screen, kept with the result bundle.
