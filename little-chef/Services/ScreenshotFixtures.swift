@@ -4,7 +4,7 @@
 //
 //  Sample content for the App Store screenshots, which the UI tests take
 //  (`testScreenshots`). Only a Debug build launched with `-ui-screenshots` uses it, and then the
-//  store is in memory: the Simulator's own recipes and iCloud are never touched.
+//  store is in memory: the Simulator's own recipes are never touched.
 //
 
 #if DEBUG

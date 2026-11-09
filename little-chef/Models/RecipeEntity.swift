@@ -2,7 +2,7 @@
 //  RecipeEntity.swift
 //  little-chef
 //
-//  The stored form of a recipe, mirrored to iCloud. Everything else reads it as `Recipe`.
+//  The stored form of a recipe. Everything else reads it as `Recipe`.
 //
 
 import Foundation

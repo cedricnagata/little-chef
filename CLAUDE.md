@@ -32,9 +32,9 @@ steps, so signing consumes what is already there and mints nothing.
 unsigned archive carries none — and `-exportArchive` re-signs from the bundle's
 **existing** entitlements rather than reading them out of the profile. Given an empty
 set it emits an empty set: the IPA ships with only `application-identifier`,
-`team-identifier`, `beta-reports-active` and `get-task-allow`, losing iCloud, push and
-the app group even though the embedded profile still grants all three. Build 18 shipped
-exactly that and crashed on launch — see the entitlements row in the failure table
+`team-identifier`, `beta-reports-active` and `get-task-allow`, losing the app group and
+the increased memory limit even though the embedded profile still grants them. Build 18
+shipped exactly that and crashed on launch — see the entitlements row in the failure table
 below. Check any build with
 `codesign -d --entitlements :- Payload/little-chef.app` on the exported IPA; the
 artifact upload keeps one from every run.
@@ -170,7 +170,7 @@ Read the error before changing anything; these look alike and aren't.
 | **409 `INVALID_APP_STATE`** | App record deleted/removed in App Store Connect. **Not** a signing problem — check the bundle ID against the live record |
 | **409 `VALIDATION_ERROR`**, "SDK version issue" | Runner's Xcode too old; see the `macos-26` invariant |
 | **409**, "bundle version must be higher" | `BUILD_NUMBER_OFFSET` too low |
-| **App launches from TestFlight and crashes immediately**, but the same code runs fine from Xcode | The IPA lost its entitlements — almost certainly because something made **Archive** stop signing. `codesign -d --entitlements :- Payload/little-chef.app`: if iCloud, `aps-environment` and the app group are absent, that's it. The crash is `LocalDataManager` opening the CloudKit-backed store in `App.init()`; its local-only fallback catches Swift errors and this arrives as an ObjC exception, so it aborts. **Not** a code bug — see the signing-style section |
+| **App launches from TestFlight and crashes immediately**, but the same code runs fine from Xcode | The IPA lost its entitlements — almost certainly because something made **Archive** stop signing. `codesign -d --entitlements :- Payload/little-chef.app`: if the app group and the increased memory limit are absent, that's it (build 18, when the app still had iCloud, crashed opening its CloudKit store). **Not** a code bug — see the signing-style section |
 | Any **certificate or profile** error at **Archive** | Archive signs manually against the profiles installed earlier in the job. Check the `Release` config of both targets still names its profile, that both profiles installed, and that no `-allowProvisioningUpdates`/`-authenticationKey*` crept back in. Do **not** "fix" this by disabling signing — that ships an app with no entitlements |
 | `<target> does not support provisioning profiles` (an SPM package target) | A signing setting was put on the `xcodebuild` command line, where it hits every target. Per-target signing belongs in the project's `Release` configs |
 | `is Xcode managed, but signing settings require a manually managed profile` | An Xcode-managed profile is installed under the name the `Release` config asks for. The App Store profiles in `IOS_PROFILE_*_BASE64` must be manually created |
@@ -180,7 +180,6 @@ Read the error before changing anything; these look alike and aren't.
 | `Cloud signing permission error` + `No profiles for '<id>' were found` at **Export** | Export fell back to cloud signing. Check `signingStyle` is `manual` and that no `-allowProvisioningUpdates`/`-authenticationKey*` reached `-exportArchive`. **Not** a missing-profile problem — the lookup was denied, not empty |
 | `Invalid authentication key credential … invalidPEMDocument` at **Upload** | `ASC_KEY_P8_BASE64` decodes to something that isn't a PEM — usually the base64 body saved without its `-----BEGIN PRIVATE KEY-----` delimiters. **Not** an auth failure. Validate with `openssl pkey -noout -in key.p8` (not `openssl pkcs8 … -noout`, which has no such flag in LibreSSL or OpenSSL 3 and rejects every key) |
 | Profile name mismatch at **Export** | `IOS_PROFILE_*_NAME` must be the profile's **Name** field, not its filename or UUID. The same name is also hardcoded as `PROVISIONING_PROFILE_SPECIFIER` in each target's `Release` config for the archive — rename a profile and **both** have to move |
-| `doesn't support the Push Notifications capability` / `entitlement 'aps-environment' … not present in profile` | The App ID or the stored profile predates the Push Notifications capability CloudKit needs. See **CloudKit sync** below |
 | `entitlement 'com.apple.developer.kernel.increased-memory-limit' … not present in profile` | The app's App Store profile predates the **Increased Memory Limit** capability. Enable it on the `NagataInc.little-chef` App ID, regenerate the profile under the same name and replace `IOS_PROFILE_APP_BASE64`. The widget doesn't carry this entitlement, so its profile is unaffected |
 
 Inspect a run:
@@ -240,93 +239,52 @@ older profile, fails the archive with the row in the table above.
   used on this device, read at launch, so a cook started before Settings has been opened runs
   where the user asked.
 
-## CloudKit sync
+## Storage
 
-Recipes and preferences live in SwiftData, mirrored to the user's **private** database in
-the `iCloud.com.littlechef.app` container by `LocalDataManager`.
+Recipes, preferences, the inventory and the shopping list live in SwiftData **on the device
+only**, in `LocalDataManager`. There is no sync and no server.
 
-### Three capabilities, not one
+Through build 60 the store was mirrored to the user's private iCloud database. That was dropped
+before 1.0 (2026-11): every new model or field needed Deploy Schema to Production in the CloudKit
+Console, a missed deploy made TestFlight saves fail silently, and mirroring forbids unique
+constraints and required values. So:
 
-SwiftData's CloudKit mirroring is `NSPersistentCloudKitContainer` underneath, and it
-refuses to set up unless **all three** of these are present. iCloud alone is not enough:
+- **`cloudKitDatabase: .none` is spelled out.** The default, `.automatic`, mirrors whenever the
+  app carries an iCloud entitlement. The app no longer has the iCloud or Push Notifications
+  entitlements, nor the `remote-notification` background mode, and doesn't register for remote
+  notifications. The App Store profiles still grant iCloud and push; a profile may grant more than
+  the app uses.
+- **Existing stores open as they are.** Same store file, same models. Rows synced from iCloud
+  before the change stay on the device; nothing is uploaded or downloaded any more.
+- **Leftovers from sync, kept on purpose.** Every attribute still has a default, nothing is
+  `@Attribute(.unique)`, the unused `UserPreferencesEntity` fields stay, and
+  `fetchPreferences()`, `fetchPantryItems()` and `fetchShoppingItems()` still collapse duplicates,
+  which old synced stores can hold. Changing any of that is a migration for no gain.
+- **`storeDidChange`** tells `RecipeManager` and `KitchenManager` to refetch after Delete All Data
+  or an import. Do not send it for ordinary single-record writes: the caller already updated its
+  own state, and `ProfileSettingsView` writes a preference on every `onChange`.
+- **One `RecipeManager`.** `MainView` owns it and passes it down; `RecipeListView` takes it from
+  the environment. Two managers over one store left one tab's list stale.
+- The `iCloud.com.littlechef.app` container still exists in the developer account, unused.
 
-| Capability | Where it lives |
-| --- | --- |
-| iCloud → CloudKit | `com.apple.developer.icloud-container-identifiers` + `…icloud-services` in `little-chef.entitlements` |
-| Push Notifications | `aps-environment` in `little-chef.entitlements` |
-| Background Modes → Remote notifications | `UIBackgroundModes` = `remote-notification` in `Info.plist` |
+### Export Profile and Import Profile
 
-Mirroring tracks the other devices' writes through **silent pushes** on a CloudKit
-database subscription, which is why a sync feature needs push at all. Those pushes only
-reach an app that asked for a device token, so `AppDelegate` calls
-`registerForRemoteNotifications()` at launch — it prompts the user for nothing and is
-unrelated to the timer-alert authorization request.
+Settings → Your Data. One JSON file (`ProfileBackup.swift`, format `littlechef-profile`, version
+1) holds the recipes, inventory, shopping list and settings, plus the on-device model choice. Not
+in it: downloaded models, paired Macs, or a cook in progress. It is how a user moves to a new
+device or survives deleting the app.
 
-`aps-environment` is checked in as `development`. Do not change it: `xcodebuild
--exportArchive` rewrites it to `production` for the `app-store` method, and hardcoding
-`production` breaks every local debug build instead.
-
-Both App Store profiles in `IOS_PROFILE_*_BASE64` must therefore be minted from an App ID
-with **Push Notifications enabled**. Enabling a capability does not update profiles that
-already exist — regenerate them in the portal and re-store the secrets, or export fails
-with the `aps-environment` row in the table above.
-
-### The Production schema is a separate, manual deploy
-
-TestFlight and App Store builds talk to the **Production** CloudKit environment; debug
-builds from Xcode talk to Development. Record types created by mirroring appear in
-Development automatically as you run the app, and **never cross to Production on their
-own** — push them with *Deploy Schema to Production* in the CloudKit Console. A schema
-that exists only in Development makes production saves fail per-record while the app
-itself looks perfectly healthy.
-
-### CRUD across two devices
-
-Mirroring being wired up is not the same as the CRUD paths being correct on top of it. These
-are the shapes that only break once a second device exists.
-
-**Preferences are a singleton row that CloudKit cannot enforce.** `@Attribute(.unique)` is
-rejected outright on a mirrored model, and every fresh device calls `fetchPreferences()`
-before its first import lands, finds nothing, and inserts its own defaults — so two devices
-means two rows. `fetchPreferences()` therefore resolves duplicates rather than trusting
-`.first` on an unsorted fetch: newest `updatedAt` wins, ties broken on `id`, losers deleted.
-Every device computes the same winner from the same set, so it converges. Left unresolved
-this reads as settings that revert on their own.
-
-**Deleting something already deleted is not an error.** `deleteRecipe(id:)` is idempotent.
-The other device deleting it first, with the import landing before the user confirms, is
-ordinary — surfacing `recipeNotFound` for it just puts "Recipe with ID <uuid> not found" in
-front of someone whose recipe is, in fact, gone.
-
-**`storeDidChange` is how anything holding a cached copy finds out.** Subscribers
-(`RecipeManager`, `KitchenManager`) are refetch triggers for the two cases a caller can't see for
-itself: a CloudKit import, and Delete All Data.
-
-It is a `PassthroughSubject`, not a closure property, because there is more than one
-subscriber and a single `var onRemoteChange: (() -> Void)?` silently let the last assignment
-win. Do not send it for ordinary single-record writes: the caller already updated its own
-state, and `ProfileSettingsView` writes a preference on every `onChange`, so echoing those
-back puts it in a save/load loop with itself.
-
-**One `RecipeManager`.** `MainView` owns it and passes it down; `RecipeListView` takes it from
-the environment. It used to hold its own `@StateObject` as well, which is two managers and two
-`recipes` arrays over one store — adding a recipe on one tab left the other's list stale.
-
-### The local-only fallback
-
-A container that can't set up mirroring is a launch crash, so `LocalDataManager` catches
-that and reopens the store local-only. It is the right call and a data-loss trap in equal
-measure: writes look like they worked, never reach iCloud, and die with the app on
-delete. So it is never silent.
-
-- It logs through `Logger`, **not `dprint`** — `dprint` compiles to nothing outside DEBUG,
-  which is exactly how a local-only TestFlight build went unnoticed.
-- It publishes `cloudSyncStatus`, surfaced as an iCloud row in Settings.
-
-Reach for that row first when told "my recipes aren't syncing". It separates *mirroring
-never started* — entitlements, no iCloud account, iCloud Drive off — from *mirroring
-started and records aren't landing*, which is the Production schema above or plain
-network. The two look identical from the recipe list and have nothing in common.
+- **Import merges, it never deletes.** Recipes match by id: added when new, replaced only when the
+  file's `updatedAt` is later. Inventory and shopping items match by name with
+  `IngredientMatcher.sameItem`, as adding one by hand does. Settings are replaced. Recipes keep
+  their exported ids and dates, so importing the same file twice adds nothing.
+- **The on-device model is restored only where this device can run it**
+  (`LLMService.onDeviceModelOptions`).
+- **`decode` checks the header first**: anything without `format: littlechef-profile` is refused,
+  and a higher `version` says the app needs updating rather than failing on a field it doesn't
+  know. A new field must bump `currentVersion` or be optional.
+- **Anything new the app persists goes in the file too**, as it goes in Delete All Data.
+- The format and the merge are Foundation-only and tested on Linux (`ProfileBackupTests`).
 
 ## Privacy promises the code keeps
 
@@ -343,10 +301,11 @@ the code and the policy together.
   `modelNotDownloaded` rather than fetching, and the session warm-up skips a model that isn't on
   disk. Only Settings' download button, behind its size and cellular prompts, calls
   `downloadModel`.
+- **Data stays on the device.** Nothing the user keeps is uploaded anywhere. It leaves the device
+  only in a profile the user exports (see Storage).
 - **Settings → Delete All Data deletes everything.** That means recipes, preferences, inventory
-  and shopping list, row by row so the deletes mirror to iCloud and the user's other devices, plus
-  every downloaded model, the model settings and every paired Mac. Anything new the app persists
-  has to be added to it.
+  and shopping list, plus every downloaded model, the model settings and every paired Mac.
+  Anything new the app persists has to be added to it.
 
 ## Permission prompts: one at launch, the rest when first used
 
@@ -361,9 +320,8 @@ front. Do not add a permission request to an `init` or a launch `.task`.
 
 ## Inventory, shopping list and suggestions
 
-The Kitchen tab keeps two SwiftData models, `PantryItemEntity` and `ShoppingItemEntity`, mirrored to
-iCloud with the recipes. **They are new CloudKit record types, so they need Deploy Schema to
-Production too.** Until then TestFlight and App Store builds keep them on the device only.
+The Kitchen tab keeps two SwiftData models, `PantryItemEntity` and `ShoppingItemEntity`, in the
+store with the recipes.
 
 `KitchenManager` is the one instance `MainView` owns, like `RecipeManager`. It is the inventory the
 recipe filters and the pre-cook check read.
@@ -387,14 +345,13 @@ the list, with or without an AI backend, so it has to be instant and give the sa
 
 ### Staples and duplicates
 
-- **Staples.** Common staples are seeded once per device (`KitchenManager.staplesSeededKey`, which
-  Delete All Data clears), in the inventory's Staples section, and count as always on hand.
-- **Why duplicates happen.** A second device seeds the staples again before iCloud has delivered
-  the first device's, so duplicate names are expected.
-- **How they're collapsed.** `fetchPantryItems()` and `fetchShoppingItems()` delete the losers as
-  `fetchPreferences()` does, but keep the **oldest** row where preferences keep the newest. Ties
-  break on `id`, so every device deletes the same rows and the store converges. Names are compared
-  with `IngredientMatcher.sameItem`, so "Eggs" and "egg" are one item.
+- **Staples.** Common staples are seeded once (`KitchenManager.staplesSeededKey`, which Delete All
+  Data clears), in the inventory's Staples section, and count as always on hand.
+- **Duplicates.** Adding and importing both match by name with `IngredientMatcher.sameItem`, so
+  "Eggs" and "egg" are one item. Stores from the iCloud builds can still hold duplicates (a second
+  device seeded the staples before the first's arrived), so `fetchPantryItems()` and
+  `fetchShoppingItems()` delete the losers as `fetchPreferences()` does, keeping the **oldest** row
+  where preferences keep the newest, ties broken on `id`.
 - **No warnings until the inventory is in use.** Recipes show have and missing, and the pre-cook
   warning appears, only once the user has added an item beyond the staples
   (`isTrackingInventory`). Before that, every recipe would report everything missing.
@@ -614,7 +571,7 @@ Control session there that the Linux session messages: push a branch, ask the Ma
   incremental and never disturb Xcode's.
 - **App Store screenshots.** `tools/mac-test <branch> --screenshots` runs only `testScreenshots`
   (skipped in every other run): a Debug launch with `-ui-screenshots` puts the sample content in
-  `ScreenshotFixtures.swift` in an in-memory store, never the Simulator's own or iCloud, and stages
+  `ScreenshotFixtures.swift` in an in-memory store, never the Simulator's own, and stages
   the cooking screen's conversation and timer, since the Simulator runs no model. It picks the
   newest iPhone Pro Max (6.9", Apple's required iPhone size); `MAC_TEST_SIMULATOR="iPad Pro
   13-inch (M5)"` gives the iPad set. The status bar is set to 9:41, and the PNGs land in

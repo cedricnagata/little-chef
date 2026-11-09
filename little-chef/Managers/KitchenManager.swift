@@ -19,10 +19,8 @@ final class KitchenManager: ObservableObject {
     @Published private(set) var suggestions: RecipeSuggestions?
     @Published private(set) var isRankingSuggestions = false
 
-    /// Set once this device has seeded the default staples. Per device, so a fresh install seeds
-    /// before iCloud has delivered anything. A second device's seeding produces duplicates that
-    /// ``LocalDataManager/fetchPantryItems()`` collapses. Cleared by Delete All Data, which
-    /// brings the defaults back like the other settings.
+    /// Set once the default staples are seeded. Cleared by Delete All Data, which brings the
+    /// defaults back like the other settings.
     static let staplesSeededKey = "little-chef.staples-seeded"
 
     private let dataManager: LocalDataManager
@@ -41,7 +39,7 @@ final class KitchenManager: ObservableObject {
         self.dataManager = dataManager
         self.llmService = llmService
 
-        // An import from another device, or Delete All Data. Ordinary single edits made here
+        // Importing a profile, or Delete All Data. Ordinary single edits made here
         // update `pantry` and `shoppingList` directly, so they don't need this.
         dataManager.storeDidChange
             .sink { [weak self] _ in Task { @MainActor in self?.load() } }

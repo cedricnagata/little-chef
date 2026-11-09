@@ -4,19 +4,21 @@ title: LittleChef Privacy Policy
 
 # LittleChef Privacy Policy
 
-**Last updated: November 2, 2026**
+**Last updated: November 9, 2026**
 
 LittleChef ("we", "the app") is designed with privacy as a core principle. This policy explains what data the app handles and how.
 
 ## Summary
 
-LittleChef does not collect, transmit, sell, or share any personal information. We have no servers, no analytics, and no advertising partners. Everything you do in the app stays on your device or in your own private iCloud account.
+LittleChef does not collect, transmit, sell, or share any personal information. We have no servers, no analytics, and no advertising partners. Everything you do in the app stays on your device.
 
 ## What data the app handles
 
-**Recipes you import or create.** Stored locally on your device using Apple's SwiftData framework. If you have iCloud enabled, recipes also sync to your personal private iCloud database so they appear on your other devices. We have no access to this data — it is encrypted and visible only to you.
+**Recipes you import or create.** Stored on your device only, using Apple's SwiftData framework. They are not synced or uploaded anywhere, and we have no access to them.
 
-**Ingredient inventory and shopping list.** The ingredients you record as having, and your shopping list, are stored and synced exactly like your recipes: on your device and, with iCloud enabled, in your private iCloud database.
+**Ingredient inventory and shopping list.** The ingredients you record as having, and your shopping list, are stored exactly like your recipes: on your device only.
+
+**Profile exports.** **Settings → Export Profile** saves your recipes, inventory, shopping list and settings to a file, wherever you choose to save or send it, such as the Files app or AirDrop. The app makes this file only when you ask, and never sends it anywhere itself. **Import Profile** reads a file you choose.
 
 **Voice and speech.** When you use voice input, audio is captured by the microphone and converted to text. Where that conversion happens depends on which AI mode the cooking session is using:
 
@@ -50,7 +52,7 @@ The mode is fixed for the duration of a cooking session: it is chosen before you
 - **Microphone** — required for voice questions while cooking.
 - **Speech Recognition** — required to convert your voice to text on-device. Not used in BigBro mode, where the paired Mac transcribes instead.
 - **Local Network** — used only to discover an optional Mac running BigBro on your home network. No connections are made without your pairing.
-- **Notifications** — used only for timer completion alerts. The app also receives silent notifications from iCloud so recipes sync between your devices. These never show anything or ask for permission.
+- **Notifications** — used only for timer completion alerts.
 - **Photos** — recipe photos are chosen with the system photo picker, which gives the app only the photos you select. No photo library permission is needed, and the photos are processed on-device.
 
 You can revoke any of these permissions at any time in iOS Settings.
@@ -61,9 +63,9 @@ LittleChef is not directed at children under 13 and does not knowingly collect a
 
 ## Data deletion
 
-You can delete your data at any time from **Settings → Delete All Data** in the app. This removes your recipes, ingredient inventory, shopping list and settings, downloaded AI models, and paired Macs. If iCloud sync is on, your recipes, inventory, shopping list and settings are also deleted from iCloud and from your other devices signed in to the same iCloud account. Deletion can't be undone.
+You can delete your data at any time from **Settings → Delete All Data** in the app. This removes your recipes, ingredient inventory, shopping list and settings, downloaded AI models, and paired Macs. Deletion can't be undone.
 
-Uninstalling the app removes everything stored on that device. Data already synced to iCloud stays there until you delete it in the app, or remove it from iOS Settings → [your name] → iCloud → Manage Storage.
+Uninstalling the app removes everything it stored on that device. A profile you exported is a file you keep, and stays wherever you saved it until you delete it.
 
 ## Changes
 

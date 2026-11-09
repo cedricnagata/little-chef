@@ -2,9 +2,9 @@
 //  KitchenEntities.swift
 //  little-chef
 //
-//  SwiftData models for the ingredient inventory and the shopping list. Mirrored to iCloud
-//  with the recipes, so every property has a default and nothing is `@Attribute(.unique)`:
-//  CloudKit mirroring refuses both.
+//  SwiftData models for the ingredient inventory and the shopping list. Every property has a
+//  default and nothing is `@Attribute(.unique)`, which CloudKit mirroring required when the
+//  store synced through iCloud; changing that now would be a migration for no gain.
 //
 
 import Foundation

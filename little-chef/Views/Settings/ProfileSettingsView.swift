@@ -2,22 +2,19 @@
 //  ProfileSettingsView.swift
 //  little-chef
 //
-//  The Settings tab: AI provider and models, voice, hands-free, iCloud status, and Delete All
-//  Data.
+//  The Settings tab: AI provider and models, voice, hands-free, exporting and importing the
+//  profile, and Delete All Data.
 //
 
 import SwiftUI
 import AVFoundation
 import Network
 import BigBroKit
+import UniformTypeIdentifiers
 
 struct ProfileSettingsView: View {
     @EnvironmentObject var llmService: LLMService
     @EnvironmentObject var voiceAssistant: VoiceAssistant
-
-    /// The shared store, for `cloudSyncStatus`. Not a `@StateObject` — this view doesn't own the
-    /// singleton, it just needs to redraw if the status is ever published again.
-    @ObservedObject private var dataManager = LocalDataManager.shared
 
     @State private var llmProvider: LLMProvider = .local
     /// Absolute `AVSpeechUtterance.rate`, where `AVSpeechUtteranceDefaultSpeechRate` is normal
@@ -34,6 +31,13 @@ struct ProfileSettingsView: View {
     @State private var modelError: String?
     @State private var confirmingDeleteAll = false
     @State private var deleteAllError: String?
+    /// The profile being exported, while the save sheet is up.
+    @State private var exportDocument: ProfileBackupDocument?
+    @State private var choosingImportFile = false
+    /// A profile read from a file, waiting for the user to confirm the import.
+    @State private var pendingImport: ProfileBackup?
+    /// The outcome of the last export or import, and whether it failed.
+    @State private var profileMessage: (text: String, isError: Bool)?
     /// On-disk sizes, sampled rather than read live. Measuring one means walking the model's
     /// directory, and a SwiftUI body runs far too often to put a filesystem crawl inside it.
     @State private var modelSizes: [String: Int64] = [:]
@@ -155,31 +159,33 @@ struct ProfileSettingsView: View {
                 Text("Hands-free")
             }
 
-            // MARK: - iCloud
-            Section {
-                switch dataManager.cloudSyncStatus {
-                case .syncing:
-                    Label("Recipes sync to iCloud", systemImage: "checkmark.icloud")
-                        .foregroundColor(.primary)
-                case .localOnly(let reason):
-                    VStack(alignment: .leading, spacing: 6) {
-                        Label("Not syncing — this device only", systemImage: "exclamationmark.icloud")
-                            .foregroundColor(.orange)
-                        Text(reason)
-                            .font(.caption)
-                            .foregroundColor(.secondary)
-                    }
-                }
-            } header: {
-                Text("iCloud")
-            } footer: {
-                if !dataManager.cloudSyncStatus.isSyncing {
-                    Text("Recipes saved now stay on this device and will be lost if you delete the app. Check that you're signed in to iCloud with iCloud Drive turned on.")
-                }
-            }
-
             // MARK: - Your Data
             Section {
+                Button("Export Profile") { exportProfile() }
+                    .fileExporter(
+                        isPresented: Binding(get: { exportDocument != nil }, set: { if !$0 { exportDocument = nil } }),
+                        document: exportDocument,
+                        contentType: .json,
+                        defaultFilename: ProfileBackup.suggestedFileName()
+                    ) { result in
+                        switch result {
+                        case .success: profileMessage = ("Profile exported.", false)
+                        case .failure(let error): profileMessage = (error.localizedDescription, true)
+                        }
+                    }
+
+                // The importer on its own button: two file presenters on one view only show one.
+                Button("Import Profile") { choosingImportFile = true }
+                    .fileImporter(isPresented: $choosingImportFile, allowedContentTypes: [.json]) { result in
+                        readProfile(result)
+                    }
+
+                if let profileMessage {
+                    Text(profileMessage.text)
+                        .font(.caption)
+                        .foregroundColor(profileMessage.isError ? .red : .secondary)
+                }
+
                 Button("Delete All Data", role: .destructive) { confirmingDeleteAll = true }
                     .disabled(llmService.isGenerating || llmService.isLoadingModel)
 
@@ -191,7 +197,7 @@ struct ProfileSettingsView: View {
             } header: {
                 Text("Your Data")
             } footer: {
-                Text("Removes your recipes, inventory, shopping list and settings, downloaded AI models, and paired Macs.")
+                Text("Everything is kept on this device only. Export Profile saves your recipes, inventory, shopping list and settings to a file. Import it on another device, or after reinstalling, to bring them back; it adds to what's already here. Delete All Data removes all of it, plus downloaded AI models and paired Macs.")
             }
 
             // MARK: - About
@@ -231,11 +237,18 @@ struct ProfileSettingsView: View {
             Button("Delete All Data", role: .destructive) { deleteAllData() }
             Button("Cancel", role: .cancel) {}
         } message: {
-            // Mirrored deletes reach iCloud, so a syncing user loses the recipes everywhere —
-            // and has to be told that before, not after.
-            Text(dataManager.cloudSyncStatus.isSyncing
-                 ? "Your recipes, inventory, shopping list and settings will be deleted from this device, from iCloud, and from your other devices signed in to the same iCloud account. Downloaded AI models and paired Macs are removed from this device. This can't be undone."
-                 : "Your recipes, inventory, shopping list and settings, downloaded AI models, and paired Macs will be deleted from this device. This can't be undone.")
+            Text("Your recipes, inventory, shopping list and settings, downloaded AI models, and paired Macs will be deleted from this device. Export your profile first if you want to keep them. This can't be undone.")
+        }
+        .confirmationDialog(
+            "Import this profile?",
+            isPresented: Binding(get: { pendingImport != nil }, set: { if !$0 { pendingImport = nil } }),
+            titleVisibility: .visible,
+            presenting: pendingImport
+        ) { backup in
+            Button("Import") { importProfile(backup) }
+            Button("Cancel", role: .cancel) { pendingImport = nil }
+        } message: { backup in
+            Text(importDescription(backup))
         }
         .alert(item: $downloadAlertKind) { kind in
             downloadAlert(for: kind)
@@ -503,7 +516,7 @@ struct ProfileSettingsView: View {
     // MARK: - Data Operations
 
     /// Everything the app keeps about the user, gone: recipes, preferences, inventory and
-    /// shopping list (and their iCloud copies), downloaded models and model settings, and every
+    /// shopping list, downloaded models and model settings, and every
     /// paired Mac.
     ///
     /// Models first, because it is the step that can refuse — mid-answer or mid-download — and
@@ -529,6 +542,57 @@ struct ProfileSettingsView: View {
         hasLoaded = false
         loadPreferences()
         refreshModelSizes()
+    }
+
+    // MARK: - Profile export and import
+
+    private func exportProfile() {
+        profileMessage = nil
+        do {
+            let backup = try LocalDataManager.shared.exportProfile(onDeviceModel: llmService.preferredOnDeviceModel)
+            exportDocument = ProfileBackupDocument(data: try backup.encoded())
+        } catch {
+            profileMessage = ("Couldn't export your profile: \(error.localizedDescription)", true)
+        }
+    }
+
+    /// Reads the chosen file and asks before importing it.
+    private func readProfile(_ result: Result<URL, Error>) {
+        profileMessage = nil
+        do {
+            let url = try result.get()
+            // A file from Files or iCloud Drive is outside the sandbox until asked for.
+            let scoped = url.startAccessingSecurityScopedResource()
+            defer { if scoped { url.stopAccessingSecurityScopedResource() } }
+            pendingImport = try ProfileBackup.decode(Data(contentsOf: url))
+        } catch {
+            profileMessage = (error.localizedDescription, true)
+        }
+    }
+
+    private func importDescription(_ backup: ProfileBackup) -> String {
+        let exported = backup.exportedAt.formatted(date: .abbreviated, time: .shortened)
+        return "Exported \(exported): \(backup.recipes.count) recipes, \(backup.pantry.count) inventory items and \(backup.shoppingList.count) on the shopping list. They're added to what's on this device, and your settings are replaced by the profile's."
+    }
+
+    private func importProfile(_ backup: ProfileBackup) {
+        pendingImport = nil
+        do {
+            let summary = try LocalDataManager.shared.importProfile(backup)
+            // Only a model this device can run; otherwise it keeps its own choice.
+            if let model = backup.settings.onDeviceModel, LLMService.onDeviceModelOptions.contains(model) {
+                llmService.preferredOnDeviceModel = model
+            }
+            // Reload the form from the imported settings, without saving the reload back.
+            hasLoaded = false
+            loadPreferences()
+            if let voiceSettings = try? LocalDataManager.shared.fetchPreferences().toUserPreferences().voiceSettings {
+                voiceAssistant.updateVoiceSettings(voiceSettings)
+            }
+            profileMessage = (summary.message, false)
+        } catch {
+            profileMessage = ("Couldn't import the profile: \(error.localizedDescription)", true)
+        }
     }
 
     private func saveIfLoaded() {
@@ -628,5 +692,25 @@ private struct BigBroVoicePicker: View {
         ProfileSettingsView()
             .environmentObject(LLMService.shared)
             .environmentObject(VoiceAssistant())
+    }
+}
+
+/// A profile file for the save sheet: the JSON ``ProfileBackup/encoded()`` makes.
+struct ProfileBackupDocument: FileDocument {
+    static var readableContentTypes: [UTType] { [.json] }
+
+    let data: Data
+
+    init(data: Data) {
+        self.data = data
+    }
+
+    init(configuration: ReadConfiguration) throws {
+        guard let data = configuration.file.regularFileContents else { throw CocoaError(.fileReadCorruptFile) }
+        self.data = data
+    }
+
+    func fileWrapper(configuration: WriteConfiguration) throws -> FileWrapper {
+        FileWrapper(regularFileWithContents: data)
     }
 }
