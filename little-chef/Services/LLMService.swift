@@ -632,6 +632,10 @@ class LLMService: ObservableObject {
             // parsing and the Suggested ranking ask for.
             parameters.topP = 0.8
             parameters.topK = 20
+            // The prompt is read 128 tokens at a time rather than mlx-swift-lm's 512. Measured on
+            // the Mac at an 8.6k-token prompt, that cuts peak memory by 0.6 to 0.8 GiB for 5–10%
+            // slower prefill, and `memoryNeeded` assumes it.
+            parameters.prefill.stepSize = 128
             return try MLXLMCommon.generate(input: lmInput, parameters: parameters, context: context)
         }
 

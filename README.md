@@ -59,12 +59,12 @@ Runs a [PrismML Bonsai 2](https://prismml.com/news/bonsai-2-family) model direct
 
 | App memory limit | Model | Download | Capability |
 | --- | --- | --- | --- |
-| 3.5 GiB+ | [Bonsai 2 9B](https://huggingface.co/prism-ml/Ternary-Bonsai-2-9B-mlx-2bit) | ~3.6 GB | Recipe parsing, cooking assistant, timer and recipe tools |
-| 2.25 GiB+ | [Bonsai 2 4B](https://huggingface.co/prism-ml/Ternary-Bonsai-2-4B-mlx-2bit) | ~2.0 GB | Cooking assistant only |
+| 3.75 GiB+ | [Bonsai 2 9B](https://huggingface.co/prism-ml/Ternary-Bonsai-2-9B-mlx-2bit) | ~3.6 GB | Recipe parsing, cooking assistant, timer and recipe tools |
+| 2.5 GiB+ | [Bonsai 2 4B](https://huggingface.co/prism-ml/Ternary-Bonsai-2-4B-mlx-2bit) | ~2.0 GB | Cooking assistant only |
 | 1.5 GiB+ | [Bonsai 2 2B](https://huggingface.co/prism-ml/Ternary-Bonsai-2-2B-mlx-2bit) | ~1.2 GB | Cooking assistant only |
 | Less | — | — | BigBro only |
 
-A device whose limit is 8.75 GiB or more (in practice an iPad with 16 GB) can also pick [Bonsai 2 27B](https://huggingface.co/prism-ml/Ternary-Bonsai-2-27B-mlx-2bit) (~8.6 GB) in Settings, alongside its default model. Each threshold is the model's language weights, an 8k-token context and MLX's working memory, plus about 0.5 GiB for the rest of the app. The downloads are larger than that because every pack includes a vision tower the app never loads.
+A device whose limit is 9 GiB or more (in practice an iPad with 16 GB) can also pick [Bonsai 2 27B](https://huggingface.co/prism-ml/Ternary-Bonsai-2-27B-mlx-2bit) (~8.6 GB) in Settings, alongside its default model. Each threshold is the model's peak memory while reading the longest prompt the app sends, measured on a Mac, plus about 0.5 GiB for the rest of the app. The downloads are larger than that because every pack includes a vision tower the app never loads.
 
 Only the 27B and 9B models support tool use. Below them, recipe import still works from recipe websites via structured data, and timers are set manually. Thinking is turned off on every model.
 

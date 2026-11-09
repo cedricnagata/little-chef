@@ -60,15 +60,15 @@ enum CookingModelChoice: String, Codable, CaseIterable {
         }
     }
 
-    /// The app memory limit, in GiB, a device needs to run this model: the language weights,
-    /// an 8k-token context and MLX's working memory, plus about half a GiB for the rest of the
-    /// app (speech, audio, UI). Weights: 27B 7.15, 9B 2.37, 4B 1.12, 2B 0.50 GiB. Only a quarter
-    /// of the layers keep a per-token cache, so the context costs 0.1 to 0.5 GiB.
+    /// The app memory limit, in GiB, a device needs to run this model: MLX's peak while it
+    /// reads an 8.6k-token prompt (longer than anything the app sends) in 128-token steps, plus
+    /// about half a GiB for the rest of the app (speech, audio, UI). Peaks measured on a Mac with
+    /// `tools/bonsai-check`: 27B 8.51, 9B 3.22, 4B 1.94, 2B 0.98 GiB.
     var memoryNeeded: Double {
         switch self {
-        case .bonsai2_27B: return 8.75
-        case .bonsai2_9B: return 3.5
-        case .bonsai2_4B: return 2.25
+        case .bonsai2_27B: return 9.0
+        case .bonsai2_9B: return 3.75
+        case .bonsai2_4B: return 2.5
         case .bonsai2_2B: return 1.5
         }
     }

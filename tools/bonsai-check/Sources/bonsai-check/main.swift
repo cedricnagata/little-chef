@@ -46,15 +46,16 @@ let toolSpecs = (CookingTools.timerToolSpecs + CookingTools.recipeToolSpecs).map
 
 /// `BONSAI_PREFILL_STEP=256` sets how many prompt tokens are processed at once (mlx-swift-lm's
 /// default is 512). The step decides most of the peak memory beyond the weights.
-let prefillStep = ProcessInfo.processInfo.environment["BONSAI_PREFILL_STEP"].flatMap(Int.init)
-print("prefill step: \(prefillStep.map(String.init) ?? "default (512)")")
+let prefillStep = ProcessInfo.processInfo.environment["BONSAI_PREFILL_STEP"].flatMap(Int.init) ?? 128
+print("prefill step: \(prefillStep) (the app's is 128)")
 
 func gib(_ bytes: Int) -> String { String(format: "%.2f GiB", Double(bytes) / 1_073_741_824) }
 
 func run(_ container: ModelContainer, messages: [Chat.Message], tools: [ToolSpec]?, temperature: Float,
          maxTokens: Int) async throws -> (text: String, calls: [String], info: GenerateCompletionInfo?) {
+    // Not Sendable, but only ever read inside the closure.
+    nonisolated(unsafe) let input = UserInput(chat: messages, tools: tools, additionalContext: ["enable_thinking": false])
     let stream = try await container.perform { (context: ModelContext) in
-        let input = UserInput(chat: messages, tools: tools, additionalContext: ["enable_thinking": false])
         let lmInput = try await context.processor.prepare(input: input)
         var parameters = GenerateParameters(maxTokens: maxTokens, temperature: temperature)
         parameters.prefill.stepSize = prefillStep

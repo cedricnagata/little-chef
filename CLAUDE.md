@@ -240,19 +240,28 @@ interactively. Models are stored under Application Support in the hub's
 
 ### The models
 
-| Choice | Repository | Download | Language weights | Needs an app limit of |
-| --- | --- | --- | --- | --- |
-| `bonsai2_27B` | `prism-ml/Ternary-Bonsai-2-27B-mlx-2bit` | 8.6 GB | 7.15 GiB | 8.75 GiB |
-| `bonsai2_9B` | `prism-ml/Ternary-Bonsai-2-9B-mlx-2bit` | 3.6 GB | 2.37 GiB | 3.5 GiB |
-| `bonsai2_4B` | `prism-ml/Ternary-Bonsai-2-4B-mlx-2bit` | 2.0 GB | 1.12 GiB | 2.25 GiB |
-| `bonsai2_2B` | `prism-ml/Ternary-Bonsai-2-2B-mlx-2bit` | 1.2 GB | 0.50 GiB | 1.5 GiB |
+| Choice | Repository | Download | Weights in memory | Peak at 8.6k tokens | Needs an app limit of |
+| --- | --- | --- | --- | --- | --- |
+| `bonsai2_27B` | `prism-ml/Ternary-Bonsai-2-27B-mlx-2bit` | 8.6 GB | 7.10 GiB | 8.51 GiB | 9.0 GiB |
+| `bonsai2_9B` | `prism-ml/Ternary-Bonsai-2-9B-mlx-2bit` | 3.6 GB | 2.36 GiB | 3.22 GiB | 3.75 GiB |
+| `bonsai2_4B` | `prism-ml/Ternary-Bonsai-2-4B-mlx-2bit` | 2.0 GB | 1.11 GiB | 1.94 GiB | 2.5 GiB |
+| `bonsai2_2B` | `prism-ml/Ternary-Bonsai-2-2B-mlx-2bit` | 1.2 GB | 0.50 GiB | 0.98 GiB | 1.5 GiB |
 
 - **Downloads include a vision tower** (0.6–0.9 GiB) in the same safetensors file, and the 9B and
   4B also carry an `mtp/` speculative-decoding head. The text loader leaves both unloaded.
-- **What each threshold covers** (`CookingModelChoice.memoryNeeded`): the language weights, an
-  8k-token context (only a quarter of the layers keep a per-token cache, so 0.1–0.5 GiB) and
-  MLX's working memory, plus about 0.5 GiB for the rest of the app. The weights were measured from
-  the safetensors headers; the rest is an estimate to confirm on a device.
+- **What each threshold covers** (`CookingModelChoice.memoryNeeded`): MLX's peak while reading
+  an 8.6k-token prompt, plus about 0.5 GiB for the rest of the app. Measured on a Mac with
+  `tools/bonsai-check` (2026-11-09). The app never sends more than about that: recipe source text
+  is capped at 12,000 characters (`RecipeExtraction.maxSourceCharacters`) and chat at 20 messages.
+  The 0.5 GiB for the app is an estimate to confirm on a device.
+- **The prompt is read 128 tokens at a time** (`prefill.stepSize`), not mlx-swift-lm's 512. Most
+  of the peak beyond the weights is that step's working memory: at 8.6k tokens, 512 → 128 took
+  the 9B from 3.87 to 3.22 GiB and the 27B from 9.30 to 8.51, for 5–10% slower prefill and the
+  same decode speed (the 27B's went from ~27 to ~25 tok/s on the Mac). The thresholds assume it.
+- **Measured tool use** (bonsai-check, Mac): every size passed chat, a timer call, a recipe call
+  and JSON. The 4B's tool calls were right in 3 of 3 runs, so it is a candidate for `.full`;
+  it stays `.limited` until that is checked on a device. The 2B made small mistakes (steps given
+  as ingredients, a wrong amount).
 - **Thinking is off for every model** (`templateContext`, `enable_thinking: false`). Qwen3.5's
   template thinks by default, and PrismML notes even simple prompts can spend 3,000 tokens on it.
 - **Sampling** is PrismML's non-thinking settings (`topP` 0.8, `topK` 20) at the caller's
