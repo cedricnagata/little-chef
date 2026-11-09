@@ -44,14 +44,20 @@ let probes: [Probe] = [
 
 let toolSpecs = (CookingTools.timerToolSpecs + CookingTools.recipeToolSpecs).map(\.mlxToolSpec)
 
+/// `BONSAI_PREFILL_STEP=256` sets how many prompt tokens are processed at once (mlx-swift-lm's
+/// default is 512). The step decides most of the peak memory beyond the weights.
+let prefillStep = ProcessInfo.processInfo.environment["BONSAI_PREFILL_STEP"].flatMap(Int.init)
+print("prefill step: \(prefillStep.map(String.init) ?? "default (512)")")
+
 func gib(_ bytes: Int) -> String { String(format: "%.2f GiB", Double(bytes) / 1_073_741_824) }
 
 func run(_ container: ModelContainer, messages: [Chat.Message], tools: [ToolSpec]?, temperature: Float,
          maxTokens: Int) async throws -> (text: String, calls: [String], info: GenerateCompletionInfo?) {
-    let input = UserInput(chat: messages, tools: tools, additionalContext: ["enable_thinking": false])
     let stream = try await container.perform { (context: ModelContext) in
+        let input = UserInput(chat: messages, tools: tools, additionalContext: ["enable_thinking": false])
         let lmInput = try await context.processor.prepare(input: input)
         var parameters = GenerateParameters(maxTokens: maxTokens, temperature: temperature)
+        parameters.prefill.stepSize = prefillStep
         parameters.topP = 0.8
         parameters.topK = 20
         return try MLXLMCommon.generate(input: lmInput, parameters: parameters, context: context)
@@ -113,16 +119,21 @@ for id in ids {
         }
     }
 
-    // The context's memory: an ~8k-token prompt, as a long recipe page might be.
-    let page = String(repeating: "Stir the sauce gently over a low heat, scraping the bottom of the pan so nothing catches. ", count: 450)
-    MLX.Memory.peakMemory = 0
-    if let result = try? await run(container, messages: [.system(system), .user(page + "\nIn one sentence, what is this text about?")],
-                                   tools: nil, temperature: 0.7, maxTokens: 40) {
-        let tokens = result.info?.promptTokenCount ?? 0
-        print("long prompt: \(tokens) tokens, peak memory \(gib(MLX.Memory.peakMemory)), prefill \(String(format: "%.0f", result.info?.promptTokensPerSecond ?? 0)) tok/s")
-    } else {
-        failures += 1
-        print("[FAIL] long prompt")
+    // Peak memory by prompt length: a cooking question with a recipe (~1k tokens), a recipe
+    // page (~4k) and a long page (~8.6k).
+    let sentence = "Stir the sauce gently over a low heat, scraping the bottom of the pan so nothing catches. "
+    for repeats in [50, 220, 450] {
+        let page = String(repeating: sentence, count: repeats)
+        MLX.Memory.clearCache()
+        MLX.Memory.peakMemory = 0
+        if let result = try? await run(container, messages: [.system(system), .user(page + "\nIn one sentence, what is this text about?")],
+                                       tools: nil, temperature: 0.7, maxTokens: 40) {
+            let tokens = result.info?.promptTokenCount ?? 0
+            print("prompt \(tokens) tokens: peak memory \(gib(MLX.Memory.peakMemory)), prefill \(String(format: "%.0f", result.info?.promptTokensPerSecond ?? 0)) tok/s")
+        } else {
+            failures += 1
+            print("[FAIL] prompt of \(repeats) sentences")
+        }
     }
 }
 print("\n\(failures == 0 ? "ALL PASSED" : "\(failures) FAILED")")
