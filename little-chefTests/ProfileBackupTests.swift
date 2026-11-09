@@ -24,7 +24,7 @@ private func backup(recipes: [Recipe] = [], pantry: [String] = [], shopping: [St
         recipes: recipes,
         pantry: pantry.map { .init(name: $0, note: nil, isStaple: false, createdAt: base) },
         shoppingList: shopping.map { .init(name: $0, note: "x", isChecked: true, recipeTitle: nil, createdAt: base) },
-        settings: .init(voiceSettings: .defaultSettings, llmProvider: .bigBro, onDeviceModel: .bonsai4B)
+        settings: .init(voiceSettings: .defaultSettings, llmProvider: .bigBro, onDeviceModel: .bonsai2_4B)
     )
 }
 
@@ -118,4 +118,12 @@ private func backup(recipes: [Recipe] = [], pantry: [String] = [], shopping: [St
     #expect(ProfileImportSummary(recipesAdded: 1).message == "Added 1 new recipe. Settings restored.")
     #expect(ProfileImportSummary(recipesAdded: 3, recipesUpdated: 1, pantryAdded: 2, shoppingAdded: 1).message
             == "Added 3 new recipes, 1 updated recipe, 2 inventory items and 1 shopping list item. Settings restored.")
+}
+
+@Test func aProfileFromTheFirstBonsaiFamilyStillImports() throws {
+    var json = String(decoding: try backup().encoded(), as: UTF8.self)
+    json = json.replacingOccurrences(of: "\"bonsai2_4b\"", with: "\"bonsai8b\"")
+    #expect(try ProfileBackup.decode(Data(json.utf8)).settings.onDeviceModel == .bonsai2_9B)
+    json = json.replacingOccurrences(of: "\"bonsai8b\"", with: "\"some-future-model\"")
+    #expect(try ProfileBackup.decode(Data(json.utf8)).settings.onDeviceModel == nil)
 }

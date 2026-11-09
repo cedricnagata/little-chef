@@ -47,6 +47,23 @@ struct ProfileBackup: Codable {
         /// The on-device model picked on the exporting device. Restored only where this device
         /// can run it.
         var onDeviceModel: CookingModelChoice?
+
+        init(voiceSettings: LocalVoiceSettings, llmProvider: LLMProvider, onDeviceModel: CookingModelChoice?) {
+            self.voiceSettings = voiceSettings
+            self.llmProvider = llmProvider
+            self.onDeviceModel = onDeviceModel
+        }
+
+        /// A model name this app doesn't know is no reason to refuse the whole profile: a file
+        /// from build 63 names the first Bonsai family, and one from a later app may name a model
+        /// added since. Known old names map to their successor; anything else is left unset.
+        init(from decoder: Decoder) throws {
+            let container = try decoder.container(keyedBy: CodingKeys.self)
+            voiceSettings = try container.decode(LocalVoiceSettings.self, forKey: .voiceSettings)
+            llmProvider = try container.decode(LLMProvider.self, forKey: .llmProvider)
+            onDeviceModel = try container.decodeIfPresent(String.self, forKey: .onDeviceModel)
+                .flatMap(CookingModelChoice.init(storedValue:))
+        }
     }
 
     // MARK: - File

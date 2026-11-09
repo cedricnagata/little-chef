@@ -34,17 +34,19 @@ enum AICapability {
 class LLMService: ObservableObject {
     static let shared = LLMService()
 
-    /// The single on-device model this device's RAM can run, or nil if none.
-    /// DEBUG builds always report the full-capability 8B model for testing.
+    /// The largest everyday model this device can run, or nil if none. DEBUG builds always
+    /// report the full-capability 9B, so every feature can be exercised on any device.
+    ///
+    /// Chosen by the app's measured memory limit, not installed RAM. iOS terminates an app at
+    /// its own limit, well below the RAM fitted, and `physicalMemory` can read a little under
+    /// the nominal size, which put devices a tier down under the old `>= 6` GiB check.
+    /// Each model's ``CookingModelChoice/memoryNeeded`` is its own footprint plus the app's.
     static let supportedOnDeviceModel: CookingModelChoice? = {
         #if DEBUG
-        return .bonsai8B
+        return .bonsai2_9B
         #else
-        let gb = Double(ProcessInfo.processInfo.physicalMemory) / 1_073_741_824
-        if gb >= 6 { return .bonsai8B }
-        if gb >= 4 { return .bonsai4B }
-        if gb >= 3 { return .bonsai1_7B }
-        return nil
+        let gib = Double(appMemoryLimit) / 1_073_741_824
+        return [CookingModelChoice.bonsai2_9B, .bonsai2_4B, .bonsai2_2B].first { gib >= $0.memoryNeeded }
         #endif
     }()
 
@@ -54,16 +56,14 @@ class LLMService: ObservableObject {
     /// Every on-device model this device can run, largest first. The baseline
     /// ``supportedOnDeviceModel`` plus, where the memory allows, the 27B.
     ///
-    /// The 27B is gated on the app's own memory limit rather than on installed RAM, and in
-    /// DEBUG too. iOS caps each app well below the RAM fitted (raised by the
-    /// increased-memory-limit entitlement), and an app that crosses the cap while loading ~7 GB
-    /// of weights is terminated: no error, just a cook that has vanished. Measuring the limit
-    /// asks the question that actually decides that. Sampled once, from `init`, before any
-    /// model has taken a share of it.
+    /// The 27B is offered alongside the baseline rather than replacing it, and is gated on the
+    /// measured limit in DEBUG too: an app that crosses the limit while loading ~7 GB of weights
+    /// is terminated, with no error, just a cook that has vanished. Sampled once, from `init`,
+    /// before any model has taken a share of it.
     static let onDeviceModelOptions: [CookingModelChoice] = {
         guard let baseline = supportedOnDeviceModel else { return [] }
         let gib = Double(appMemoryLimit) / 1_073_741_824
-        return gib >= 9 ? [.bonsai27BTernary, baseline] : [baseline]
+        return gib >= CookingModelChoice.bonsai2_27B.memoryNeeded ? [.bonsai2_27B, baseline] : [baseline]
     }()
 
     /// What iOS will let this process use before terminating it: what is left plus what is
@@ -148,7 +148,7 @@ class LLMService: ObservableObject {
     }
     /// The on-device model picked in Settings. Read through ``activeOnDeviceModel``, which
     /// falls back when this device can't run it.
-    @Published var preferredOnDeviceModel: CookingModelChoice = .bonsai8B {
+    @Published var preferredOnDeviceModel: CookingModelChoice = .bonsai2_9B {
         didSet { UserDefaults.standard.set(preferredOnDeviceModel.rawValue, forKey: Self.onDeviceModelKey) }
     }
 
@@ -176,7 +176,7 @@ class LLMService: ObservableObject {
     private init() {
         _ = Self.onDeviceModelOptions
         if let stored = UserDefaults.standard.string(forKey: Self.onDeviceModelKey),
-           let choice = CookingModelChoice(rawValue: stored) {
+           let choice = CookingModelChoice(storedValue: stored) {
             preferredOnDeviceModel = choice
         }
         // The last provider chosen on this device, so a cook started before Settings has been
@@ -224,7 +224,7 @@ class LLMService: ObservableObject {
     // MARK: - Model Lifecycle
 
     private func loadModel(modelId: String? = nil) async throws -> MLXLMCommon.ModelContainer {
-        let id = modelId ?? activeOnDeviceModel?.modelId ?? CookingModelChoice.bonsai8B.modelId
+        let id = modelId ?? activeOnDeviceModel?.modelId ?? CookingModelChoice.bonsai2_9B.modelId
 
         if let container = modelContainers[id] {
             dprint("🤖 [LLM] Model \(id) already loaded, returning cached container")
@@ -302,7 +302,7 @@ class LLMService: ObservableObject {
     /// decision made in Settings, behind a size warning and a cellular check, and the privacy
     /// policy promises models download only when the user chooses to.
     private func downloadedModelContainer(modelId: String?) async throws -> MLXLMCommon.ModelContainer {
-        let id = modelId ?? activeOnDeviceModel?.modelId ?? CookingModelChoice.bonsai8B.modelId
+        let id = modelId ?? activeOnDeviceModel?.modelId ?? CookingModelChoice.bonsai2_9B.modelId
         guard isModelLoaded(id) || isModelDownloaded(id) else {
             throw LLMError.modelNotDownloaded(CookingModelChoice(modelId: id)?.displayName ?? "The AI model")
         }
@@ -380,12 +380,15 @@ class LLMService: ObservableObject {
         return total
     }
 
-    /// Deletes models left where swift-transformers' `HubApi` put them before mlx-swift-lm 3.
+    /// Deletes models nothing loads any more: the first Bonsai family (replaced by Bonsai 2),
+    /// and anything left where swift-transformers' `HubApi` put models before mlx-swift-lm 3.
     ///
-    /// The new downloader never reads them, so each is a model the user can neither use nor see
-    /// in Settings to remove. Off the main thread: it can be several gigabytes.
+    /// Each is a model the user can neither use nor see in Settings to remove. Off the main
+    /// thread: it can be several gigabytes.
     private static func removeLegacyDownloads() {
-        let directories = CookingModelChoice.allCases.flatMap { HubModelStore.legacyDirectories(for: $0.modelId) }
+        let ids = CookingModelChoice.allCases.map(\.modelId) + CookingModelChoice.retiredModelIds
+        let directories = ids.flatMap { HubModelStore.legacyDirectories(for: $0) }
+            + CookingModelChoice.retiredModelIds.compactMap { HubModelStore.repoDirectory(for: $0) }
         Task.detached(priority: .utility) {
             for directory in directories where FileManager.default.fileExists(atPath: directory.path) {
                 try? FileManager.default.removeItem(at: directory)
@@ -450,7 +453,7 @@ class LLMService: ObservableObject {
 
         UserDefaults.standard.removeObject(forKey: Self.onDeviceModelKey)
         UserDefaults.standard.removeObject(forKey: Self.providerKey)
-        preferredOnDeviceModel = .bonsai8B
+        preferredOnDeviceModel = .bonsai2_9B
         currentProvider = LLMService.deviceSupportsLocalModels ? .local : .bigBro
         dprint("🤖 [LLM] ✅ Deleted all models")
     }
@@ -620,10 +623,19 @@ class LLMService: ObservableObject {
 
         let stream: AsyncStream<Generation> = try await container.perform { (context: ModelContext) in
             let lmInput = try await context.processor.prepare(input: userInput)
-            let parameters = GenerateParameters(
+            var parameters = GenerateParameters(
                 maxTokens: maxTokens ?? 2048,
                 temperature: temperature ?? 0.7
             )
+            // PrismML's non-thinking settings for Bonsai 2, less its presence penalty: 1.5 over
+            // the last 64 tokens would fight the repeated keys and quotes of the JSON that recipe
+            // parsing and the Suggested ranking ask for.
+            parameters.topP = 0.8
+            parameters.topK = 20
+            // The prompt is read 128 tokens at a time rather than mlx-swift-lm's 512. Measured on
+            // the Mac at an 8.6k-token prompt, that cuts peak memory by 0.6 to 0.8 GiB for 5–10%
+            // slower prefill, and `memoryNeeded` assumes it.
+            parameters.prefill.stepSize = 128
             return try MLXLMCommon.generate(input: lmInput, parameters: parameters, context: context)
         }
 
@@ -834,7 +846,7 @@ class LLMService: ObservableObject {
 
     /// The chat-template variables for the model a request will load.
     private func templateContext(for modelId: String?) -> [String: any Sendable]? {
-        let id = modelId ?? activeOnDeviceModel?.modelId ?? CookingModelChoice.bonsai8B.modelId
+        let id = modelId ?? activeOnDeviceModel?.modelId ?? CookingModelChoice.bonsai2_9B.modelId
         return CookingModelChoice(modelId: id)?.templateContext
     }
 }
