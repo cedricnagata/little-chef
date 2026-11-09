@@ -326,9 +326,11 @@ class LLMService: ObservableObject {
     }
 
     func unloadModel(modelId: String? = nil) {
+        let unloadedSomething: Bool
         if let modelId {
-            modelContainers.removeValue(forKey: modelId)
+            unloadedSomething = modelContainers.removeValue(forKey: modelId) != nil
         } else {
+            unloadedSomething = !modelContainers.isEmpty
             modelContainers.removeAll()
         }
         loadedModelIds = Set(modelContainers.keys)
@@ -340,7 +342,10 @@ class LLMService: ObservableObject {
             loadProgress = 0.0
             loadError = nil
         }
-        MLX.Memory.clearCache()
+        // Only after a model was in memory. With none ever loaded, MLX builds its Metal device here
+        // for nothing, and on the Simulator that aborts (in `Device::Device()`), which made Delete
+        // All Data crash before it had deleted anything.
+        if unloadedSomething { MLX.Memory.clearCache() }
         dprint("🤖 [LLM] Unloaded \(modelId ?? "all models"); resident: \(loadedModelIds)")
     }
 
