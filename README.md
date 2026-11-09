@@ -44,9 +44,10 @@ Available on [TestFlight](https://testflight.apple.com/join/Rz11FzNk)
 - The assistant creates a timer and waits for you to say go, so a misheard duration can be fixed before it starts
 - Live Activities on the Lock Screen and Dynamic Island, and a notification when a timer finishes
 
-### Sync and Your Data
-- Recipes, preferences, inventory and shopping list sync through your private iCloud database
-- **Settings → Delete All Data** removes all of it, from iCloud and your other devices too, along with downloaded models and paired Macs
+### Your Data
+- Recipes, preferences, inventory and shopping list stay on the device; nothing is synced or uploaded
+- **Settings → Export Profile** saves all of it to one file, and **Import Profile** adds a file's contents back, on a new device or after reinstalling
+- **Settings → Delete All Data** removes all of it, along with downloaded models and paired Macs
 - No accounts, analytics or tracking. See the [privacy policy](docs/privacy.md)
 
 ## AI Inference
@@ -54,23 +55,22 @@ Available on [TestFlight](https://testflight.apple.com/join/Rz11FzNk)
 LittleChef supports two inference backends, selectable in Settings. The choice is pinned when a cooking session starts and holds for that whole session, so an answer never changes backend halfway through a recipe.
 
 ### On-Device (Local)
-Runs a [PrismML Bonsai](https://huggingface.co/prism-ml) 1-bit model directly on iPhone using [MLX](https://github.com/ml-explore/mlx-swift). Which model depends on how much RAM the device has:
+Runs a [PrismML Bonsai 2](https://prismml.com/news/bonsai-2-family) model directly on iPhone using [MLX](https://github.com/ml-explore/mlx-swift): Qwen3.5-based, with ternary weights packed as 2-bit. Which model depends on the app's memory limit, which iOS sets per device (well below the RAM fitted, raised by the increased-memory-limit entitlement):
 
-| RAM | Model | Capability |
-| --- | --- | --- |
-| 6 GB+ (for example iPhone 15 Pro, iPhone 16 and later) | [Bonsai 8B](https://huggingface.co/prism-ml/Bonsai-8B-mlx-1bit) (~3.5 GB) | Recipe parsing, cooking assistant, timer and recipe tools |
-| 4 GB+ | [Bonsai 4B](https://huggingface.co/prism-ml/Bonsai-4B-mlx-1bit) (~1.8 GB) | Cooking assistant only |
-| 3 GB+ | [Bonsai 1.7B](https://huggingface.co/prism-ml/Bonsai-1.7B-mlx-1bit) (~0.9 GB) | Cooking assistant only |
-| Under 3 GB | — | BigBro only |
+| App memory limit | Model | Download | Capability |
+| --- | --- | --- | --- |
+| 3.5 GiB+ | [Bonsai 2 9B](https://huggingface.co/prism-ml/Ternary-Bonsai-2-9B-mlx-2bit) | ~3.6 GB | Recipe parsing, cooking assistant, timer and recipe tools |
+| 2.25 GiB+ | [Bonsai 2 4B](https://huggingface.co/prism-ml/Ternary-Bonsai-2-4B-mlx-2bit) | ~2.0 GB | Cooking assistant only |
+| 1.5 GiB+ | [Bonsai 2 2B](https://huggingface.co/prism-ml/Ternary-Bonsai-2-2B-mlx-2bit) | ~1.2 GB | Cooking assistant only |
+| Less | — | — | BigBro only |
 
-A device whose per-app memory limit is 9 GB or more (in practice a 16 GB iPad, with the increased-memory-limit entitlement) can also pick [Bonsai 27B ternary](https://huggingface.co/prism-ml/Ternary-Bonsai-27B-mlx-2bit) (~7 GB) in Settings, alongside its default model.
+A device whose limit is 8.75 GiB or more (in practice an iPad with 16 GB) can also pick [Bonsai 2 27B](https://huggingface.co/prism-ml/Ternary-Bonsai-2-27B-mlx-2bit) (~8.6 GB) in Settings, alongside its default model. Each threshold is the model's language weights, an 8k-token context and MLX's working memory, plus about 0.5 GiB for the rest of the app. The downloads are larger than that because every pack includes a vision tower the app never loads.
 
-Only the 27B and 8B models support tool use. Below them, recipe import still works from recipe websites via structured data, and timers are set manually.
+Only the 27B and 9B models support tool use. Below them, recipe import still works from recipe websites via structured data, and timers are set manually. Thinking is turned off on every model.
 
 - Models are downloaded only when you tap Download in Settings, with the size shown and a warning on cellular
 - No internet required after the download
 - Full privacy — all inference runs on-device
-- Bonsai 8B generates ~44 tok/s on iPhone 16 Pro Max
 
 ### BigBro (Mac Companion)
 Pairs with a Mac running [BigBro](https://github.com/cedricnagata/bigbro) over the local network. The Mac runs `bonsai-27b-ternary` (Bonsai 27B ternary) in-process through MLX and handles all inference, with tool use fully supported. Suitable for older devices that don't meet the RAM requirement.
@@ -113,7 +113,7 @@ Turn-taking is the same on both paths: the microphone endpoints on signal energy
 │      │           ├── Local: Bonsai via MLX                                │
 │      │           └── BigBro: Mac companion via network                    │
 │      ↓                                                                    │
-│   LocalDataManager  (SwiftData, mirrored to iCloud;                       │
+│   LocalDataManager  (SwiftData, on the device;                            │
 │                      recipes, inventory, preferences)                     │
 └───────────────────────────────────────────────────────────────────────────┘
 ```
@@ -132,28 +132,27 @@ Turn-taking is the same on both paths: the microphone endpoints on signal energy
 - `LocalRecipeParser` — imports recipes from URLs (`WebScraperService`, schema.org + LLM cleanup), images (`OCRService`), and text; the parsing itself is `RecipeExtraction`
 - `KitchenManager` — the ingredient inventory and shopping list, what each recipe is missing (`IngredientMatcher`), and the Suggested ranking (`RecipeSuggester`)
 - `IngredientScaler` — rescales ingredient amounts when the servings change
-- `LocalDataManager` — SwiftData persistence for recipes, preferences, inventory and shopping list, mirrored to iCloud, falling back to a local-only store if iCloud can't be set up
+- `LocalDataManager` — SwiftData persistence for recipes, preferences, inventory and shopping list, on the device only, and profile export and import
 
 ## Tech Stack
 
 - **UI**: SwiftUI, ActivityKit (Live Activities), AVFoundation (TTS), Speech Framework (STT)
-- **On-device inference**: MLX Swift (`mlx-swift`, `mlx-swift-lm`), PrismML Bonsai 1-bit (8B / 4B / 1.7B by device RAM), Bonsai 27B ternary where memory allows. Models come from Hugging Face through `swift-huggingface` and `swift-transformers`
+- **On-device inference**: MLX Swift (`mlx-swift`, `mlx-swift-lm` from a fork, see below), PrismML Bonsai 2 (9B / 4B / 2B by the app's memory limit), Bonsai 2 27B where memory allows. Models come from Hugging Face through `swift-huggingface` and `swift-transformers`
 - **Mac inference & speech**: [BigBroKit](https://github.com/cedricnagata/bigbro-kit) (local network pairing, Parakeet STT, Kokoro TTS)
 - **Recipe parsing**: WebScraperService (`WKWebView`), OCRService (Vision), schema.org extraction
-- **Storage**: SwiftData (CloudKit-backed, falling back to a local-only store)
+- **Storage**: SwiftData, on the device only, with Export Profile and Import Profile in Settings
 
 ## Building
 
 - **Xcode 26** (the iOS 26 SDK). The app runs on iPhone and iPad with iOS 18.6 or later
 - Open `little-chef.xcodeproj` and run the `little-chef` scheme. Swift packages resolve on first open
 - **Debug** builds sign automatically with your development team. **Release** builds and archives sign manually and need the two App Store provisioning profiles installed (see CLAUDE.md, "Signing style")
-- Debug builds always report the Bonsai 8B with full capability, whatever the device, so every feature can be tested on any phone. Release builds choose by RAM as in the table above
-- iCloud sync in a Debug build talks to the CloudKit **Development** environment; TestFlight and App Store builds use **Production**
+- Debug builds always report the Bonsai 2 9B with full capability, whatever the device, so every feature can be tested on any phone. Release builds choose by the app's memory limit as in the table above
 
 | Package | Requirement | Why |
 | --- | --- | --- |
-| [`mlx-swift`](https://github.com/ml-explore/mlx-swift) | exactly 0.33.0 | The first release with 1-bit quantization |
-| [`mlx-swift-lm`](https://github.com/ml-explore/mlx-swift-lm) | pinned revision | No tagged release accepts `mlx-swift` 0.33 yet |
+| [`mlx-swift`](https://github.com/ml-explore/mlx-swift) | exactly 0.33.0 | What the `mlx-swift-lm` revision below requires |
+| [`mlx-swift-lm`](https://github.com/cedricnagata/mlx-swift-lm/tree/little-chef/bonsai-2) | pinned revision on a **temporary fork** | Upstream can't load Bonsai 2 until [ml-explore/mlx-swift-lm#630](https://github.com/ml-explore/mlx-swift-lm/pull/630) merges. See CLAUDE.md, "MLX packages", for how to go back |
 | [`swift-huggingface`](https://github.com/huggingface/swift-huggingface) | 0.9.0+ | Model downloads |
 | [`swift-transformers`](https://github.com/huggingface/swift-transformers) | 1.3.0+ | Tokenizers |
 | [`bigbro-kit`](https://github.com/cedricnagata/bigbro-kit) | `main` branch | The BigBro Mac client |

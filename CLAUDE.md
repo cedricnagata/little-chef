@@ -191,13 +191,46 @@ gh run view <id> --log-failed
 
 ## MLX packages
 
-On-device inference uses the stock `ml-explore/mlx-swift` and `ml-explore/mlx-swift-lm`.
-Bonsai's 1-bit weights need `mlx-swift` **0.33.0** or later — the first release whose bundled
-MLX has 1-bit quantization.
+On-device inference runs PrismML's **Bonsai 2** family through `ml-explore/mlx-swift` (exactly
+**0.33.0**) and **a fork of `mlx-swift-lm`**.
 
-`mlx-swift-lm` is pinned to a **revision**, not a version, because no release yet accepts
-`mlx-swift` 0.33: the latest tag, 3.32.3, caps it below. Move it to a version requirement once a
-release declares `mlx-swift` 0.33 or later.
+### The mlx-swift-lm fork, and how to retire it
+
+Bonsai 2 packs are `model_type: prism_hadamard_qwen35`: ternary weights stored as MLX 2-bit
+(group 128) with a signed, blockwise Walsh–Hadamard rotation folded into each projection's input.
+The loader has to rotate the activations to match. Loaded as plain `qwen3_5`, they decode
+nonsense. Upstream mlx-swift-lm can't load them yet. Support is
+[ml-explore/mlx-swift-lm#630](https://github.com/ml-explore/mlx-swift-lm/pull/630) by spokvulcan,
+open and unreviewed since 2026-10-14. Python mlx-lm merged the equivalent (#1941) on 2026-10-08.
+
+So the app pins **`github.com/cedricnagata/mlx-swift-lm`, branch `little-chef/bonsai-2`,
+revision `7a5ff87`**. That revision is exactly:
+
+- upstream `691a19a`, the revision the app pinned before (the first one to accept mlx-swift 0.33),
+- plus PR #630's single commit `a3596e4`, cherry-picked unchanged (`-x`, author kept).
+
+Nothing else differs. The fork is public because GitHub forks of public repos can't be private,
+and that is also what lets CI fetch it with no extra secret. Pinning the PR's own branch instead
+would have gone back to mlx-swift 0.32, since #630 is based on upstream as of 2026-10-13.
+
+**Check on it** when touching MLX: `gh pr view 630 -R ml-explore/mlx-swift-lm --json state,mergedAt`.
+
+**Retiring the fork, once #630 (or an equivalent) is merged upstream:**
+
+1. Find the first upstream commit or release with `prism_hadamard_qwen35` in
+   `Libraries/MLXLLM/LLMModelFactory.swift` that still accepts mlx-swift 0.33.
+2. In `project.pbxproj`, point the `mlx-swift-lm` package reference back at
+   `https://github.com/ml-explore/mlx-swift-lm`: that revision, or a version requirement once a
+   tagged release has both. Update `Package.resolved` to match (`tools/mac-test` saves Xcode's
+   own copy when resolution changes it).
+3. Check on the Mac that every Bonsai 2 size still loads and answers, then a TestFlight build.
+4. Remove this section's fork notes and the README's fork row. Archive or delete the fork
+   (`gh repo archive cedricnagata/mlx-swift-lm`).
+
+If upstream needs something else of the app first, such as a newer mlx-swift, the fork can be
+rebased instead: cherry-pick `a3596e4` (or the PR's latest commit) onto the new upstream
+revision, push it as a new commit on `little-chef/bonsai-2`, and repin. Never put the app's own
+changes on the fork.
 
 mlx-swift-lm 3 doesn't download or tokenize by itself. `HubModelLoading.swift` bridges it to
 `swift-huggingface` and `swift-transformers` by hand rather than through the `MLXHuggingFace`
@@ -205,39 +238,64 @@ macros, because `xcodebuild` won't run a package's macros in CI until someone tr
 interactively. Models are stored under Application Support in the hub's
 `models--<org>--<name>` layout. Caches is not used, because iOS can empty it.
 
+### The models
+
+| Choice | Repository | Download | Language weights | Needs an app limit of |
+| --- | --- | --- | --- | --- |
+| `bonsai2_27B` | `prism-ml/Ternary-Bonsai-2-27B-mlx-2bit` | 8.6 GB | 7.15 GiB | 8.75 GiB |
+| `bonsai2_9B` | `prism-ml/Ternary-Bonsai-2-9B-mlx-2bit` | 3.6 GB | 2.37 GiB | 3.5 GiB |
+| `bonsai2_4B` | `prism-ml/Ternary-Bonsai-2-4B-mlx-2bit` | 2.0 GB | 1.12 GiB | 2.25 GiB |
+| `bonsai2_2B` | `prism-ml/Ternary-Bonsai-2-2B-mlx-2bit` | 1.2 GB | 0.50 GiB | 1.5 GiB |
+
+- **Downloads include a vision tower** (0.6–0.9 GiB) in the same safetensors file, and the 9B and
+  4B also carry an `mtp/` speculative-decoding head. The text loader leaves both unloaded.
+- **What each threshold covers** (`CookingModelChoice.memoryNeeded`): the language weights, an
+  8k-token context (only a quarter of the layers keep a per-token cache, so 0.1–0.5 GiB) and
+  MLX's working memory, plus about 0.5 GiB for the rest of the app. The weights were measured from
+  the safetensors headers; the rest is an estimate to confirm on a device.
+- **Thinking is off for every model** (`templateContext`, `enable_thinking: false`). Qwen3.5's
+  template thinks by default, and PrismML notes even simple prompts can spend 3,000 tokens on it.
+- **Sampling** is PrismML's non-thinking settings (`topP` 0.8, `topK` 20) at the caller's
+  temperature, without their presence penalty of 1.5, which would fight the repeated keys of JSON
+  output.
+- **The first family is retired.** Its cases are gone. `CookingModelChoice(storedValue:)` maps
+  the old names in `UserDefaults` and exported profiles to their successors (8B → 9B, 4B → 4B,
+  1.7B → 2B, 27B → 27B), and `removeLegacyDownloads` deletes their downloads at launch
+  (`retiredModelIds`).
+- **BigBro is separate.** The Mac still serves the first-family 27B (`bigBroModel`,
+  `bonsai-27b-ternary`) from its own catalog, in the bigbro repo.
+
 ### The increased-memory-limit entitlement
 
 `com.apple.developer.kernel.increased-memory-limit` is on the app target, not the widget. iOS caps
-each app well below the RAM fitted, and the 27B's ~7 GB of weights can't load under the default
-cap on any current device. `LLMService.onDeviceModelOptions` offers the 27B only when the app's
-measured limit (`os_proc_available_memory()` plus the current footprint) is 9 GB or more. So the
-entitlement is what makes the option appear at all, on devices that grant it. It also gives the
-8B more room on 6–8 GB iPhones.
+each app well below the RAM fitted. The entitlement raises that cap on devices that grant it,
+which is what lets the 27B appear at all and the 9B fit on more iPhones.
 
 The entitlement has to be granted by the profile. Removing it from the App ID, or restoring an
 older profile, fails the archive with the row in the table above.
 
 ### Which model a device gets, and what it can do
 
-- **The default model goes by installed RAM.** `LLMService.supportedOnDeviceModel` reads
-  `ProcessInfo.physicalMemory` in GiB: 6 or more gets the 8B, 4 or more the 4B, 3 or more the
-  1.7B, and below that there is no on-device model and the provider is forced to BigBro.
-- **The 27B goes by the measured app limit** (above), and is offered alongside the default rather
-  than replacing it.
+- **Every tier goes by the measured app limit**, not installed RAM: `os_proc_available_memory()`
+  plus the current footprint, sampled once at launch. `supportedOnDeviceModel` is the largest of
+  9B, 4B and 2B whose `memoryNeeded` fits; below 1.5 GiB there is no on-device model and the
+  provider is forced to BigBro. `ProcessInfo.physicalMemory` is not used: it can read under the
+  nominal RAM, which put devices a tier down under the old `>= 6` GiB check. The limit is 0 on
+  the Simulator, so a Release build there gets no model.
+- **The 27B is offered alongside the default** where the limit allows, rather than replacing it.
 - **What the backend can do is `AICapability`.** `.full` (chat, timer and recipe tools, AI recipe
-  parsing) needs the 27B, the 8B or a connected Mac. `.limited` (chat only) is the 4B and 1.7B.
+  parsing) needs the 27B, the 9B or a connected Mac. `.limited` (chat only) is the 4B and 2B.
   `.none` means no model or no Mac. Ask `capability(of:)` with the provider a cook pinned, not
   `capability`, which follows the app-wide setting.
-- **DEBUG overrides the RAM check and the tiers**, though not the 27B's memory gate. A debug build
-  reports the 8B and `.full` on every device, so every feature can be exercised on any phone.
-  The limited and none paths can only be seen in a Release build: TestFlight, or a local Release
-  run with the manual profiles installed.
-- **The on-device model is per device; the provider syncs.** The chosen on-device model lives
-  only in `UserDefaults` (`little-chef.on-device-model`), because what a device can run and has
-  downloaded are facts about that device. The provider is in the synced preferences, and Settings
-  applies it when it appears. `little-chef.llm-provider` in `UserDefaults` is the last provider
-  used on this device, read at launch, so a cook started before Settings has been opened runs
-  where the user asked.
+- **DEBUG overrides the tiers**, though not the 27B's memory gate. A debug build reports the 9B
+  and `.full` on every device, so every feature can be exercised on any phone. The limited and
+  none paths can only be seen in a Release build: TestFlight, or a local Release run with the
+  manual profiles installed.
+- **The on-device model is per device.** It lives in `UserDefaults`
+  (`little-chef.on-device-model`), because what a device can run and has downloaded are facts
+  about that device; an imported profile restores it only where this device can run it.
+  `little-chef.llm-provider` is the last provider used on this device, read at launch, so a cook
+  started before Settings has been opened runs where the user asked.
 
 ## Storage
 
@@ -569,6 +627,13 @@ Control session there that the Linux session messages: push a branch, ask the Ma
   and on a failed build the `error:` lines from the log. The log and result bundle are kept under
   `~/Library/Caches/little-chef-mac-test/`, with a DerivedData of its own there, so rebuilds are
   incremental and never disturb Xcode's.
+- **The on-device models.** The Simulator can't run MLX, so `tools/bonsai-check` checks them on
+  the Mac itself: `cd tools/bonsai-check && swift run -c release bonsai-check [model id ...]`.
+  It loads each Bonsai 2 model the way the app does (the same mlx-swift-lm fork, the app's
+  Hugging Face loader and tool definitions, symlinked in) and reports chat, a timer tool call, a
+  recipe tool call and JSON output, pass or fail, with tokens per second, the weights' memory and
+  the peak memory at an ~8k-token prompt. Downloads go to `~/Library/Application
+  Support/huggingface/hub`, about 15 GB for all four. Keep its package pins equal to the app's.
 - **App Store screenshots.** `tools/mac-test <branch> --screenshots` runs only `testScreenshots`
   (skipped in every other run): a Debug launch with `-ui-screenshots` puts the sample content in
   `ScreenshotFixtures.swift` in an in-memory store, never the Simulator's own, and stages
