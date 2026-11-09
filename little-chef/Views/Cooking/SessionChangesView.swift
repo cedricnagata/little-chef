@@ -129,7 +129,7 @@ struct SessionChangesView: View {
         } header: {
             Text(changes.count == 1 ? "1 change" : "\(changes.count) changes")
         } footer: {
-            Text("Saving updates \(recipe?.displayTitle ?? "this recipe") in your recipes, on this device and every other one signed in to your iCloud account.")
+            Text("Saving updates \(recipe?.displayTitle ?? "this recipe") in your recipes.")
         }
     }
 

@@ -18,11 +18,11 @@ Questions, problems or ideas: email **the.cedster@gmail.com**, or open an issue 
 
 **Voice isn't working.** LittleChef asks for the microphone and speech recognition the first time you use voice. If you declined, turn them on in iOS **Settings → LittleChef**.
 
-**My recipes aren't on my other device.** Recipes, preferences, inventory and the shopping list sync through your private iCloud database. Check that both devices are signed in to the same iCloud account, with iCloud allowed for LittleChef (iOS **Settings → [your name] → iCloud**), and give it a few minutes.
+**How do I move my recipes to another device?** Everything is kept on the device, with no syncing. On the old device, go to **Settings → Export Profile** and save the file to Files or AirDrop it. On the new one, **Settings → Import Profile** and choose the file. It brings your recipes, inventory, shopping list and settings, and adds them to anything already there. Export a profile before deleting the app, too, if you want to keep your recipes.
 
 **The Mac doesn't show up.** BigBro must be running, and macOS must have been allowed Local Network access for it (asked on first launch). On the iPhone, check **Settings → LittleChef → Local Network**.
 
-**How do I delete my data?** **Settings → Delete All Data** in the app. It removes your recipes, inventory, shopping list, settings, downloaded models and paired Macs, and with iCloud sync on, the same data from iCloud and your other devices. It can't be undone.
+**How do I delete my data?** **Settings → Delete All Data** in the app. It removes your recipes, inventory, shopping list, settings, downloaded models and paired Macs from the device. It can't be undone.
 
 ## Privacy
 

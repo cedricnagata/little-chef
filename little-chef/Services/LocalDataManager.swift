@@ -2,9 +2,8 @@
 //  LocalDataManager.swift
 //  little-chef
 //
-//  The SwiftData store: recipes, preferences, inventory and shopping list, mirrored to the
-//  user's private iCloud database, with a local-only fallback when mirroring can't start.
-//  See CLAUDE.md, "CloudKit sync".
+//  The SwiftData store: recipes, preferences, inventory and shopping list, on this device only.
+//  Export Profile and Import Profile move it between devices. See CLAUDE.md, "Storage".
 //
 
 import Combine
@@ -12,24 +11,8 @@ import Foundation
 import OSLog
 import SwiftData
 
-/// Whether the store backing this session is mirroring to CloudKit.
-enum CloudSyncStatus: Equatable {
-    /// The store is backed by CloudKit. Whether records have actually landed also depends on
-    /// network reachability and the signed-in iCloud account, but the mirroring is wired up.
-    case syncing
-
-    /// CloudKit mirroring could not be set up, so this device is on a local-only store:
-    /// nothing written here reaches iCloud, and nothing survives deleting the app.
-    case localOnly(reason: String)
-
-    var isSyncing: Bool {
-        if case .syncing = self { return true }
-        return false
-    }
-}
-
-/// Manages local data persistence for recipes and user preferences.
-/// Both sync to the user's private iCloud database via SwiftData + CloudKit.
+/// The app's SwiftData store, kept on the device. Nothing in it leaves the device except in a
+/// profile the user exports.
 @MainActor
 class LocalDataManager: ObservableObject {
     static let shared: LocalDataManager = {
@@ -40,21 +23,14 @@ class LocalDataManager: ObservableObject {
         }
     }()
 
-    /// Release builds need this. `dprint` compiles to nothing outside DEBUG, which is precisely
-    /// why a silent fall back to a local-only store went unnoticed through TestFlight.
+    /// Release builds need this: `dprint` compiles to nothing outside DEBUG.
     private static let log = Logger(subsystem: "NagataInc.little-chef", category: "persistence")
 
     private let modelContainer: ModelContainer
     private let modelContext: ModelContext
 
-    /// Whether this session is mirroring to CloudKit, and why not when it isn't.
-    ///
-    /// Decided once at launch: the container is built with either a CloudKit-backed
-    /// configuration or a local-only one, and it cannot change store mid-session.
-    @Published private(set) var cloudSyncStatus: CloudSyncStatus = .syncing
-
-    /// Fires when the store changed underneath whatever you last read out of it: a CloudKit
-    /// import from another device, or Delete All Data.
+    /// Fires when the store changed underneath whatever you last read out of it: Delete All Data,
+    /// or importing a profile.
     ///
     /// A subject rather than a closure property because there is more than one subscriber —
     /// `RecipeManager` and `KitchenManager` — and a single `var onRemoteChange` silently kept
@@ -75,81 +51,32 @@ class LocalDataManager: ObservableObject {
             ShoppingItemEntity.self
         ])
 
-        let cloudConfiguration = ModelConfiguration(
-            schema: schema,
-            isStoredInMemoryOnly: false,
-            cloudKitDatabase: .private("iCloud.com.littlechef.app")
-        )
-
-        // Built into locals and assigned in one go at the end: `cloudSyncStatus` is `@Published`,
-        // and touching a property wrapper mid-init is `self` used before every stored property
-        // has a value.
-        let container: ModelContainer
-        let status: CloudSyncStatus
-
         #if DEBUG
         let screenshots = ScreenshotFixtures.isActive
         #else
         let screenshots = false
         #endif
 
-        if screenshots {
-            // The App Store screenshots: sample content in memory, nothing near iCloud or the
-            // Simulator's own store. `.none` is required: left at its default, a configuration in
-            // an app with the iCloud entitlement mirrors to CloudKit, and the first save of an
-            // in-memory store then aborts with an Objective-C exception no `catch` can see.
-            container = try ModelContainer(
-                for: schema,
-                configurations: [ModelConfiguration(schema: schema, isStoredInMemoryOnly: true, cloudKitDatabase: .none)])
-            status = .syncing
-        } else {
-            do {
-                container = try ModelContainer(for: schema, configurations: [cloudConfiguration])
-                status = .syncing
-                Self.log.notice("Store opened with CloudKit mirroring (iCloud.com.littlechef.app)")
-            } catch {
-                // CloudKit can be unavailable at runtime (no iCloud account signed in,
-                // restricted iCloud, provisioning/entitlement issues during review, etc.).
-                // Fall back to a local-only store so the app still launches and works
-                // rather than crashing on first run.
-                //
-                // This branch is a silent data-loss trap — writes look like they worked and then
-                // die with the app — so it is recorded rather than shrugged off, and surfaced in
-                // Settings. Log at `error` so it shows up in a device console without a debugger.
-                Self.log.error(
-                    "CloudKit-backed ModelContainer failed; falling back to a LOCAL-ONLY store. Recipes saved on this device will not reach iCloud and will not survive reinstalling. Error: \(error.localizedDescription, privacy: .public)")
-                status = .localOnly(reason: error.localizedDescription)
-                let localConfiguration = ModelConfiguration(
-                    schema: schema,
-                    isStoredInMemoryOnly: false
-                )
-                container = try ModelContainer(for: schema, configurations: [localConfiguration])
-            }
-        }
+        // `.none` spelled out. The default, `.automatic`, mirrors to CloudKit whenever the app
+        // carries an iCloud entitlement, and this store must never start doing that again
+        // because someone ticked a capability in Xcode.
+        //
+        // The screenshots get sample content in memory, never the Simulator's own store.
+        let configuration = ModelConfiguration(
+            schema: schema,
+            isStoredInMemoryOnly: screenshots,
+            cloudKitDatabase: .none
+        )
+        let container = try ModelContainer(for: schema, configurations: [configuration])
 
         modelContainer = container
-        // `mainContext`, not a freshly built `ModelContext`. Tidy-up, not part of the sync fix —
-        // mirroring happens below the context — but a hand-rolled context is a second context
-        // over the same container with autosave off, and this manager is `@MainActor` anyway.
-        // Using the container's own main context means one context and a save-on-tick backstop
-        // behind the explicit `save()` calls.
+        // The container's own main context: one context, with a save-on-tick backstop behind the
+        // explicit `save()` calls, and this manager is `@MainActor` anyway.
         modelContext = container.mainContext
-        cloudSyncStatus = status
 
         #if DEBUG
         if screenshots { seedScreenshotContent() }
         #endif
-
-        // Reload when a remote CloudKit change arrives from another device
-        NotificationCenter.default.addObserver(
-            forName: NSNotification.Name.NSPersistentStoreRemoteChange,
-            object: nil,
-            queue: .main
-        ) { [weak self] _ in
-            Task { @MainActor [weak self] in
-                self?.storeDidChange.send()
-            }
-        }
     }
 
     #if DEBUG
@@ -205,13 +132,8 @@ class LocalDataManager: ObservableObject {
         try modelContext.save()
     }
 
-    /// Delete a recipe.
-    ///
-    /// Idempotent, because with two devices "it isn't there" is a normal outcome rather than an
-    /// error: the other device deleted it and the import landed between this screen rendering
-    /// and the user confirming. The caller wanted it gone and it is gone — raising
-    /// `recipeNotFound` here only put "Recipe with ID <uuid> not found" in front of someone who
-    /// had just successfully deleted a recipe.
+    /// Delete a recipe. Idempotent: the caller wanted it gone, and if it already is, that is
+    /// not an error to show anyone.
     func deleteRecipe(id: UUID) throws {
         guard let recipe = try fetchRecipe(id: id) else { return }
 
@@ -220,11 +142,6 @@ class LocalDataManager: ObservableObject {
     }
 
     /// Deletes every recipe, preference, inventory and shopping-list row.
-    ///
-    /// Row by row through the context rather than a batch delete, so the deletions go through
-    /// the same path CloudKit mirroring exports from: the user's iCloud copy and their other
-    /// devices empty too. That is what "delete all my data" has to mean while sync is on —
-    /// otherwise the next import would quietly put everything back.
     func deleteAllData() throws {
         for recipe in try modelContext.fetch(FetchDescriptor<RecipeEntity>()) {
             modelContext.delete(recipe)
@@ -247,12 +164,12 @@ class LocalDataManager: ObservableObject {
 
     // MARK: - Kitchen Operations
 
-    /// The inventory, with any duplicate names collapsed.
+    /// The inventory, with any duplicate names collapsed: the oldest row wins, ties broken on
+    /// `id`.
     ///
-    /// Duplicates arrive the same way preference rows do: two devices each seed the default
-    /// staples before either has imported the other's, or the same item is added on both. The
-    /// oldest row wins, ties broken on `id`, so every device deletes the same losers and the
-    /// store converges instead of each device keeping its own copy.
+    /// Nothing written now makes duplicates — adding and importing both match by name — but a
+    /// store from the builds that synced through iCloud can hold them: two devices each seeded
+    /// the staples before either had the other's.
     func fetchPantryItems() throws -> [PantryItemEntity] {
         let items = try modelContext.fetch(FetchDescriptor<PantryItemEntity>())
         return try collapseDuplicates(items, name: \.name, createdAt: \.createdAt, id: \.id)
@@ -366,21 +283,12 @@ class LocalDataManager: ObservableObject {
 
     // MARK: - User Preferences Operations
 
-    /// Fetch user preferences (creates default if none exist)
+    /// The user's preferences, created with the defaults if there are none.
     ///
-    /// Preferences are meant to be a single row, and CloudKit gives no way to say so —
-    /// `@Attribute(.unique)` is rejected outright on a mirrored model. So duplicates are a
-    /// question of when, not if: every fresh device calls this before its first import lands,
-    /// finds nothing, and inserts its own defaults. Two devices, two rows, both synced.
-    ///
-    /// The old `preferences.first` on an unsorted fetch then picked between them arbitrarily,
-    /// which reads as settings that revert on their own — a saved speech rate showing up as the
-    /// default on the next launch, and back again after that.
-    ///
-    /// So collapse them here instead. The winner is the most recently updated row, ties broken
-    /// on `id` so the choice is total rather than merely mostly-ordered; every device sees the
-    /// same set once synced, computes the same winner, and deletes the same losers, so this
-    /// converges rather than each device fighting for its own copy.
+    /// One row, but a store from the builds that synced through iCloud can hold several: every
+    /// device inserted its own defaults before the other's arrived. Picking `.first` of an
+    /// unsorted fetch read as settings that revert on their own, so the most recently updated
+    /// row wins, ties broken on `id`, and the rest are deleted.
     func fetchPreferences() throws -> UserPreferencesEntity {
         let preferences = try modelContext.fetch(FetchDescriptor<UserPreferencesEntity>())
             // Sorted here rather than in the descriptor: the tie-break is `UUID`, which isn't
@@ -395,7 +303,7 @@ class LocalDataManager: ObservableObject {
         }
 
         if preferences.count > 1 {
-            Self.log.notice("Collapsing \(preferences.count - 1) duplicate preference rows merged in from another device")
+            Self.log.notice("Collapsing \(preferences.count - 1) duplicate preference rows")
             for duplicate in preferences.dropFirst() {
                 modelContext.delete(duplicate)
             }
@@ -408,6 +316,89 @@ class LocalDataManager: ObservableObject {
     func updatePreferences(voiceSettings: LocalVoiceSettings, llmProvider: LLMProvider) throws {
         try fetchPreferences().update(voiceSettings: voiceSettings, llmProvider: llmProvider)
         try modelContext.save()
+    }
+
+    // MARK: - Profile export and import
+
+    /// Everything in the store, as a profile file holds it. See ``ProfileBackup``.
+    func exportProfile(onDeviceModel: CookingModelChoice?) throws -> ProfileBackup {
+        let preferences = try fetchPreferences().toUserPreferences()
+        return ProfileBackup(
+            exportedAt: Date(),
+            recipes: try fetchAllRecipes().map { $0.toRecipe() },
+            pantry: try fetchPantryItems().map {
+                .init(name: $0.name, note: $0.note, isStaple: $0.isStaple, createdAt: $0.createdAt)
+            },
+            shoppingList: try fetchShoppingItems().map {
+                .init(name: $0.name, note: $0.note, isChecked: $0.isChecked,
+                      recipeTitle: $0.recipeTitle, createdAt: $0.createdAt)
+            },
+            settings: .init(
+                voiceSettings: preferences.voiceSettings,
+                llmProvider: preferences.llmProvider,
+                onDeviceModel: onDeviceModel
+            )
+        )
+    }
+
+    /// Merges a profile into the store, in one save, as ``ProfileBackup/importPlan`` describes.
+    /// Recipes keep the ids and dates they were exported with, so importing the same file again
+    /// adds nothing.
+    @discardableResult
+    func importProfile(_ backup: ProfileBackup) throws -> ProfileImportSummary {
+        let recipes = try fetchAllRecipes()
+        let plan = backup.importPlan(
+            existingRecipes: Dictionary(recipes.map { ($0.id, $0.updatedAt) }, uniquingKeysWith: max),
+            existingPantryNames: try fetchPantryItems().map(\.name),
+            existingShoppingNames: try fetchShoppingItems().map(\.name)
+        )
+
+        for recipe in plan.recipesToAdd {
+            modelContext.insert(RecipeEntity(
+                id: recipe.id, title: recipe.title, description: recipe.description,
+                servings: recipe.servings, prepTime: recipe.prepTime, cookTime: recipe.cookTime,
+                ingredients: recipe.ingredients, instructions: recipe.instructions, tags: recipe.tags,
+                sourceUrl: recipe.sourceUrl, cuisineType: recipe.cuisineType, difficulty: recipe.difficulty,
+                createdAt: recipe.createdAt, updatedAt: recipe.updatedAt
+            ))
+        }
+        for recipe in plan.recipesToUpdate {
+            guard let entity = recipes.first(where: { $0.id == recipe.id }) else { continue }
+            entity.update(from: RecipeData(
+                title: recipe.title, description: recipe.description, servings: recipe.servings,
+                prepTime: recipe.prepTime, cookTime: recipe.cookTime, ingredients: recipe.ingredients,
+                instructions: recipe.instructions, tags: recipe.tags, sourceUrl: recipe.sourceUrl,
+                cuisineType: recipe.cuisineType, difficulty: recipe.difficulty
+            ))
+            // The file's date, not now: it is the same edit, made elsewhere.
+            entity.updatedAt = recipe.updatedAt
+        }
+        for item in plan.pantryToAdd {
+            let entity = PantryItemEntity(name: item.name, note: item.note, isStaple: item.isStaple)
+            entity.createdAt = item.createdAt
+            modelContext.insert(entity)
+        }
+        for item in plan.shoppingToAdd {
+            let entity = ShoppingItemEntity(name: item.name, note: item.note, recipeTitle: item.recipeTitle)
+            entity.isChecked = item.isChecked
+            entity.createdAt = item.createdAt
+            modelContext.insert(entity)
+        }
+        try fetchPreferences().update(
+            voiceSettings: backup.settings.voiceSettings,
+            llmProvider: backup.settings.llmProvider
+        )
+
+        try modelContext.save()
+        Self.log.notice("Imported a profile: \(plan.recipesToAdd.count) recipes added, \(plan.recipesToUpdate.count) updated, \(plan.pantryToAdd.count) inventory and \(plan.shoppingToAdd.count) shopping items added")
+        storeDidChange.send()
+
+        return ProfileImportSummary(
+            recipesAdded: plan.recipesToAdd.count,
+            recipesUpdated: plan.recipesToUpdate.count,
+            pantryAdded: plan.pantryToAdd.count,
+            shoppingAdded: plan.shoppingToAdd.count
+        )
     }
 }
 
