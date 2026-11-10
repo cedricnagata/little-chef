@@ -246,6 +246,7 @@ class LLMService: ObservableObject {
         }
 
         // Unload any other model first — only one model in memory at a time
+        if modelContainers.keys.contains(where: { $0 != id }) { promptPrefixCache.reset() }
         for existingId in modelContainers.keys where existingId != id {
             dprint("🤖 [LLM] Unloading \(existingId) before loading \(id)")
             modelContainers.removeValue(forKey: existingId)
@@ -334,6 +335,8 @@ class LLMService: ObservableObject {
             modelContainers.removeAll()
         }
         loadedModelIds = Set(modelContainers.keys)
+        // Its arrays are the model's memory too, and belong to a model no longer loaded.
+        promptPrefixCache.reset()
         // Only if nothing is mid-load. Unloading one model while another is downloading used to
         // clear the download's own progress state, leaving Settings showing an idle row over a
         // transfer that was still running.
@@ -549,7 +552,8 @@ class LLMService: ObservableObject {
     ) async throws -> String {
         try await generate(
             messages: messages, temperature: temperature, maxTokens: maxTokens, tools: tools,
-            modelId: modelId, provider: provider, responseFormat: responseFormat, onChunk: nil
+            modelId: modelId, provider: provider, responseFormat: responseFormat,
+            promptCacheKey: nil, onChunk: nil
         )
     }
 
@@ -564,11 +568,13 @@ class LLMService: ObservableObject {
         modelId: String? = nil,
         provider: LLMProvider? = nil,
         responseFormat: ResponseFormat? = nil,
+        promptCacheKey: String? = nil,
         onChunk: @escaping (String) -> Void
     ) async throws -> String {
         try await generate(
             messages: messages, temperature: temperature, maxTokens: maxTokens, tools: tools,
-            modelId: modelId, provider: provider, responseFormat: responseFormat, onChunk: onChunk
+            modelId: modelId, provider: provider, responseFormat: responseFormat,
+            promptCacheKey: promptCacheKey, onChunk: onChunk
         )
     }
 
@@ -580,6 +586,7 @@ class LLMService: ObservableObject {
         modelId: String?,
         provider: LLMProvider?,
         responseFormat: ResponseFormat?,
+        promptCacheKey: String?,
         onChunk: ((String) -> Void)?
     ) async throws -> String {
         isGenerating = true
@@ -593,7 +600,7 @@ class LLMService: ObservableObject {
         }
         return try await generateOnDevice(
             messages: messages, tools: tools, temperature: temperature,
-            maxTokens: maxTokens, modelId: modelId, onChunk: onChunk
+            maxTokens: maxTokens, modelId: modelId, promptCacheKey: promptCacheKey, onChunk: onChunk
         )
     }
 
@@ -605,21 +612,21 @@ class LLMService: ObservableObject {
         temperature: Float?,
         maxTokens: Int?,
         modelId: String?,
+        promptCacheKey: String?,
         onChunk: ((String) -> Void)?
     ) async throws -> String {
         let container = try await downloadedModelContainer(modelId: modelId)
 
-        let userInput = UserInput(
-            chat: messages.map { message -> Chat.Message in
-                switch message.role {
-                case .system: return .system(message.content)
-                case .user: return .user(message.content)
-                case .assistant: return .assistant(message.content)
-                }
-            },
-            tools: tools?.nativeToolSpecs,
-            additionalContext: templateContext(for: modelId)
-        )
+        let chat = Self.chatMessages(messages)
+        let toolSpecs = tools?.nativeToolSpecs
+        let additionalContext = templateContext(for: modelId)
+        let userInput = UserInput(chat: chat, tools: toolSpecs, additionalContext: additionalContext)
+        let prefixCache = promptPrefixCache
+        // A cooking conversation keeps what the model has already read between questions; see
+        // `PromptPrefixCache`. Everything else is read from the start, and leaves it alone.
+        let cacheKey = messages.last?.role == .user
+            ? promptCacheKey.map { "\($0)|\(modelId ?? activeOnDeviceModel?.modelId ?? "")" }
+            : nil
 
         let stream: AsyncStream<Generation> = try await container.perform { (context: ModelContext) in
             let lmInput = try await context.processor.prepare(input: userInput)
@@ -636,7 +643,23 @@ class LLMService: ObservableObject {
             // the Mac at an 8.6k-token prompt, that cuts peak memory by 0.6 to 0.8 GiB for 5–10%
             // slower prefill, and `memoryNeeded` assumes it.
             parameters.prefill.stepSize = 128
-            return try MLXLMCommon.generate(input: lmInput, parameters: parameters, context: context)
+
+            guard let cacheKey else {
+                return try MLXLMCommon.generate(input: lmInput, parameters: parameters, context: context)
+            }
+            let prompt = lmInput.text.tokens.asArray(Int.self)
+            let placeholder = UserInput(
+                chat: chat.dropLast() + [.user(PromptPrefixCache.placeholderQuestion)],
+                tools: toolSpecs, additionalContext: additionalContext)
+            let placeholderPrompt = try await context.processor.prepare(input: placeholder).text.tokens.asArray(Int.self)
+            let prepared = try prefixCache.prepare(
+                prompt: prompt,
+                boundary: PromptPrefixCache.boundary(prompt: prompt, placeholderPrompt: placeholderPrompt),
+                key: cacheKey, model: context.model, parameters: parameters)
+            dprint("🤖 [LLM] prompt \(prompt.count) tokens, \(prefixCache.lastReusedTokenCount) already read, \(prepared.suffix.count) after the settled part")
+            return try MLXLMCommon.generate(
+                input: LMInput(tokens: MLXArray(prepared.suffix.map(Int32.init))),
+                cache: prepared.cache, parameters: parameters, context: context, tools: toolSpecs)
         }
 
         var output = ""
@@ -842,6 +865,57 @@ class LLMService: ObservableObject {
         guard output.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return output }
         return "I got caught repeating myself there, so I have stopped. "
              + "Have a look at the recipe and tell me what still needs changing."
+    }
+
+    /// The app's messages as mlx-swift-lm's.
+    private static func chatMessages(_ messages: [ChatMessage]) -> [Chat.Message] {
+        messages.map { message -> Chat.Message in
+            switch message.role {
+            case .system: return .system(message.content)
+            case .user: return .user(message.content)
+            case .assistant: return .assistant(message.content)
+            }
+        }
+    }
+
+    /// What the cooking assistant has already read, kept between questions. One at a time: a
+    /// new cook, another model or an unload starts it over. See `PromptPrefixCache`.
+    private let promptPrefixCache = PromptPrefixCache()
+
+    /// Reads a cook's system prompt and tools into the kept cache now, while the cook is
+    /// starting, so the first question reads only itself.
+    ///
+    /// Only for a model already in memory or on disk, like every on-device request: this must
+    /// never be what starts a download.
+    func prewarmPrompt(system: ChatMessage, tools: CookingTools?, promptCacheKey: String) async {
+        guard let model = activeOnDeviceModel else { return }
+        do {
+            let container = try await downloadedModelContainer(modelId: model.modelId)
+            let toolSpecs = tools?.nativeToolSpecs
+            let additionalContext = model.templateContext
+            let chat = Self.chatMessages([system])
+            let prefixCache = promptPrefixCache
+            let started = Date()
+            try await container.perform { (context: ModelContext) in
+                func tokens(_ question: String) async throws -> [Int] {
+                    try await context.processor.prepare(input: UserInput(
+                        chat: chat + [.user(question)], tools: toolSpecs, additionalContext: additionalContext
+                    )).text.tokens.asArray(Int.self)
+                }
+                // Two stand-in questions: where their renders part is where any real one begins.
+                let prompt = try await tokens("?")
+                let placeholderPrompt = try await tokens(PromptPrefixCache.placeholderQuestion)
+                var parameters = GenerateParameters()
+                parameters.prefill.stepSize = 128
+                _ = try prefixCache.prepare(
+                    prompt: prompt,
+                    boundary: PromptPrefixCache.boundary(prompt: prompt, placeholderPrompt: placeholderPrompt),
+                    key: "\(promptCacheKey)|\(model.modelId)", model: context.model, parameters: parameters)
+            }
+            dprint("🤖 [LLM] Read the cook's prompt ahead in \(String(format: "%.1f", Date().timeIntervalSince(started)))s")
+        } catch {
+            dprint("🤖 [LLM] ⚠️ Couldn't read the cook's prompt ahead: \(error.localizedDescription)")
+        }
     }
 
     /// The chat-template variables for the model a request will load.

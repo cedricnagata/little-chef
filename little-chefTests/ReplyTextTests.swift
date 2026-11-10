@@ -129,3 +129,39 @@ private func visible(_ chunks: [String]) -> String {
     #expect(TimerActionInference.action(for: "Timer 'pasta' created — say start when you're ready.") == nil)
     #expect(TimerActionInference.action(for: "Your timer is set for 10 minutes. Start it when ready.") == nil)
 }
+
+// MARK: - Spoken text
+
+@Test(arguments: [
+    ("Add 1 tbsp of olive oil.", "Add 1 tablespoon of olive oil."),
+    ("Use 2 tsp salt and 1/2 tsp pepper.", "Use 2 teaspoons salt and one half teaspoon pepper."),
+    ("1 1/2 cups of stock", "1 and a half cups of stock"),
+    ("1½ cups", "1 and a half cups"),
+    ("¾ cup sugar", "three quarters cup sugar"),
+    ("Bake at 350°F for 25 min.", "Bake at 350 degrees Fahrenheit for 25 minutes."),
+    ("Heat to 180 °C, about 1 hr.", "Heat to 180 degrees Celsius, about 1 hour."),
+    ("Preheat to 425F.", "Preheat to 425 degrees Fahrenheit."),
+    ("8 oz cheese and 2 lbs beef", "8 ounces cheese and 2 pounds beef"),
+    ("500g flour, 250 ml milk, 1 l water", "500 grams flour, 250 millilitres milk, 1 litre water"),
+    ("Add a tbsp of butter, e.g. salted.", "Add a tablespoon of butter, for example salted."),
+    ("Rest it 10 mins.", "Rest it 10 minutes."),
+])
+func expandsWhatSpeechCannotSay(text: String, spoken: String) {
+    #expect(SpokenText.forSpeech(text) == spoken)
+}
+
+@Test(arguments: [
+    "Give it a minute, then taste.",
+    "Use a large pan.",
+    "Season to taste.",
+    "Grate the cheese.",
+    "Serves 4.",
+])
+func leavesOrdinaryWordsAlone(text: String) {
+    #expect(SpokenText.forSpeech(text) == text)
+}
+
+@Test func dropsAnAbbreviationsStopOnlyMidSentence() {
+    #expect(SpokenText.forSpeech("Add 1 tbsp. of oil.") == "Add 1 tablespoon of oil.")
+    #expect(SpokenText.forSpeech("Simmer for 5 min. Then serve.") == "Simmer for 5 minutes. Then serve.")
+}

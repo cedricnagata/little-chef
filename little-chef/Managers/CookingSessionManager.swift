@@ -45,6 +45,10 @@ class CookingSessionManager: ObservableObject, TimerManager {
     /// session that no longer exists.
     private var warmUpTask: Task<Void, Never>?
 
+    /// Reading the cook's prompt into the on-device model ahead of the first question. See
+    /// `LocalCookingAgent.prewarm(recipe:)`.
+    private var promptPrewarmTask: Task<Void, Never>?
+
     /// Whether this session has already asked for a warm-up — tracked separately from
     /// `warmUpTask`, which is nil both before a warm-up and when there was nothing to warm.
     private var hasWarmedUp = false
@@ -113,6 +117,7 @@ class CookingSessionManager: ObservableObject, TimerManager {
         let provider = sessionProvider
         guard llmService.needsWarmUp(for: provider) else {
             isPreparingModel = false
+            prewarmPrompt()
             return
         }
         isPreparingModel = true
@@ -123,6 +128,7 @@ class CookingSessionManager: ObservableObject, TimerManager {
             await self.llmService.prepareSpeechForSession(provider: provider)
             guard !Task.isCancelled else { return }
             self.isPreparingModel = false
+            self.prewarmPrompt()
         }
     }
 
@@ -141,8 +147,18 @@ class CookingSessionManager: ObservableObject, TimerManager {
     }
     #endif
 
+    /// Once the model is up and the agent exists — whichever comes second — reads the cook's
+    /// instructions, tools and recipe in, so the first question reads only itself.
+    private func prewarmPrompt() {
+        guard let agent = cookingAgent, let session = currentSession else { return }
+        let recipe = createRecipeFromSession(session)
+        promptPrewarmTask?.cancel()
+        promptPrewarmTask = Task { await agent.prewarm(recipe: recipe) }
+    }
+
     func initAgentForSession() {
         cookingAgent = LocalCookingAgent(timerManager: self, recipeEditor: self, provider: sessionProvider)
+        if hasWarmedUp && !isPreparingModel { prewarmPrompt() }
         error = nil
         // The cook can be resumed onto this screen without going back through
         // `startCookingSession` — a warm-up that already finished is a no-op, one that never
@@ -162,6 +178,8 @@ class CookingSessionManager: ObservableObject, TimerManager {
     func endCookingSession() {
         warmUpTask?.cancel()
         warmUpTask = nil
+        promptPrewarmTask?.cancel()
+        promptPrewarmTask = nil
         hasWarmedUp = false
         isPreparingModel = false
         currentSession = nil

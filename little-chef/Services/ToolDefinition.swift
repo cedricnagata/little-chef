@@ -355,17 +355,20 @@ struct CookingTools {
         }
     }
 
-    /// Execute a tool by name with the given arguments
+    /// Execute a tool by name with the given arguments.
+    ///
+    /// The phone runs no tool loop: it executes the calls and returns `forUser` as the reply,
+    /// shown and spoken. So anything said only to steer the model belongs in `forModel` alone.
     @MainActor
     func execute(toolName: String, arguments: [String: Any]) -> ToolOutcome {
         if let outcome = executeRecipeTool(toolName: toolName, arguments: arguments) {
             return outcome
         }
-        return ToolOutcome(executeTimerTool(toolName: toolName, arguments: arguments))
+        return executeTimerTool(toolName: toolName, arguments: arguments)
     }
 
     @MainActor
-    private func executeTimerTool(toolName: String, arguments: [String: Any]) -> String {
+    private func executeTimerTool(toolName: String, arguments: [String: Any]) -> ToolOutcome {
         // `set_timer` and `pause_timer` are the names this tool set used to carry. Models copy
         // them out of their own training data and out of earlier turns in the transcript, and
         // the text-tool-call fallback parses whatever name it is handed, so both are mapped
@@ -373,83 +376,88 @@ struct CookingTools {
         switch toolName {
         case "create_timer", "set_timer":
             guard let name = string(arguments["name"]) else {
-                return "Error: missing 'name'"
+                return ToolOutcome("Error: missing 'name'")
             }
             let totalSeconds = duration(from: arguments)
             guard totalSeconds > 0 else {
-                return "Error: duration must be greater than 0"
+                return ToolOutcome("Error: duration must be greater than 0")
             }
             guard timerManager.createTimer(name: name, durationSeconds: totalSeconds) else {
-                return "A timer called '\(name)' already exists — update it instead of creating another."
+                return ToolOutcome("A timer called '\(name)' already exists — update it instead of creating another.")
             }
             if let created = timerManager.getTimer(name: name) {
                 loopGuard.recordCreation(id: created.id)
             }
-            return "Timer '\(name)' created for \(spoken(totalSeconds)). It is not running yet — "
-                 + "tell the user it is ready and wait for them to ask before starting it."
+            return ToolOutcome(
+                forModel: "Timer '\(name)' created for \(spoken(totalSeconds)). It is not running yet — "
+                    + "tell the user it is ready and wait for them to ask before starting it.",
+                forUser: "Timer '\(name)' is set for \(spoken(totalSeconds)). Say start when you're ready.")
 
         case "start_timer":
             guard let name = string(arguments["name"]) else {
-                return "Error: missing 'name'"
+                return ToolOutcome("Error: missing 'name'")
             }
             guard let timer = timerManager.getTimer(name: name) else {
-                return "No timer called '\(name)' exists. Create it first."
+                return ToolOutcome("No timer called '\(name)' exists. Create it first.")
             }
             guard !loopGuard.wasCreatedThisLoop(id: timer.id) else {
-                return "Timer '\(timer.label)' was only just created, so it cannot be started yet. "
-                     + "Tell the user it is set for \(spoken(timer.remainingSeconds)) and ask them "
-                     + "to say when to start it."
+                return ToolOutcome(
+                    forModel: "Timer '\(timer.label)' was only just created, so it cannot be started yet. "
+                        + "Tell the user it is set for \(spoken(timer.remainingSeconds)) and ask them "
+                        + "to say when to start it.",
+                    forUser: "Timer '\(timer.label)' is ready for \(spoken(timer.remainingSeconds)). "
+                        + "Say start when you want it running.")
             }
             guard timerManager.startTimer(name: name) else {
-                return "Timer '\(timer.label)' is already running."
+                return ToolOutcome("Timer '\(timer.label)' is already running.")
             }
-            return "Timer '\(timer.label)' started with \(spoken(timer.remainingSeconds)) to go."
+            return ToolOutcome("Timer '\(timer.label)' started with \(spoken(timer.remainingSeconds)) to go.")
 
         case "stop_timer", "pause_timer":
             guard let name = string(arguments["name"]) else {
-                return "Error: missing 'name'"
+                return ToolOutcome("Error: missing 'name'")
             }
             guard let timer = timerManager.getTimer(name: name) else {
-                return "No timer called '\(name)' exists."
+                return ToolOutcome("No timer called '\(name)' exists.")
             }
             guard timerManager.stopTimer(name: name) else {
-                return "Timer '\(timer.label)' was not running."
+                return ToolOutcome("Timer '\(timer.label)' was not running.")
             }
-            return "Timer '\(timer.label)' stopped with \(spoken(timer.remainingSeconds)) left."
+            return ToolOutcome("Timer '\(timer.label)' stopped with \(spoken(timer.remainingSeconds)) left.")
 
         case "update_timer":
             guard let name = string(arguments["name"]) else {
-                return "Error: missing 'name'"
+                return ToolOutcome("Error: missing 'name'")
             }
             guard timerManager.getTimer(name: name) != nil else {
-                return "No timer called '\(name)' exists. Create it first."
+                return ToolOutcome("No timer called '\(name)' exists. Create it first.")
             }
             let newName = string(arguments["new_name"]) ?? string(arguments["newName"])
             let totalSeconds = duration(from: arguments)
             let newDuration = totalSeconds > 0 ? totalSeconds : nil
             guard newName != nil || newDuration != nil else {
-                return "Error: give 'new_name', a new duration, or both"
+                return ToolOutcome("Error: give 'new_name', a new duration, or both")
             }
             timerManager.updateTimer(name: name, newName: newName, durationSeconds: newDuration)
             guard let updated = timerManager.getTimer(name: newName ?? name) else {
-                return "Timer updated."
+                return ToolOutcome("Timer updated.")
             }
             var changes: [String] = []
             if newName != nil { changes.append("renamed to '\(updated.label)'") }
             if let newDuration { changes.append("set to \(spoken(newDuration))") }
-            return "Timer '\(name)' \(changes.joined(separator: " and "))."
+            return ToolOutcome("Timer '\(name)' \(changes.joined(separator: " and ")).")
 
         case "delete_timer":
             guard let name = string(arguments["name"]) else {
-                return "Error: missing 'name'"
+                return ToolOutcome("Error: missing 'name'")
             }
             guard timerManager.deleteTimer(name: name) else {
-                return "No timer called '\(name)' exists."
+                return ToolOutcome("No timer called '\(name)' exists.")
             }
-            return "Timer '\(name)' deleted."
+            return ToolOutcome("Timer '\(name)' deleted.")
 
         default:
-            return "Unknown tool: \(toolName)"
+            return ToolOutcome("Unknown tool: \(toolName)")
         }
     }
 

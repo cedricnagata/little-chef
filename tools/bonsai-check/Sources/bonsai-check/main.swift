@@ -77,6 +77,125 @@ func run(_ container: ModelContainer, messages: [Chat.Message], tools: [ToolSpec
     return (text, calls, info)
 }
 
+/// A cook as the app runs one: its instructions, all 12 tools and a recipe, then a few
+/// questions, each asked with the conversation so far. Run twice — reading every prompt from the
+/// start, as the app did, and with `PromptPrefixCache`, as it does now — timing each question to
+/// its first word.
+func conversation(_ container: ModelContainer, id: String) async throws {
+    let recipe = """
+        Recipe: Creamy Tuscan Chicken
+        Seared chicken in a garlic, sun-dried tomato and spinach cream sauce.
+        Servings: 4 | Prep: 10 minutes | Cook: 25 minutes
+
+        Ingredients:
+        - 4 boneless chicken thighs
+        - 1 tsp salt
+        - 1/2 tsp black pepper
+        - 2 tbsp olive oil
+        - 4 cloves garlic, minced
+        - 1/2 cup sun-dried tomatoes, chopped
+        - 1 cup heavy cream
+        - 1/2 cup chicken stock
+        - 1/2 cup grated parmesan
+        - 2 cups baby spinach
+        - 1 tsp Italian seasoning
+
+        Steps:
+        1. Season the chicken on both sides with the salt and pepper.
+        2. Heat the olive oil in a large skillet over medium-high heat. Sear the chicken 5-6 minutes a side until golden and cooked through, then set it aside.
+        3. Lower the heat to medium. Add the garlic and sun-dried tomatoes and cook for 1 minute.
+        4. Pour in the cream and stock, add the Italian seasoning, and bring to a gentle simmer.
+        5. Stir in the parmesan until melted, then the spinach until it wilts.
+        6. Return the chicken to the pan and simmer 5 minutes, spooning the sauce over it.
+        """
+    let systemText = system + "\n\n" + recipe
+    let questions = [
+        "How long do I sear the chicken for?",
+        "Can I use half-and-half instead of heavy cream?",
+        "Make a timer called chicken for 6 minutes.",
+        "What do I do after the spinach wilts?",
+    ]
+    let prefixCache = PromptPrefixCache()
+    let key = "check|\(id)"
+
+    for cached in [false, true] {
+        prefixCache.reset()
+        if cached {
+            let started = Date()
+            try await container.perform { (context: ModelContext) in
+                func tokens(_ q: String) async throws -> [Int] {
+                    try await context.processor.prepare(input: UserInput(
+                        chat: [.system(systemText), .user(q)], tools: toolSpecs,
+                        additionalContext: ["enable_thinking": false])).text.tokens.asArray(Int.self)
+                }
+                let prompt = try await tokens("?")
+                let placeholder = try await tokens(PromptPrefixCache.placeholderQuestion)
+                var parameters = GenerateParameters()
+                parameters.prefill.stepSize = prefillStep
+                _ = try prefixCache.prepare(
+                    prompt: prompt, boundary: PromptPrefixCache.boundary(prompt: prompt, placeholderPrompt: placeholder),
+                    key: key, model: context.model, parameters: parameters)
+            }
+            print(String(format: "  read ahead at the cook's start: %.1fs", Date().timeIntervalSince(started)))
+        }
+        var history: [Chat.Message] = [.system(systemText)]
+        var firstWords: [Double] = []
+        for question in questions {
+            let earlier = history
+            let chat = earlier + [.user(question)]
+            let started = Date()
+            var firstWord: Double?
+            var reply = "", calls: [String] = []
+            let (stream, promptCount, reused) = try await container.perform { (context: ModelContext) in
+                nonisolated(unsafe) let input = UserInput(chat: chat, tools: toolSpecs, additionalContext: ["enable_thinking": false])
+                let lmInput = try await context.processor.prepare(input: input)
+                var parameters = GenerateParameters(maxTokens: 120, temperature: 0.7)
+                parameters.topP = 0.8
+                parameters.topK = 20
+                parameters.prefill.stepSize = prefillStep
+                let promptCount = lmInput.text.tokens.size
+                guard cached else {
+                    return (try MLXLMCommon.generate(input: lmInput, parameters: parameters, context: context), promptCount, 0)
+                }
+                let prompt = lmInput.text.tokens.asArray(Int.self)
+                nonisolated(unsafe) let placeholderInput = UserInput(
+                    chat: earlier + [.user(PromptPrefixCache.placeholderQuestion)], tools: toolSpecs,
+                    additionalContext: ["enable_thinking": false])
+                let placeholder = try await context.processor.prepare(input: placeholderInput).text.tokens.asArray(Int.self)
+                let prepared = try prefixCache.prepare(
+                    prompt: prompt, boundary: PromptPrefixCache.boundary(prompt: prompt, placeholderPrompt: placeholder),
+                    key: key, model: context.model, parameters: parameters)
+                return (try MLXLMCommon.generate(
+                    input: LMInput(tokens: MLXArray(prepared.suffix.map(Int32.init))),
+                    cache: prepared.cache, parameters: parameters, context: context, tools: toolSpecs),
+                        promptCount, prefixCache.lastReusedTokenCount)
+            }
+            for await generation in stream {
+                switch generation {
+                case .chunk(let chunk):
+                    if firstWord == nil, !chunk.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                        firstWord = Date().timeIntervalSince(started)
+                    }
+                    reply += chunk
+                case .toolCall(let call):
+                    if firstWord == nil { firstWord = Date().timeIntervalSince(started) }
+                    calls.append(call.function.name)
+                default: break
+                }
+            }
+            let wait = firstWord ?? Date().timeIntervalSince(started)
+            firstWords.append(wait)
+            let shown = reply.trimmingCharacters(in: .whitespacesAndNewlines).replacingOccurrences(of: "\n", with: " ")
+            print(String(format: "  %@ %5.2fs to first word, prompt %d tokens, %d already read | %@%@",
+                         cached ? "[kept]" : "[full]", wait, promptCount, reused,
+                         calls.isEmpty ? "" : "calls \(calls.joined(separator: ",")) | ", String(shown.prefix(90))))
+            history = chat + [.assistant(reply)]
+        }
+        print(String(format: "  %@ average %.2fs to first word", cached ? "[kept]" : "[full]",
+                     firstWords.reduce(0, +) / Double(firstWords.count)))
+    }
+}
+
 let ids = CommandLine.arguments.count > 1
     ? Array(CommandLine.arguments.dropFirst())
     : CookingModelChoice.allCases.reversed().map(\.modelId)
@@ -118,6 +237,14 @@ for id in ids {
             failures += 1
             print("[FAIL] \(probe.name): \(error)")
         }
+    }
+
+    print("conversation, reading every prompt from the start vs keeping what was read:")
+    do {
+        try await conversation(container, id: id)
+    } catch {
+        failures += 1
+        print("[FAIL] conversation: \(error)")
     }
 
     // Peak memory by prompt length: a cooking question with a recipe (~1k tokens), a recipe

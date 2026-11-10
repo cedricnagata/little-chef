@@ -547,7 +547,7 @@ final class VoiceAssistant: NSObject, ObservableObject {
             do {
                 try await bigBroPlayer.play(
                     llmService.bigBroClient.speak(
-                        sentence,
+                        SpokenText.forSpeech(sentence),
                         voice: voiceSettings.bigBroVoice,
                         speed: macSpeed()
                     )
