@@ -661,9 +661,11 @@ it should produce: questions that must not edit, changes that must be recorded, 
 kitchen line, the shopping list, and writing a recipe from nothing. Each runs `EVAL_RUNS` times
 (default 3) at the app's sampling. Run it before and after changing the prompt or the tools.
 
-With the twelve tools (2026-11-10): 9B 94%, 4B 90%. The 4B's misses were "hold the chicken timer
-while I flip it" (it kept the timer running) and reading "how much longer on the chicken?" as
-cooking time; the second is now answered without the model when there's a chicken timer.
+As shipped (2026-11-10, the twelve tools plus `add_to_shopping_list`): 9B 75/75, 4B 70/75. The
+4B's misses: "hold the chicken timer while I flip it" (kept it running), "how much longer on the
+chicken?" read as cooking time (in the app, answered without the model when there's a chicken
+timer), steps written as the reply instead of recorded, and one question that recorded an
+ingredient.
 
 ## Ingredient scaling
 
