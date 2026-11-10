@@ -1,5 +1,6 @@
 import Foundation
 import MLX
+import MLXLLM
 import MLXLMCommon
 
 // `bonsai-check eval [model...]`: the cooking assistant's scripted test set. Each case is one
@@ -116,8 +117,13 @@ func blankRecipe(ingredients: [String] = []) -> Recipe {
            difficulty: nil, createdAt: Date(), updatedAt: Date())
 }
 
-let pastaWaiting = [LocalTimer(label: "pasta", remainingSeconds: 540, status: .new)]
-let chickenRunning = [LocalTimer(label: "chicken", remainingSeconds: 200, status: .running)]
+func makeTimer(_ label: String, seconds: Int, _ status: TimerStatusType) -> LocalTimer {
+    LocalTimer(id: UUID().uuidString, label: label, durationSeconds: seconds, remainingSeconds: seconds,
+               status: status, createdAt: Date())
+}
+
+let pastaWaiting = [makeTimer("pasta", seconds: 540, .new)]
+let chickenRunning = [makeTimer("chicken", seconds: 200, .running)]
 let pastaCreated = [("Set a timer for the pasta, 9 minutes.", "Timer 'pasta' is set for 9 minutes. Say start when you're ready.")]
 
 let evalCases: [EvalCase] = [

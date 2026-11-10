@@ -17,7 +17,8 @@ private final class Timers: TimerManager {
 
     func createTimer(name: String, durationSeconds: Int) -> Bool {
         guard getTimer(name: name) == nil else { return false }
-        timers.append(LocalTimer(label: name, remainingSeconds: durationSeconds))
+        timers.append(LocalTimer(id: UUID().uuidString, label: name, durationSeconds: durationSeconds,
+                                 remainingSeconds: durationSeconds, status: .new, createdAt: Date()))
         return true
     }
     func startTimer(name: String) -> Bool {
@@ -216,7 +217,10 @@ struct CookingCommandTests {
 
     private func timers(_ pairs: (String, TimerStatusType)...) -> Timers {
         let timers = Timers()
-        timers.timers = pairs.map { LocalTimer(label: $0.0, remainingSeconds: 270, status: $0.1) }
+        timers.timers = pairs.map {
+            LocalTimer(id: UUID().uuidString, label: $0.0, durationSeconds: 270, remainingSeconds: 270,
+                       status: $0.1, createdAt: Date())
+        }
         return timers
     }
 
