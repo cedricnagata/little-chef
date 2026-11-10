@@ -44,6 +44,7 @@ let probes: [Probe] = [
 
 let toolSpecs = (CookingTools.timerToolSpecs + CookingTools.recipeToolSpecs).map(\.mlxToolSpec)
 
+
 /// `BONSAI_PREFILL_STEP=256` sets how many prompt tokens are processed at once (mlx-swift-lm's
 /// default is 512). The step decides most of the peak memory beyond the weights.
 let prefillStep = ProcessInfo.processInfo.environment["BONSAI_PREFILL_STEP"].flatMap(Int.init) ?? 128
@@ -77,7 +78,7 @@ func run(_ container: ModelContainer, messages: [Chat.Message], tools: [ToolSpec
     return (text, calls, info)
 }
 
-/// A cook as the app runs one: its instructions, all 12 tools and a recipe, then a few
+/// A cook as the app runs one: its instructions, the cooking tools and a recipe, then a few
 /// questions, each asked with the conversation so far. Run twice — reading every prompt from the
 /// start, as the app did, and with `PromptPrefixCache`, as it does now — timing each question to
 /// its first word.
@@ -196,9 +197,15 @@ func conversation(_ container: ModelContainer, id: String) async throws {
     }
 }
 
-let ids = CommandLine.arguments.count > 1
-    ? Array(CommandLine.arguments.dropFirst())
-    : CookingModelChoice.allCases.reversed().map(\.modelId)
+// `bonsai-check eval [model...]` runs the cooking test set instead (Eval.swift).
+var arguments = Array(CommandLine.arguments.dropFirst())
+let evalMode = arguments.first == "eval"
+if evalMode { arguments.removeFirst() }
+let ids = arguments.isEmpty ? CookingModelChoice.allCases.reversed().map(\.modelId) : arguments
+if evalMode {
+    let passed = await runEval(ids: ids)
+    exit(passed ? 0 : 1)
+}
 
 var failures = 0
 for id in ids {

@@ -10,13 +10,18 @@ enum TimerStatusType: String, Codable {
 final class LocalTimer: Identifiable {
     let id: String
     var label: String
+    var durationSeconds: Int
     var remainingSeconds: Int
     var status: TimerStatusType
+    let createdAt: Date
 
-    init(id: String = UUID().uuidString, label: String, remainingSeconds: Int, status: TimerStatusType = .new) {
+    // The app's initializer exactly, with no defaults, so a call that builds here builds in Xcode.
+    init(id: String, label: String, durationSeconds: Int, remainingSeconds: Int, status: TimerStatusType, createdAt: Date) {
         self.id = id
         self.label = label
+        self.durationSeconds = durationSeconds
         self.remainingSeconds = remainingSeconds
         self.status = status
+        self.createdAt = createdAt
     }
 }

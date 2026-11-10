@@ -558,7 +558,12 @@ first word.
 
 ### What the prompt holds
 
-`LocalCookingAgent.buildSystemMessage` holds a rule only where nothing else does its job.
+`CookingPrompt` builds it (Foundation only, so the Linux tests and `bonsai-check eval` use the
+app's own prompt), and holds a rule only where nothing else does its job.
+
+- **Replies are short:** "one to three short sentences unless they ask for more detail", and
+  `LocalCookingAgent` caps a cooking reply at 512 tokens, room for a tool call that records a
+  whole method.
 
 - **The speech rules are BigBro only.** The phone's voices get every sentence through
   `SpokenText.forSpeech`, in `OnDeviceSpeaker.speak` and before `bigBroClient.speak` in
@@ -567,6 +572,10 @@ first word.
   pass, so the Mac still gets the rules.
 - **There is no timer paragraph.** "Created, not started" is in `create_timer`'s description and
   its result, and `ToolLoopGuard` refuses a start in the same turn.
+- **The kitchen is one line**, worked out in code when the cook starts: "the user's inventory
+  doesn't have heavy cream and shallots. It has everything else." (`IngredientMatcher`, as the
+  missing-ingredients check). Nothing when the user keeps no inventory. A tool to look things up
+  would have cost a model turn per question, since the phone runs no tool loop.
 - **The tool-result rules are BigBro only.** "Trust the result over the recipe below" and "don't
   send it again" are about reading results, which only the Mac's loop does. The phone gets "one
   call per tool".
@@ -578,8 +587,9 @@ first word.
 
 `LLMService` keeps the model's cache for the settled part of one cooking conversation, everything
 before the newest question, and feeds a question only what came after. A cook's agent passes a
-`promptCacheKey`. Recipe import and the Suggested ranking pass none, so they are read from the
-start and leave the kept cache alone.
+`promptCacheKey`, the same for every cook (`LocalCookingAgent.promptCacheKey`). Recipe import and
+the Suggested ranking pass none, so they are read from the start and leave the kept cache alone.
+The key needs no cook in it: only a prompt that starts with exactly the kept tokens reuses them.
 
 - **The copy is kept at the boundary, before the newest question.** Bonsai 2's linear-attention
   layers keep a running state that can't be rewound, so a cache can only be extended. Next turn's
@@ -591,12 +601,16 @@ start and leave the kept cache alone.
   begins. A placeholder rather than leaving the question out, because Qwen3.5's template refuses
   a conversation with no user message.
 - **What starts it over:**
-  - another cook (a new key), another model, or an unload;
+  - another model, or an unload;
   - a prompt that doesn't start with the kept tokens: the recipe edited mid-cook, or history
     dropping off the front;
   - the history window (20 messages), which moves 8 at a time so the second case is rare.
-- **The cook's prompt is read ahead** (`LocalCookingAgent.prewarm`, from `CookingSessionManager`
-  once both the model and the agent exist). The first question then reads only itself.
+- **The cook's prompt is read ahead, while the recipe is open.** `RecipeDetailView` calls
+  `CookingSessionManager.readAhead(for:)`, which after 1.5 seconds on the page loads the model and
+  reads in the prompt that recipe's cook will build. Leaving the page during the wait reads
+  nothing; once started it runs to the end, since leaving the page is usually the cook starting.
+  The cook's own read-ahead (`LocalCookingAgent.prewarm`, once the model and the agent exist)
+  then finds it all there. A cook started some other way still reads ahead at its start.
 - **Memory:** the kept copy and the working cache exist side by side while a reply generates.
   At 2k tokens that is about 0.1 GiB on the 9B, inside the 0.5 GiB the thresholds leave for the
   app.
@@ -609,6 +623,49 @@ start and leave the kept cache alone.
   | 4B | 2.63s | 0.22s | 2.5s |
 
   A phone is several times slower than the Mac on both.
+
+## The cooking tools
+
+Twelve recipe and timer tools, one per action (`create_timer`, `start_timer`...,
+`add_ingredients`, `update_ingredients`, `remove_steps`...), plus `add_to_shopping_list` when the
+cook has a kitchen. Their definitions are about 1,800 tokens, the largest part of the prompt.
+
+**Merging them was tried and measured worse** (2026-11-10, `bonsai-check eval`, 3 runs a case):
+five tools (`timer` with an action; `edit_ingredients` and `edit_steps`, each with add, change
+and remove) cut the prompt from about 2,220 tokens to 1,660, and took the 9B from 94% to 75% and
+the 4B from 90% to 83%. The 9B mostly said "I've removed the parmesan" and called nothing. Since
+the prompt is read ahead while the recipe is open, 560 tokens buys almost no speed, so the one
+tool per action stays. Re-measure before trying again.
+
+## Commands answered without the model
+
+`CookingCommand` answers the commonest things said mid-cook in code, before the model is asked,
+from `CookingSessionManager.sendQueryStreaming` (typed and spoken alike): timer create, start,
+stop and cancel; "how long is left"; "repeat that"; "what's step 3"; "how much salt". Timer
+commands go through `CookingTools.execute`, so the wording and rules (created stopped) are the
+model's. The turn is added to the conversation like any other.
+
+It is deliberately strict: a pattern has to match everything said, and anything that could mean
+two things goes to the model. Bare "stop" and "cancel" are never timer commands (they as often
+mean the voice or the alarm); bare "start" is, because the create reply says to say it. A timer is
+found by its label, or the one label containing the name said, never a label merely mentioned in
+a longer phrase ("stop the chicken from sticking"). There is no "next step": the app doesn't
+know which step the cook is on.
+
+## The cooking test set
+
+`swift run -c release bonsai-check eval [model...]` in `tools/bonsai-check`, on the Mac (put it
+on `caffeinate -i`: a Mac that sleeps mid-run inflates the timings, not the scores). 25 cases, each
+one question in a cook asked with the app's prompt and tools, checked for the tool call or answer
+it should produce: questions that must not edit, changes that must be recorded, timers, the
+kitchen line, the shopping list, and writing a recipe from nothing. Each runs `EVAL_RUNS` times
+(default 3) at the app's sampling. Run it before and after changing the prompt or the tools.
+
+As shipped (2026-11-10, the twelve tools plus `add_to_shopping_list`): 9B 75/75, 4B 70/75. The
+4B's misses: "hold the chicken timer while I flip it" (kept it running), "how much longer on the
+chicken?" read as cooking time (in the app, answered without the model when there's a chicken
+timer), steps written as the reply instead of recorded, and one question that recorded an
+ingredient.
 
 ## Ingredient scaling
 

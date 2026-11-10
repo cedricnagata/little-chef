@@ -96,6 +96,15 @@ protocol RecipeEditing {
     ) -> [String]
 }
 
+// MARK: - Shopping List Protocol
+
+/// The user's shopping list, for the assistant to add to while they cook.
+@MainActor
+protocol ShoppingListWriting {
+    /// Adds each name the list doesn't already have. Returns the ones that were new.
+    func addShoppingItems(_ names: [String]) -> [String]
+}
+
 // MARK: - Tool specs
 
 /// One tool, in the one place both backends read it from.
@@ -176,11 +185,14 @@ struct CookingTools {
     /// The session's recipe, when this cook has one to edit. Nil leaves the recipe tools off the
     /// list entirely rather than offering tools that would answer every call with a refusal.
     let recipeEditor: RecipeEditing?
+    /// The user's shopping list. Nil leaves `add_to_shopping_list` off the list.
+    let shoppingList: ShoppingListWriting?
     private let loopGuard: ToolLoopGuard
 
-    init(timerManager: TimerManager, recipeEditor: RecipeEditing? = nil) {
+    init(timerManager: TimerManager, recipeEditor: RecipeEditing? = nil, shoppingList: ShoppingListWriting? = nil) {
         self.timerManager = timerManager
         self.recipeEditor = recipeEditor
+        self.shoppingList = shoppingList
         self.loopGuard = ToolLoopGuard()
     }
 
@@ -194,8 +206,15 @@ struct CookingTools {
     func beginToolLoop() { loopGuard.beginLoop() }
 
     /// Every tool this session offers, backend-agnostic.
+    ///
+    /// One tool per action, deliberately: merging them into five (`timer` with an action,
+    /// `edit_ingredients` with add, change and remove) cut 560 tokens from the prompt and took the
+    /// 9B from 94% to 75% on `bonsai-check eval`. See CLAUDE.md, "The cooking tools".
     var toolSpecs: [CookingToolSpec] {
-        recipeEditor == nil ? Self.timerToolSpecs : Self.timerToolSpecs + Self.recipeToolSpecs
+        var specs = Self.timerToolSpecs
+        if recipeEditor != nil { specs += Self.recipeToolSpecs }
+        if shoppingList != nil { specs.append(Self.shoppingToolSpec) }
+        return specs
     }
 
     /// Native MLX tool specs for passing to UserInput
@@ -328,6 +347,16 @@ struct CookingTools {
         ),
     ]
 
+    // MARK: - Shopping list tool
+
+    static let shoppingToolSpec = CookingToolSpec(
+        name: "add_to_shopping_list",
+        description: "Put things on the user's shopping list. Only when the user asks you to add something, never because an ingredient is missing.",
+        parameters: [
+            .init(name: "items", type: "string", description: "What to buy, one per line, as plain names: 'shallots\nheavy cream'", isRequired: true)
+        ]
+    )
+
     /// What a tool call produced, told twice — because a tool result has two possible audiences
     /// and they want different things.
     ///
@@ -361,10 +390,28 @@ struct CookingTools {
     /// shown and spoken. So anything said only to steer the model belongs in `forModel` alone.
     @MainActor
     func execute(toolName: String, arguments: [String: Any]) -> ToolOutcome {
+        if toolName == "add_to_shopping_list" {
+            return executeShoppingList(arguments: arguments)
+        }
         if let outcome = executeRecipeTool(toolName: toolName, arguments: arguments) {
             return outcome
         }
         return executeTimerTool(toolName: toolName, arguments: arguments)
+    }
+
+    @MainActor
+    private func executeShoppingList(arguments: [String: Any]) -> ToolOutcome {
+        guard let shoppingList else { return ToolOutcome("There is no shopping list to add to.") }
+        let items = lines(from: arguments, keys: ["items", "item", "names", "name", "ingredients"])
+        guard !items.isEmpty else { return ToolOutcome("Error: missing 'items'") }
+        let added = shoppingList.addShoppingItems(items)
+        let alreadyThere = items.filter { item in !added.contains { $0.caseInsensitiveCompare(item) == .orderedSame } }
+        var sentences: [String] = []
+        if !added.isEmpty { sentences.append("Added \(CookingPrompt.list(added)) to your shopping list.") }
+        if !alreadyThere.isEmpty {
+            sentences.append("\(CookingPrompt.list(alreadyThere)) \(alreadyThere.count == 1 ? "was" : "were") already on it.")
+        }
+        return ToolOutcome(sentences.joined(separator: " "))
     }
 
     @MainActor
