@@ -15,7 +15,7 @@ import Foundation
 ///  - The phone's voices get the text through `SpokenText`, which writes out "tbsp", "350°F" and
 ///    "1/2" itself. Hands-free on the Mac speaks the Mac's own text with no such pass, so BigBro
 ///    still gets the rules spelled out.
-///  - Timers: "created, not started" is in the timer tool's description and its result, and
+///  - Timers: "created, not started" is in create_timer's description and its result, and
 ///    `ToolLoopGuard` refuses a start in the same turn.
 struct CookingPrompt {
     /// What the assistant may do to the recipe.
@@ -135,8 +135,8 @@ struct CookingPrompt {
 
 
                 This cook started without a recipe: you are writing it down as the two of you go. \
-                Whenever the user names things they are using, record them with edit_ingredients. \
-                Whenever they describe what they did, record it with edit_steps, in the order it \
+                Whenever the user names things they are using, record them with add_ingredients. \
+                Whenever they describe what they did, record it with add_steps, in the order it \
                 happened. Use set_recipe_details to name the dish once you know what it is, and \
                 to fill in servings or times when the user mentions them. Record only what the \
                 user actually says they used or did — never your own suggestions, and never a \
@@ -149,8 +149,9 @@ struct CookingPrompt {
 
                 The user may cook the recipe differently from how it reads. When they tell you they \
                 changed something — a different amount, an extra ingredient, a step they skipped or \
-                did another way — record it with edit_ingredients or edit_steps. Only record what \
-                the user actually did or asked you to change; never edit the recipe to match a \
+                did another way — record it with update_ingredients, add_ingredients, \
+                remove_ingredients, update_steps, add_steps or remove_steps. Only record what the \
+                user actually did or asked you to change; never edit the recipe to match a \
                 suggestion of your own, and never edit it because they asked a question about it. \
                 Nothing you record is saved — they are shown every change when the cook ends and \
                 choose then whether to keep it — so do not tell them the recipe has been updated \
@@ -174,7 +175,7 @@ struct CookingPrompt {
 
 
             Record everything from one message in a single call per tool: every ingredient in one \
-            edit_ingredients call, one per line, and every step in one edit_steps call. Never call \
+            add_ingredients call, one per line, and every step in one add_steps call. Never call \
             the same tool twice in a row. Each result ends with the list as it now stands — trust \
             that over the recipe printed below, which is a snapshot from before your edits. When a \
             result says a line was already there, it is recorded and there is nothing left to do: \

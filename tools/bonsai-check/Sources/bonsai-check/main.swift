@@ -27,10 +27,10 @@ let probes: [Probe] = [
           check: { text, calls in calls.isEmpty && text.count > 20 && !text.contains("<think>") }),
     Probe(name: "timer tool", prompt: "Make a timer called pasta for 9 minutes.",
           tools: true, temperature: 0.7, maxTokens: 200,
-          check: { _, calls in calls.contains { $0.hasPrefix("timer(") && $0.contains("action=create") } }),
+          check: { _, calls in calls.contains { $0.hasPrefix("create_timer") } }),
     Probe(name: "recipe tool", prompt: "Swap the butter for 2 tbsp olive oil in the recipe.",
           tools: true, temperature: 0.7, maxTokens: 300,
-          check: { _, calls in calls.contains { $0.hasPrefix("edit_ingredients(") && $0.contains("change=") } }),
+          check: { _, calls in calls.contains { $0.hasPrefix("update_ingredients") } }),
     Probe(name: "JSON", prompt: """
         Return only a JSON object with keys "title" (string), "servings" (integer) and \
         "ingredients" (array of strings) for this recipe: Scrambled eggs for two. Whisk 4 eggs \

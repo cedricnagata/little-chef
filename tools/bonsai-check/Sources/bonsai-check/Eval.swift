@@ -8,9 +8,8 @@ import MLXLMCommon
 // for the tool call or answer it should produce. Every case runs `EVAL_RUNS` times (default 3,
 // at the app's temperature), so a score is a rate rather than one lucky draw.
 //
-// `EVAL_TOOLS=merged` scores the tools the app has now, `legacy` build 65's twelve, and `both`
-// (the default) one after the other, so a change to the tools or the prompt can be compared on
-// the same questions.
+// Run it before and after a change to the prompt or the tools, and compare. It measured merging
+// the twelve tools into five as worse (CLAUDE.md, "The cooking tools"); `ops` still reads both.
 
 /// One thing a reply did, whatever the tool set called it: "timer.create", "ingredients.add",
 /// "steps.change", "details", "shopping.add".
@@ -35,8 +34,6 @@ struct EvalCase {
     var kitchen: CookingPrompt.Kitchen? = .init(missing: ["Heavy cream", "Sun-dried tomatoes"])
     var history: [(String, String)] = []
     var timers: [LocalTimer] = []
-    /// Needs `add_to_shopping_list`, which build 65 didn't have.
-    var mergedOnly = false
     let question: String
     /// Nil when the reply passes, otherwise why it didn't.
     let check: (Reply) -> String?
@@ -54,6 +51,17 @@ func expect(_ kind: String, containing words: [String] = [], count: Int? = nil) 
         let text = lowered(matching.map(\.text).joined(separator: "\n"))
         let missing = words.filter { !text.contains($0) }
         return missing.isEmpty ? nil : "\(kind) lacks \(missing)"
+    }
+}
+
+/// A changed line, as a change or as removing the old line and adding the new one: `RecipeDiff`
+/// shows the user the same thing either way.
+func changed(_ section: String, to words: [String]) -> (Reply) -> String? {
+    { reply in
+        if expect("\(section).change", containing: words)(reply) == nil { return nil }
+        let swapped = reply.ops.contains { $0.kind == "\(section).remove" }
+            && expect("\(section).add", containing: words)(reply) == nil
+        return swapped ? nil : "no \(section).change (or remove and add) with \(words)"
     }
 }
 
@@ -143,9 +151,9 @@ let evalCases: [EvalCase] = [
 
     // Changes the cook made: recorded.
     EvalCase(name: "swap made", question: "I'm using half-and-half instead of the heavy cream.",
-             check: expect("ingredients.change", containing: ["half"])),
+             check: changed("ingredients", to: ["half"])),
     EvalCase(name: "amount made", question: "I only had 2 cloves of garlic, so I used those.",
-             check: expect("ingredients.change", containing: ["2"])),
+             check: changed("ingredients", to: ["2"])),
     EvalCase(name: "extra", question: "I added a pinch of chili flakes with the garlic.",
              check: expect("ingredients.add", containing: ["chili"])),
     EvalCase(name: "batch", question: "I also threw in 1 tsp cumin, 1 tsp smoked paprika and a squeeze of lemon.",
@@ -153,7 +161,7 @@ let evalCases: [EvalCase] = [
     EvalCase(name: "left out", question: "I left out the parmesan.",
              check: expect("ingredients.remove", containing: ["parmesan"])),
     EvalCase(name: "step made", question: "I seared it for 8 minutes a side instead.",
-             check: expect("steps.change", containing: ["8"])),
+             check: changed("steps", to: ["8"])),
     EvalCase(name: "servings", question: "Can you scale this down to 2 servings?",
              check: expect("details", containing: ["servings=2"])),
 
@@ -175,7 +183,7 @@ let evalCases: [EvalCase] = [
     // The kitchen.
     EvalCase(name: "have everything", question: "Do I have everything I need?",
              check: all(noEdits, says(["cream", "tomato"]))),
-    EvalCase(name: "shopping", mergedOnly: true, question: "Put the heavy cream on my shopping list.",
+    EvalCase(name: "shopping", question: "Put the heavy cream on my shopping list.",
              check: all(expect("shopping.add", containing: ["cream"]),
                         { $0.ops.contains { $0.kind.hasPrefix("ingredients.") } ? "edited the recipe" : nil })),
 
@@ -252,20 +260,8 @@ func ops(_ name: String, _ args: [String: Any]) -> [Op] {
 
 // MARK: - Running
 
-/// The prompt with build 65's tool names, for the legacy run: the same rules, naming the tools
-/// that set had.
-func legacyWording(_ prompt: String) -> String {
-    prompt
-        .replacingOccurrences(of: "record it with edit_ingredients or edit_steps",
-                              with: "record it with update_ingredients, add_ingredients, remove_ingredients, update_steps, add_steps or remove_steps")
-        .replacingOccurrences(of: "record them with edit_ingredients", with: "record them with add_ingredients")
-        .replacingOccurrences(of: "record it with edit_steps", with: "record it with add_steps")
-}
-
 func runEval(ids: [String]) async -> Bool {
     let runs = ProcessInfo.processInfo.environment["EVAL_RUNS"].flatMap(Int.init) ?? 3
-    let which = ProcessInfo.processInfo.environment["EVAL_TOOLS"] ?? "both"
-    let toolSets = which == "both" ? ["legacy", "merged"] : [which]
     var ok = true
 
     for id in ids {
@@ -280,54 +276,47 @@ func runEval(ids: [String]) async -> Bool {
             continue
         }
 
-        for toolSet in toolSets {
-            var passed = 0, total = 0
-            var seconds = 0.0
-            var promptTokens: [Int] = []
-            print("-- \(toolSet) tools")
-            for evalCase in evalCases {
-                if toolSet == "legacy" && evalCase.mergedOnly { continue }
-                let specs: [CookingToolSpec]
-                switch (toolSet, evalCase.editing) {
-                case ("legacy", .none): specs = LegacyTools.timer
-                case ("legacy", _): specs = LegacyTools.timer + LegacyTools.recipe
-                case (_, .none): specs = CookingTools.timerToolSpecs
-                default: specs = CookingTools.timerToolSpecs + CookingTools.recipeToolSpecs + [CookingTools.shoppingToolSpec]
-                }
-                var system = CookingPrompt(provider: .local, recipe: evalCase.recipe, editing: evalCase.editing,
-                                           kitchen: evalCase.kitchen).system
-                if toolSet == "legacy" { system = legacyWording(system) }
-                var chat: [Chat.Message] = [.system(system)]
-                for (user, assistant) in evalCase.history { chat += [.user(user), .assistant(assistant)] }
-                chat.append(.user(evalCase.question + CookingPrompt.timersNote(evalCase.timers)))
+        var passed = 0, total = 0
+        var seconds = 0.0
+        var promptTokens: [Int] = []
+        for evalCase in evalCases {
+            // The tools a cook offers: timers always; the recipe tools when there's a recipe to
+            // edit; the shopping list when there's a kitchen.
+            var specs = CookingTools.timerToolSpecs
+            if evalCase.editing != .none { specs += CookingTools.recipeToolSpecs }
+            if evalCase.kitchen != nil { specs.append(CookingTools.shoppingToolSpec) }
+            let system = CookingPrompt(provider: .local, recipe: evalCase.recipe, editing: evalCase.editing,
+                                       kitchen: evalCase.kitchen).system
+            var chat: [Chat.Message] = [.system(system)]
+            for (user, assistant) in evalCase.history { chat += [.user(user), .assistant(assistant)] }
+            chat.append(.user(evalCase.question + CookingPrompt.timersNote(evalCase.timers)))
 
-                var wins = 0
-                var failures: [String] = []
-                for _ in 0..<runs {
-                    let started = Date()
-                    do {
-                        let (reply, tokens) = try await ask(container, chat: chat, tools: specs.map(\.mlxToolSpec))
-                        seconds += Date().timeIntervalSince(started)
-                        promptTokens.append(tokens)
-                        if let why = evalCase.check(reply) {
-                            failures.append("\(why) | \(reply.ops) \(reply.text.prefix(120).replacingOccurrences(of: "\n", with: " "))")
-                        } else {
-                            wins += 1
-                        }
-                    } catch {
-                        failures.append("error: \(error)")
+            var wins = 0
+            var failures: [String] = []
+            for _ in 0..<runs {
+                let started = Date()
+                do {
+                    let (reply, tokens) = try await ask(container, chat: chat, tools: specs.map(\.mlxToolSpec))
+                    seconds += Date().timeIntervalSince(started)
+                    promptTokens.append(tokens)
+                    if let why = evalCase.check(reply) {
+                        failures.append("\(why) | \(reply.ops) \(reply.text.prefix(120).replacingOccurrences(of: "\n", with: " "))")
+                    } else {
+                        wins += 1
                     }
+                } catch {
+                    failures.append("error: \(error)")
                 }
-                passed += wins
-                total += runs
-                print(String(format: "  %@ %d/%d %@", wins == runs ? "PASS" : "MISS", wins, runs, evalCase.name))
-                for failure in failures.prefix(2) { print("      \(failure)") }
             }
-            let averageTokens = promptTokens.isEmpty ? 0 : promptTokens.reduce(0, +) / promptTokens.count
-            print(String(format: "  %@ tools: %d/%d (%.0f%%), prompt about %d tokens, %.1fs a reply",
-                         toolSet, passed, total, 100 * Double(passed) / Double(max(total, 1)), averageTokens,
-                         seconds / Double(max(total, 1))))
+            passed += wins
+            total += runs
+            print(String(format: "  %@ %d/%d %@", wins == runs ? "PASS" : "MISS", wins, runs, evalCase.name))
+            for failure in failures.prefix(2) { print("      \(failure)") }
         }
+        let averageTokens = promptTokens.isEmpty ? 0 : promptTokens.reduce(0, +) / promptTokens.count
+        print(String(format: "  %d/%d (%.0f%%), prompt about %d tokens, %.1fs a reply",
+                     passed, total, 100 * Double(passed) / Double(max(total, 1)), averageTokens,
+                     seconds / Double(max(total, 1))))
     }
     return ok
 }

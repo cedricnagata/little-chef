@@ -60,6 +60,11 @@ enum CookingCommand {
             #"^(?:how are|check)(?: the| my)? (timers?)$"#,
             #"^time check$"#,
         ]
+        // "How much longer on the chicken" is about the chicken timer only if there is one: with
+        // no timer by that name it is a question about cooking it.
+        if let name = firstMatch(said, [#"^how much longer(?: on| for| is)?(?: the| my)? (.+?)$"#]).flatMap(timerName(from:)) {
+            return resolve(name, in: timers).map(describe)
+        }
         guard let phrase = firstMatch(said, patterns) else { return nil }
         guard !timers.isEmpty else { return nil }
 

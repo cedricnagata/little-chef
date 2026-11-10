@@ -103,71 +103,17 @@ private let recipe = Recipe(
     instructions: ["Season the chicken.", "Sear it 5 minutes a side.", "Add the cream and simmer."],
     tags: [], sourceUrl: nil, cuisineType: nil, difficulty: nil, createdAt: Date(), updatedAt: Date())
 
-// MARK: - Merged tools
+// MARK: - Shopping list tool
 
 @MainActor
-struct MergedToolTests {
-    @Test func timerActionsRunTheToolsTheyReplaced() {
-        let timers = Timers()
-        let tools = CookingTools(timerManager: timers)
-
-        let created = tools.execute(toolName: "timer", arguments: ["action": "create", "name": "pasta", "minutes": 9])
-        #expect(created.forUser.contains("set for 9 minutes"))
-        #expect(timers.timers.first?.status == .new)
-
-        // Same loop: a start right after the create is refused, as with start_timer.
-        _ = tools.execute(toolName: "timer", arguments: ["action": "start", "name": "pasta"])
-        #expect(timers.timers.first?.status == .new)
-
-        _ = tools.execute(toolName: "timer", arguments: ["action": "change", "name": "pasta", "minutes": 12])
-        #expect(timers.timers.first?.remainingSeconds == 720)
-        _ = tools.execute(toolName: "timer", arguments: ["action": "delete", "name": "pasta"])
-        #expect(timers.timers.isEmpty)
-
-        #expect(tools.execute(toolName: "timer", arguments: ["action": "explode", "name": "x"]).forUser.contains("must be"))
-    }
-
-    @Test func editIngredientsChangesRemovesAndAddsInOneCall() {
-        let lines = Lines()
-        lines.ingredients = ["2 tbsp butter", "1 onion", "salt"]
-        let tools = CookingTools(timerManager: Timers(), recipeEditor: lines)
-
-        let outcome = tools.execute(toolName: "edit_ingredients", arguments: [
-            "change": "2 tbsp butter -> 2 tbsp olive oil", "remove": "salt", "add": "1 tsp cumin\n1 tsp paprika",
-        ])
-        #expect(lines.ingredients == ["2 tbsp olive oil", "1 onion", "1 tsp cumin", "1 tsp paprika"])
-        // The list once, at the end, and only for the model.
-        #expect(outcome.forModel.components(separatedBy: "Ingredients now").count == 2)
-        #expect(outcome.forModel.contains("Nothing is saved"))
-        #expect(!outcome.forUser.contains("Ingredients now"))
-    }
-
-    /// Step numbers mean what they meant in the recipe the model was shown, so changes and
-    /// removals run before additions.
-    @Test func editStepsUsesTheNumbersAsShown() {
-        let lines = Lines()
-        lines.steps = ["One", "Two", "Three"]
-        let tools = CookingTools(timerManager: Timers(), recipeEditor: lines)
-
-        _ = tools.execute(toolName: "edit_steps", arguments: ["change": "3 -> Three, longer", "add": "Zero", "position": 1])
-        #expect(lines.steps == ["Zero", "One", "Two", "Three, longer"])
-    }
-
-    @Test func theOldActionAndItemsShapeStillWorks() {
-        let lines = Lines()
-        let tools = CookingTools(timerManager: Timers(), recipeEditor: lines)
-        _ = tools.execute(toolName: "edit_ingredients", arguments: ["action": "add", "items": "two eggs"])
-        #expect(lines.ingredients == ["two eggs"])
-        #expect(tools.execute(toolName: "edit_ingredients", arguments: [:]).forUser.contains("add, change or remove"))
-    }
-
+struct ShoppingToolTests {
     @Test func shoppingListToolIsOfferedOnlyWithAList() {
         #expect(!CookingTools(timerManager: Timers()).toolSpecs.contains { $0.name == "add_to_shopping_list" })
 
         let shopping = Shopping()
         shopping.items = ["cream"]
         let tools = CookingTools(timerManager: Timers(), shoppingList: shopping)
-        #expect(tools.toolSpecs.map(\.name) == ["timer", "add_to_shopping_list"])
+        #expect(tools.toolSpecs.last?.name == "add_to_shopping_list")
 
         let outcome = tools.execute(toolName: "add_to_shopping_list", arguments: ["items": "shallots\ncream"])
         #expect(shopping.items == ["cream", "shallots"])
@@ -190,15 +136,12 @@ struct CookingPromptTests {
         #expect(!none.contains("Kitchen:"))
     }
 
-    @Test func thePromptNamesOnlyTheToolsThatExist() {
-        for editing in [CookingPrompt.Editing.following, .writing] {
-            let prompt = CookingPrompt(provider: .bigBro, recipe: recipe, editing: editing, kitchen: nil).system
-            for old in ["add_ingredients", "update_ingredients", "remove_ingredients", "add_steps", "update_steps", "remove_steps"] {
-                #expect(!prompt.contains(old))
-            }
-            #expect(prompt.contains("edit_ingredients"))
-        }
-        #expect(!CookingPrompt(provider: .local, recipe: recipe, editing: .none, kitchen: nil).system.contains("edit_"))
+    @Test func thePromptNamesTheRecipeToolsOnlyWhenThereAreSome() {
+        #expect(CookingPrompt(provider: .local, recipe: recipe, editing: .following, kitchen: nil).system
+            .contains("update_ingredients"))
+        #expect(CookingPrompt(provider: .local, recipe: recipe, editing: .writing, kitchen: nil).system
+            .contains("add_ingredients"))
+        #expect(!CookingPrompt(provider: .local, recipe: recipe, editing: .none, kitchen: nil).system.contains("_ingredients"))
     }
 
     @Test func repliesAreAskedToBeShort() {
@@ -275,6 +218,8 @@ struct CookingCommandTests {
             == "The pasta timer has 4 minutes and 30 seconds left. The rice timer is paused with 4 minutes and 30 seconds left.")
         // No timers: maybe a question about the recipe.
         #expect(answer("how much time is left") == nil)
+        #expect(answer("How much longer on the pasta?", timers: running) == "The pasta timer has 4 minutes and 30 seconds left.")
+        #expect(answer("how much longer on the chicken", timers: running) == nil)
     }
 
     @Test func questionsAboutCookingGoToTheModel() {
