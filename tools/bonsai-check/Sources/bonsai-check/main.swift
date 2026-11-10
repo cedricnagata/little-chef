@@ -202,7 +202,10 @@ var arguments = Array(CommandLine.arguments.dropFirst())
 let evalMode = arguments.first == "eval"
 if evalMode { arguments.removeFirst() }
 let ids = arguments.isEmpty ? CookingModelChoice.allCases.reversed().map(\.modelId) : arguments
-if evalMode { exit(await runEval(ids: ids) ? 0 : 1) }
+if evalMode {
+    let passed = await runEval(ids: ids)
+    exit(passed ? 0 : 1)
+}
 
 var failures = 0
 for id in ids {

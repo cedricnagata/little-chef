@@ -200,13 +200,13 @@ class CookingSessionManager: ObservableObject, TimerManager {
         guard currentSession == nil, llmService.currentProvider == .local else { return }
         do { try await Task.sleep(nanoseconds: 1_500_000_000) } catch { return }
         guard currentSession == nil else { return }
-        let kitchenNote = kitchenNote(for: recipe)
+        let note = kitchenNote(for: recipe)
         Task { [weak self] in
             guard let self else { return }
             await self.llmService.prepareForSession(provider: .local)
             // A cook of another recipe started meanwhile: its own read-ahead is the one wanted.
             if let session = self.currentSession, session.sourceRecipeID != recipe.id { return }
-            await self.makeAgent(provider: .local, kitchen: kitchenNote).prewarm(recipe: Self.recipeAsCooked(recipe))
+            await self.makeAgent(provider: .local, kitchen: note).prewarm(recipe: Self.recipeAsCooked(recipe))
         }
     }
 
