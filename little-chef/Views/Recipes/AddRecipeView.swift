@@ -50,7 +50,7 @@ struct AddRecipeView: View {
                         }
 
                         if !llmRecipeParsingEnabled {
-                            Text("Text and image import need on-device AI, which isn't available on this device. Import from a recipe URL instead.")
+                            Text("Text and image import need the AI assistant. \(LLMService.shared.unavailableReason ?? "The model on this device can't read recipes.") Import from a recipe URL instead.")
                                 .font(.caption)
                                 .foregroundColor(.secondary)
                                 .frame(maxWidth: .infinity, alignment: .leading)

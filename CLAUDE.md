@@ -294,11 +294,14 @@ older profile, fails the archive with the row in the table above.
 - **The 27B is offered alongside the default** where the limit allows, rather than replacing it.
 - **What the backend can do is `AICapability`.** `.full` (chat, timer and recipe tools, AI recipe
   parsing) needs the 27B, the 9B or a connected Mac. `.limited` (chat only) is the 4B and 2B.
-  `.none` means no model or no Mac. Ask `capability(of:)` with the provider a cook pinned, not
-  `capability`, which follows the app-wide setting.
+  `.none` means no model, a model not downloaded yet, or no Mac: nothing that needs the model is
+  offered until it is on the device (`downloadedModelIds`), and `unavailableReason(of:)` says
+  what to do about it where the assistant would be. Ask `capability(of:)` with the provider a
+  cook pinned, not `capability`, which follows the app-wide setting.
 - **DEBUG overrides the tiers**, though not the 27B's memory gate. A debug build reports the 9B
-  and `.full` on every device, so every feature can be exercised on any phone. The limited and
-  none paths can only be seen in a Release build: TestFlight, or a local Release run with the
+  on every device, so every feature can be exercised on any phone once its model is downloaded,
+  and `.full` in the Simulator, which has no model. The limited path, and none in the Simulator,
+  can only be seen in a Release build: TestFlight, or a local Release run with the
   manual profiles installed.
 - **The on-device model is per device.** It lives in `UserDefaults`
   (`little-chef.on-device-model`), because what a device can run and has downloaded are facts

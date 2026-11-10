@@ -93,28 +93,57 @@ class LLMService: ObservableObject {
             : Self.supportedOnDeviceModel
     }
 
-    /// What the active provider + model can do, in production. DEBUG = always full.
+    /// What the active provider + model can do right now.
     var capability: AICapability { capability(of: currentProvider) }
 
-    /// What a named provider can do, in production. DEBUG = always full.
+    /// What a named provider can do right now. Always full in the Simulator, which has no model.
     ///
     /// Takes the provider rather than reading ``currentProvider`` so a cooking session can ask
     /// about the provider it pinned at start. A session that began on-device must keep
     /// reporting on-device capabilities for its whole life, even if something changes the
     /// app-wide provider underneath it.
+    ///
+    /// On-device, nothing until the model is downloaded. Reporting what the device *could* run
+    /// let a new install start a cook, type a question, and only then be told there was no model.
     func capability(of provider: LLMProvider) -> AICapability {
-        #if DEBUG
+        #if DEBUG && targetEnvironment(simulator)
         return .full
         #else
         switch provider {
         case .bigBro:
             return bigBroClient.isConnected ? .full : .none
         case .local:
-            guard let model = activeOnDeviceModel else { return .none }
+            guard let model = activeOnDeviceModel, isReady(model) else { return .none }
             return model.isFullCapability ? .full : .limited
         }
         #endif
     }
+
+    /// On disk or in memory. Published state only, so views that ask redraw when a download
+    /// finishes, and a download in progress doesn't count until it has.
+    private func isReady(_ model: CookingModelChoice) -> Bool {
+        downloadedModelIds.contains(model.modelId) || loadedModelIds.contains(model.modelId)
+    }
+
+    /// Why the assistant can't answer on `provider`, said the way the user puts it right. Nil
+    /// when it can.
+    func unavailableReason(of provider: LLMProvider) -> String? {
+        guard capability(of: provider) == .none else { return nil }
+        switch provider {
+        case .bigBro:
+            return "Connect to your Mac in Settings to use the AI assistant."
+        case .local:
+            guard let model = activeOnDeviceModel else {
+                return "This device can't run the AI assistant itself. Pair a Mac in Settings to use it."
+            }
+            if currentlyLoadingModelId == model.modelId {
+                return "The AI model is downloading (\(Int(loadProgress * 100))%). The assistant is ready when it finishes."
+            }
+            return "Download the AI model in Settings to use the assistant."
+        }
+    }
+
+    var unavailableReason: String? { unavailableReason(of: currentProvider) }
 
     /// Whether an opportunistic (non-user-initiated) LLM pass can run right now without
     /// surprising the user with a first-time multi-GB on-device model download. True for

@@ -101,7 +101,7 @@ struct StartCookingView: View {
                 .disabled(!canCookWithoutRecipe)
 
                 if !canCookWithoutRecipe {
-                    Text("Cooking without a recipe needs the AI assistant")
+                    Text("Cooking without a recipe needs the AI assistant. \(llmService.unavailableReason ?? "")")
                         .font(.caption)
                         .foregroundColor(.secondary)
                 } else if recipeManager.recipes.isEmpty {
@@ -124,6 +124,8 @@ struct ActiveCookingView: View {
     /// Observed so the screen redraws when the Mac connects or drops: `chatEnabled` depends on
     /// it, and `LLMService` doesn't republish its client's changes.
     @ObservedObject private var bigBroClient = LLMService.shared.bigBroClient
+    /// Observed so the assistant appears when a model download that was running finishes.
+    @EnvironmentObject private var llmService: LLMService
     @State private var textInput = ""
     @State private var showingEndSessionAlert = false
     @State private var showingSessionChanges = false
@@ -143,6 +145,15 @@ struct ActiveCookingView: View {
     /// Asks the session, not the service: the provider is pinned when a cook starts, so this
     /// has to describe the backend this session is actually running on.
     private var chatEnabled: Bool { cookingSessionManager.capability.llmChatEnabled }
+
+    /// Settings can't be opened mid-cook, so the fix starts with ending it, unless the model is
+    /// already on its way.
+    private var unavailableText: String {
+        let reason = llmService.unavailableReason(of: cookingSessionManager.sessionProvider)
+            ?? "The AI assistant is unavailable."
+        let fix = reason.contains("in Settings") ? "End the cook to do that. " : ""
+        return "\(reason) \(fix)Timers still work: add them by hand."
+    }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -177,8 +188,9 @@ struct ActiveCookingView: View {
             } else {
                 VStack(spacing: 0) {
                     Divider()
-                    Label("AI assistant unavailable — add timers manually", systemImage: "wand.and.stars.inverse")
+                    Label(unavailableText, systemImage: "wand.and.stars.inverse")
                         .font(.caption)
+                        .multilineTextAlignment(.center)
                         .foregroundColor(.secondary)
                         .frame(maxWidth: .infinity)
                         .padding()
