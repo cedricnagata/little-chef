@@ -505,7 +505,9 @@ prompt is a snapshot from when the user's message arrived, so mid-turn it still 
 written down yet" while three ingredients are recorded, and that contradiction is what makes a
 model record them again. `forUser` is what happened and nothing else — the on-device path returns
 tool results *as the reply* (`LLMService`, native calls and the `<tool_call>` fallback), where an
-enumerated ingredient list would be printed on screen and read out loud.
+enumerated ingredient list would be printed on screen and read out loud. The timer tools are
+split the same way: "tell the user it is ready and wait" steers the model, and was shown and
+spoken to the user until it moved to `forModel` alone.
 
 ### One tool list, two backends
 
@@ -546,6 +548,67 @@ Spoken text is cut into sentences by `SentenceSplitter`, which never splits at t
 `LocalCookingAgent.reply(to:recipe:history:)` builds every prompt from the session's transcript.
 That transcript includes turns a hands-free loop on the Mac mirrored in, which a private copy in
 the agent never saw.
+
+## The cooking prompt, and reusing it between questions
+
+Before 2026-11, the phone re-read the whole prompt before every answer. That was about 2,600
+tokens, measured with the 9B's tokenizer: 1,809 for the 12 tool definitions, about 280 for a
+6-step recipe, and about 500 for the rules. On an iPhone 14 Pro that was a long wait before the
+first word.
+
+### What the prompt holds
+
+`LocalCookingAgent.buildSystemMessage` holds a rule only where nothing else does its job.
+
+- **The speech rules are BigBro only.** The phone's voices get every sentence through
+  `SpokenText.forSpeech`, in `OnDeviceSpeaker.speak` and before `bigBroClient.speak` in
+  `VoiceAssistant`. It writes out "tbsp", "350°F", "1 1/2" and "e.g.". The on-screen text keeps the
+  short forms. Hands-free on the Mac (`BigBroVoiceSession`) speaks the Mac's own text with no such
+  pass, so the Mac still gets the rules.
+- **There is no timer paragraph.** "Created, not started" is in `create_timer`'s description and
+  its result, and `ToolLoopGuard` refuses a start in the same turn.
+- **The tool-result rules are BigBro only.** "Trust the result over the recipe below" and "don't
+  send it again" are about reading results, which only the Mac's loop does. The phone gets "one
+  call per tool".
+- **Ingredients are listed one per line.** They carry commas of their own.
+- **Timers ride on the newest question** (`timersNote`), not the system prompt. The Mac's
+  hands-free briefing, built once, still includes them.
+
+### `PromptPrefixCache`
+
+`LLMService` keeps the model's cache for the settled part of one cooking conversation, everything
+before the newest question, and feeds a question only what came after. A cook's agent passes a
+`promptCacheKey`. Recipe import and the Suggested ranking pass none, so they are read from the
+start and leave the kept cache alone.
+
+- **The copy is kept at the boundary, before the newest question.** Bonsai 2's linear-attention
+  layers keep a running state that can't be rewound, so a cache can only be extended. Next turn's
+  prompt always starts with this turn's settled part, but not with this turn's reply as generated:
+  the template renders past replies differently. So last turn's question and answer are read
+  again each turn as history, a few dozen tokens.
+- **Finding the boundary.** The conversation is rendered a second time with a placeholder
+  (`"\u{1}"`) as the newest question; the two token lists agree up to where the question's text
+  begins. A placeholder rather than leaving the question out, because Qwen3.5's template refuses
+  a conversation with no user message.
+- **What starts it over:**
+  - another cook (a new key), another model, or an unload;
+  - a prompt that doesn't start with the kept tokens: the recipe edited mid-cook, or history
+    dropping off the front;
+  - the history window (20 messages), which moves 8 at a time so the second case is rare.
+- **The cook's prompt is read ahead** (`LocalCookingAgent.prewarm`, from `CookingSessionManager`
+  once both the model and the agent exist). The first question then reads only itself.
+- **Memory:** the kept copy and the working cache exist side by side while a reply generates.
+  At 2k tokens that is about 0.1 GiB on the 9B, inside the 0.5 GiB the thresholds leave for the
+  app.
+- **Measured on the Mac** with bonsai-check's conversation probe (2026-11-10), four questions
+  with the app's 12 tools and a recipe. Average time to first word:
+
+  | Model | Before | Kept | Read-ahead at the cook's start |
+  | --- | --- | --- | --- |
+  | 9B | 4.63s | 0.33s | 4.5s |
+  | 4B | 2.63s | 0.22s | 2.5s |
+
+  A phone is several times slower than the Mac on both.
 
 ## Ingredient scaling
 
