@@ -37,7 +37,8 @@ final class OnDeviceSpeaker: NSObject {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
 
-        let utterance = AVSpeechUtterance(string: trimmed)
+        // "1 tbsp" would be read out as letters. See `SpokenText`.
+        let utterance = AVSpeechUtterance(string: SpokenText.forSpeech(trimmed))
         utterance.voice = voice
         // `rate` is an absolute value on `AVSpeechUtteranceMinimumSpeechRate`...`Maximum`,
         // where `AVSpeechUtteranceDefaultSpeechRate` is normal speed — not a multiplier.

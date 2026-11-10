@@ -29,6 +29,9 @@ final class LocalCookingAgent {
     /// make sense, not so many that an hour-long cook outgrows an on-device model's context.
     private let maxHistoryMessages = 20
 
+    /// Names this cook's conversation to `LLMService`'s kept prompt cache. See `PromptPrefixCache`.
+    private let promptCacheKey = UUID().uuidString
+
     convenience init(timerManager: TimerManager, recipeEditor: RecipeEditing?, provider: LLMProvider) {
         self.init(llmService: .shared, timerManager: timerManager, recipeEditor: recipeEditor, provider: provider)
     }
@@ -48,7 +51,16 @@ final class LocalCookingAgent {
     /// this agent, and takes a system prompt as a string. Exposed so the spoken assistant is
     /// briefed identically to the typed one instead of carrying a second copy of the prompt.
     func systemPrompt(for recipe: Recipe?) -> String {
-        buildSystemMessage(recipe: recipe).content
+        // The Mac's hands-free loop is briefed once, so it gets the timers as they stand then.
+        buildSystemMessage(recipe: recipe, includingTimers: true).content
+    }
+
+    /// Reads the instructions, tools and recipe into the on-device model now, while the cook is
+    /// starting, so the first question doesn't wait for them. Nothing to do on the Mac.
+    func prewarm(recipe: Recipe?) async {
+        guard provider == .local else { return }
+        await llmService.prewarmPrompt(
+            system: buildSystemMessage(recipe: recipe), tools: cookingTools(), promptCacheKey: promptCacheKey)
     }
 
     /// The tools this agent would offer, or none if the pinned provider can't call them.
@@ -69,54 +81,56 @@ final class LocalCookingAgent {
         history: [Message],
         onChunk: @escaping (String) -> Void
     ) async throws -> String {
-        let earlier = history
-            .filter { !$0.content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
-            .suffix(maxHistoryMessages)
+        let spoken = history.filter { !$0.content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+        // The window moves eight messages at a time rather than one, so the conversation's start
+        // — and with it the model's kept cache — stays put for eight turns at a stretch instead
+        // of changing on every one once a cook passes twenty messages.
+        let overflow = max(0, spoken.count - maxHistoryMessages)
+        let earlier = spoken
+            .dropFirst((overflow + 7) / 8 * 8)
             .map { ChatMessage(role: $0.isUser ? .user : .assistant, content: $0.content) }
 
+        // Timers change by the second, so they ride on the question rather than in the system
+        // prompt: a system prompt that changed every turn would be read from scratch every turn.
         return try await llmService.generateChatCompletionStreaming(
-            messages: [buildSystemMessage(recipe: recipe)] + earlier + [ChatMessage(role: .user, content: question)],
+            messages: [buildSystemMessage(recipe: recipe)] + earlier
+                + [ChatMessage(role: .user, content: question + timersNote)],
             tools: cookingTools(),
             modelId: provider == .local ? llmService.activeOnDeviceModel?.modelId : nil,
             provider: provider,
+            promptCacheKey: provider == .local ? promptCacheKey : nil,
             onChunk: onChunk
         )
     }
 
     // MARK: - Private Methods
 
-    private func buildSystemMessage(recipe: Recipe?) -> ChatMessage {
+    private func buildSystemMessage(recipe: Recipe?, includingTimers: Bool = false) -> ChatMessage {
         var prompt = "You are LittleChef, a concise and helpful cooking assistant. Answer cooking questions directly. Be brief."
 
-        // Everything here is read aloud by a speech model that pronounces abbreviations as
-        // letters — "tsp" comes out "tee ess pee" — so they have to be spelled out in the text
-        // before they ever reach it.
-        prompt += """
-
-
-            Your replies are spoken out loud. Never abbreviate; write every word out in full so \
-            it can be read aloud:
-            - teaspoon / tablespoon, not tsp / tbsp
-            - cup, ounce, pound, gram, kilogram, millilitre, litre, not c / oz / lb / g / kg / ml / l
-            - minutes, hours, seconds, not min / hr / sec
-            - degrees Fahrenheit or degrees Celsius, not F / C / °F / °C
-            - approximately, about, for example, and so on, not approx / ca. / e.g. / etc.
-            Write numbers as digits ("350 degrees Fahrenheit", "2 tablespoons"), and fractions as \
-            words ("one and a half cups", not "1 1/2 cups"). Use no markdown, symbols or emoji.
-            """
-
-        if cookingTools() != nil {
-            // Creating and starting are two separate messages, not two calls in one turn — a
-            // timer that starts the moment it is named leaves no room to correct the duration.
+        // Every token here is read again before each answer, and on a phone that wait is most of
+        // the time to the first word. So each rule is here only where nothing else does its job:
+        //  - The phone's voices get the text through `SpokenText`, which writes out "tbsp",
+        //    "350°F" and "1/2" itself. Hands-free on the Mac speaks the Mac's own text with no
+        //    such pass, so BigBro still needs the rules spelled out.
+        //  - Timers: "created, not started" is in create_timer's description and its result, and
+        //    `ToolLoopGuard` refuses a start in the same turn. A paragraph here repeated all three.
+        if provider == .bigBro {
             prompt += """
 
 
-                Timers: creating a timer and starting it are separate actions in separate replies. \
-                When asked to set a timer, call create_timer only, then tell the user it is ready \
-                and wait. Start it with start_timer only when they ask in a later message. Never \
-                call create_timer and start_timer in the same reply. Use update_timer to change a \
-                timer's duration or name, stop_timer to stop one, delete_timer to remove one.
+                Your replies are spoken out loud. Never abbreviate; write every word out in full so \
+                it can be read aloud:
+                - teaspoon / tablespoon, not tsp / tbsp
+                - cup, ounce, pound, gram, kilogram, millilitre, litre, not c / oz / lb / g / kg / ml / l
+                - minutes, hours, seconds, not min / hr / sec
+                - degrees Fahrenheit or degrees Celsius, not F / C / °F / °C
+                - approximately, about, for example, and so on, not approx / ca. / e.g. / etc.
+                Write numbers as digits ("350 degrees Fahrenheit", "2 tablespoons"), and fractions as \
+                words ("one and a half cups", not "1 1/2 cups"). Use no markdown, symbols or emoji.
                 """
+        } else {
+            prompt += " Your replies are read aloud: write plain sentences, with no markdown, lists or emoji."
         }
 
         if cookingTools()?.recipeEditor != nil {
@@ -130,9 +144,16 @@ final class LocalCookingAgent {
             if let prep = recipe.prepTime { prompt += " | Prep: \(prep) minutes" }
             if let cook = recipe.cookTime { prompt += " | Cook: \(cook) minutes" }
 
-            prompt += recipe.ingredients.isEmpty
-                ? "\n\nIngredients: none written down yet"
-                : "\n\nIngredients: \(recipe.ingredients.joined(separator: ", "))"
+            // One per line: ingredients carry commas of their own ("4 cloves garlic, minced"),
+            // so a comma-joined list ran one into the next.
+            if recipe.ingredients.isEmpty {
+                prompt += "\n\nIngredients: none written down yet"
+            } else {
+                prompt += "\n\nIngredients:"
+                for ingredient in recipe.ingredients {
+                    prompt += "\n- \(ingredient)"
+                }
+            }
 
             if recipe.instructions.isEmpty {
                 prompt += "\n\nSteps: none written down yet"
@@ -144,26 +165,21 @@ final class LocalCookingAgent {
             }
         }
 
-        let activeTimers = timerManager.getAllTimers()
-        if !activeTimers.isEmpty {
-            prompt += "\n\nActive timers:"
-            for timer in activeTimers {
-                let state = timer.status == .new ? "created, not started yet" : timer.status.rawValue
-                prompt += "\n- \(timer.label): \(state), \(Self.spoken(seconds: timer.remainingSeconds)) left"
-            }
-        }
+        if includingTimers { prompt += timersNote }
 
         return ChatMessage(role: .system, content: prompt)
     }
 
-    /// "4 minutes and 30 seconds" rather than "4 minutes": a timer with under a minute to go
-    /// used to be described to the model as having none.
-    private static func spoken(seconds: Int) -> String {
-        let minutes = seconds / 60, remainder = seconds % 60
-        let minutePart = "\(minutes) \(minutes == 1 ? "minute" : "minutes")"
-        let secondPart = "\(remainder) \(remainder == 1 ? "second" : "seconds")"
-        if minutes > 0 && remainder > 0 { return "\(minutePart) and \(secondPart)" }
-        return minutes > 0 ? minutePart : secondPart
+    /// The timers as they stand, or nothing when there are none.
+    private var timersNote: String {
+        let timers = timerManager.getAllTimers()
+        guard !timers.isEmpty else { return "" }
+        var note = "\n\nActive timers:"
+        for timer in timers {
+            let state = timer.status == .new ? "created, not started yet" : timer.status.rawValue
+            note += "\n- \(timer.label): \(state), \(SpokenDuration.text(seconds: timer.remainingSeconds)) left"
+        }
+        return note
     }
 
     /// How to use the recipe tools, which differs entirely depending on whether there is a recipe.
@@ -211,8 +227,19 @@ final class LocalCookingAgent {
     /// snapshot note is the other half of that: the recipe printed below is taken when the user's
     /// message arrives and does not move while the tools run, so the tool results are the only
     /// honest account of the recipe mid-turn, and they say so.
+    ///
+    /// The rest is about reading tool results, which only the Mac's tool loop does. The phone
+    /// runs every call from one reply and answers with the results, so it gets the first rule
+    /// alone.
     private var batchingInstructions: String {
-        """
+        guard provider == .bigBro else {
+            return """
+
+
+                Record everything from one message in a single call per tool, one item per line.
+                """
+        }
+        return """
 
 
         Record everything from one message in a single call per tool: pass every ingredient to \

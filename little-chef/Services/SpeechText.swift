@@ -2,8 +2,9 @@
 //  SpeechText.swift
 //  little-chef
 //
-//  Text shaped for being read aloud: replies cut into sentences as they stream, and durations
-//  spelled out the way a speech model can say them.
+//  Text shaped for being read aloud: replies cut into sentences as they stream, durations
+//  spelled out the way a speech model can say them, and the abbreviations recipes are full of
+//  expanded before they reach a voice.
 //
 
 import Foundation
@@ -81,4 +82,118 @@ enum SpokenDuration {
         if minutes > 0 && remainder > 0 { return "\(minutePart) and \(secondPart)" }
         return minutes > 0 ? minutePart : secondPart
     }
+}
+
+/// A reply as it should be spoken: the abbreviations, temperatures and fractions recipes are full
+/// of, written out in words.
+///
+/// Speech models read "1 tbsp" as "one tee bee ess pee" and "350°F" as "three fifty degrees eff".
+/// The on-screen text keeps the short forms; only what goes to a voice is expanded. Done here
+/// rather than by asking the model, which costs prompt on every question and isn't always obeyed.
+///
+/// Conservative on purpose: a letter that could be a word ("g", "l", "min") is only treated as a
+/// unit right after a number, and only common fractions are named.
+enum SpokenText {
+    static func forSpeech(_ text: String) -> String {
+        var text = text
+        for rule in rules {
+            text = rule.apply(to: text)
+        }
+        return text
+    }
+
+    private struct Rule {
+        let regex: NSRegularExpression
+        let replace: ([String?]) -> String
+
+        init(_ pattern: String, caseInsensitive: Bool = true, replace: @escaping ([String?]) -> String) {
+            regex = try! NSRegularExpression(pattern: pattern, options: caseInsensitive ? [.caseInsensitive] : [])
+            self.replace = replace
+        }
+
+        func apply(to text: String) -> String {
+            let ns = text as NSString
+            var result = ""
+            var last = 0
+            for match in regex.matches(in: text, range: NSRange(location: 0, length: ns.length)) {
+                result += ns.substring(with: NSRange(location: last, length: match.range.location - last))
+                let groups = (0..<match.numberOfRanges).map { index -> String? in
+                    let range = match.range(at: index)
+                    return range.location == NSNotFound ? nil : ns.substring(with: range)
+                }
+                result += replace(groups)
+                last = match.range.location + match.range.length
+            }
+            return result + ns.substring(from: last)
+        }
+    }
+
+    /// A number as recipes write one: digits, a decimal, a fraction, or a mix ("1 1/2", "1½").
+    private static let number = #"(\d+(?:[.,]\d+)?(?:\s*[½¼¾⅓⅔⅛]|\s+\d/\d)?|[½¼¾⅓⅔⅛]|\d/\d)"#
+
+    /// An abbreviation's own full stop, dropped only mid-sentence ("1 tbsp. of oil"). At the end of
+    /// a sentence the stop is the sentence's, and stays.
+    private static let dot = #"(?:\.(?=\s+(?-i:[a-z])))?(?![a-z])"#
+
+    /// Whether a unit after `amount` is singular: "1 teaspoon", "1/2 teaspoon", "2 teaspoons".
+    private static func isSingular(_ amount: String) -> Bool {
+        let amount = amount.trimmingCharacters(in: .whitespaces)
+        if amount == "1" { return true }
+        return amount.count <= 3 && (amount.contains("/") || "½¼¾⅓⅔⅛".contains(amount))
+    }
+
+    private static func unit(_ singular: String, _ plural: String) -> ([String?]) -> String {
+        { groups in
+            let amount = groups[1] ?? ""
+            return "\(amount) \(isSingular(amount) ? singular : plural)"
+        }
+    }
+
+    private static let fractions: [String: (alone: String, mixed: String)] = [
+        "1/2": ("one half", "a half"), "½": ("one half", "a half"),
+        "1/4": ("one quarter", "a quarter"), "¼": ("one quarter", "a quarter"),
+        "3/4": ("three quarters", "three quarters"), "¾": ("three quarters", "three quarters"),
+        "1/3": ("one third", "a third"), "⅓": ("one third", "a third"),
+        "2/3": ("two thirds", "two thirds"), "⅔": ("two thirds", "two thirds"),
+        "1/8": ("one eighth", "an eighth"), "⅛": ("one eighth", "an eighth"),
+    ]
+
+    private static let rules: [Rule] = [
+        // Units after a number. Before the fractions, so "1/2 tsp" can still see its amount.
+        Rule(number + #"\s*(?:tsps?|teaspoons?)"# + dot, replace: unit("teaspoon", "teaspoons")),
+        Rule(number + #"\s*(?:tbsps?|tbs|tbl|tablespoons?)"# + dot, replace: unit("tablespoon", "tablespoons")),
+        Rule(number + #"\s*(?:oz|ounces?)"# + dot, replace: unit("ounce", "ounces")),
+        Rule(number + #"\s*(?:lbs?|pounds?)"# + dot, replace: unit("pound", "pounds")),
+        Rule(number + #"\s*(?:kg|kilograms?)"# + dot, replace: unit("kilogram", "kilograms")),
+        Rule(number + #"\s*(?:g|grams?)"# + dot, replace: unit("gram", "grams")),
+        Rule(number + #"\s*(?:ml|millilitres?|milliliters?)"# + dot, replace: unit("millilitre", "millilitres")),
+        Rule(number + #"\s*(?:l|litres?|liters?)"# + dot, replace: unit("litre", "litres")),
+        Rule(number + #"\s*(?:qts?)"# + dot, replace: unit("quart", "quarts")),
+        Rule(number + #"\s*(?:mins?)"# + dot, replace: unit("minute", "minutes")),
+        Rule(number + #"\s*(?:hrs?)"# + dot, replace: unit("hour", "hours")),
+        Rule(number + #"\s*(?:secs?)"# + dot, replace: unit("second", "seconds")),
+
+        // A unit on its own, where it can't be mistaken for a word: "a tbsp of oil".
+        Rule(#"\btsps?\b"# + dot, replace: { _ in "teaspoon" }),
+        Rule(#"\btbsps?\b"# + dot, replace: { _ in "tablespoon" }),
+
+        // Temperatures: "350°F", "180 °C", "350F", and a bare "350°".
+        Rule(#"(\d+)\s*°\s*F\b|(\d+)F\b"#, caseInsensitive: false, replace: { "\($0[1] ?? $0[2] ?? "") degrees Fahrenheit" }),
+        Rule(#"(\d+)\s*°\s*C\b|(\d+)C\b"#, caseInsensitive: false, replace: { "\($0[1] ?? $0[2] ?? "") degrees Celsius" }),
+        Rule(#"(\d+)\s*°"#, replace: { "\($0[1] ?? "") degrees" }),
+
+        // Fractions: "1 1/2" and "1½" become "1 and a half", a lone "1/2" "one half".
+        Rule(#"(\d+)\s*(1/2|1/4|3/4|1/3|2/3|1/8|½|¼|¾|⅓|⅔|⅛)(?![\d/])"#, replace: { groups in
+            "\(groups[1] ?? "") and \(fractions[groups[2] ?? ""]?.mixed ?? (groups[2] ?? ""))"
+        }),
+        Rule(#"(?<![\d/])(1/2|1/4|3/4|1/3|2/3|1/8|½|¼|¾|⅓|⅔|⅛)(?![\d/])"#, replace: { groups in
+            fractions[groups[1] ?? ""]?.alone ?? (groups[1] ?? "")
+        }),
+
+        // The Latin ones.
+        Rule(#"\be\.g\.,?"#, replace: { _ in "for example" }),
+        Rule(#"\bi\.e\.,?"#, replace: { _ in "that is" }),
+        Rule(#"\betc\."#, replace: { _ in "and so on" }),
+        Rule(#"\bapprox"# + dot, replace: { _ in "approximately" }),
+    ]
 }
