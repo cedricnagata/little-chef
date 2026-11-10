@@ -7,6 +7,7 @@
 //
 //   swift run -c release bonsai-check                 # every model
 //   swift run -c release bonsai-check prism-ml/Ternary-Bonsai-2-4B-mlx-2bit
+//   swift run -c release bonsai-check eval [model...]  # the cooking test set (Eval.swift)
 //
 // Keep the package pins below equal to the app's (project.pbxproj / Package.resolved).
 

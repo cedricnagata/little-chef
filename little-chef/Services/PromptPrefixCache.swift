@@ -30,7 +30,9 @@ final class PromptPrefixCache: @unchecked Sendable {
     /// The tokens `cache` holds, exactly.
     private var tokens: [Int] = []
     private var cache: [KVCache]?
-    /// What the cache belongs to: one cook on one model. A different key starts over.
+    /// What the cache belongs to: the cooking conversation on one model. A different key starts
+    /// over. Within a key, only a prompt that begins with exactly the kept tokens reuses them, so
+    /// a cook reuses what was read while its recipe was open, and nothing from another recipe.
     private var key: String?
 
     /// How many tokens the last request found already read, for the log and the Mac check.

@@ -27,10 +27,10 @@ let probes: [Probe] = [
           check: { text, calls in calls.isEmpty && text.count > 20 && !text.contains("<think>") }),
     Probe(name: "timer tool", prompt: "Make a timer called pasta for 9 minutes.",
           tools: true, temperature: 0.7, maxTokens: 200,
-          check: { _, calls in calls.contains { $0.hasPrefix("create_timer") } }),
+          check: { _, calls in calls.contains { $0.hasPrefix("timer(") && $0.contains("action=create") } }),
     Probe(name: "recipe tool", prompt: "Swap the butter for 2 tbsp olive oil in the recipe.",
           tools: true, temperature: 0.7, maxTokens: 300,
-          check: { _, calls in calls.contains { $0.hasPrefix("update_ingredients") } }),
+          check: { _, calls in calls.contains { $0.hasPrefix("edit_ingredients(") && $0.contains("change=") } }),
     Probe(name: "JSON", prompt: """
         Return only a JSON object with keys "title" (string), "servings" (integer) and \
         "ingredients" (array of strings) for this recipe: Scrambled eggs for two. Whisk 4 eggs \
@@ -43,6 +43,7 @@ let probes: [Probe] = [
 ]
 
 let toolSpecs = (CookingTools.timerToolSpecs + CookingTools.recipeToolSpecs).map(\.mlxToolSpec)
+
 
 /// `BONSAI_PREFILL_STEP=256` sets how many prompt tokens are processed at once (mlx-swift-lm's
 /// default is 512). The step decides most of the peak memory beyond the weights.
@@ -77,7 +78,7 @@ func run(_ container: ModelContainer, messages: [Chat.Message], tools: [ToolSpec
     return (text, calls, info)
 }
 
-/// A cook as the app runs one: its instructions, all 12 tools and a recipe, then a few
+/// A cook as the app runs one: its instructions, the cooking tools and a recipe, then a few
 /// questions, each asked with the conversation so far. Run twice — reading every prompt from the
 /// start, as the app did, and with `PromptPrefixCache`, as it does now — timing each question to
 /// its first word.
@@ -196,9 +197,12 @@ func conversation(_ container: ModelContainer, id: String) async throws {
     }
 }
 
-let ids = CommandLine.arguments.count > 1
-    ? Array(CommandLine.arguments.dropFirst())
-    : CookingModelChoice.allCases.reversed().map(\.modelId)
+// `bonsai-check eval [model...]` runs the cooking test set instead (Eval.swift).
+var arguments = Array(CommandLine.arguments.dropFirst())
+let evalMode = arguments.first == "eval"
+if evalMode { arguments.removeFirst() }
+let ids = arguments.isEmpty ? CookingModelChoice.allCases.reversed().map(\.modelId) : arguments
+if evalMode { exit(await runEval(ids: ids) ? 0 : 1) }
 
 var failures = 0
 for id in ids {

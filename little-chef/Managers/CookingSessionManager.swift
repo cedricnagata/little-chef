@@ -40,6 +40,13 @@ class CookingSessionManager: ObservableObject, TimerManager {
     private var cookingAgent: LocalCookingAgent?
     private let llmService: LLMService
 
+    /// The inventory and shopping list. Set by `MainView`, which owns it; nil in previews, where a
+    /// cook has no kitchen to look at and no shopping list to add to.
+    weak var kitchen: KitchenManager?
+
+    /// What the inventory said about this cook's recipe when it started. See `CookingPrompt.Kitchen`.
+    private var kitchenNote: CookingPrompt.Kitchen?
+
     /// The in-flight warm-up, held so ending the session can cancel it. Without this, leaving a
     /// cook immediately after starting one leaves a multi-second model load running against a
     /// session that no longer exists.
@@ -92,6 +99,7 @@ class CookingSessionManager: ObservableObject, TimerManager {
 
     private func begin(_ session: CookingSession) {
         currentSession = session
+        kitchenNote = kitchenNote(for: createRecipeFromSession(session))
         // Read once, here. Everything downstream — the agent, the voice loop, the capability
         // gate — asks this session rather than the service, so the backend is fixed for the
         // duration of the cook.
@@ -157,13 +165,49 @@ class CookingSessionManager: ObservableObject, TimerManager {
     }
 
     func initAgentForSession() {
-        cookingAgent = LocalCookingAgent(timerManager: self, recipeEditor: self, provider: sessionProvider)
+        cookingAgent = makeAgent(provider: sessionProvider, kitchen: kitchenNote)
         if hasWarmedUp && !isPreparingModel { prewarmPrompt() }
         error = nil
         // The cook can be resumed onto this screen without going back through
         // `startCookingSession` — a warm-up that already finished is a no-op, one that never
         // ran gets its chance here.
         if !hasWarmedUp { startWarmUp() }
+    }
+
+    private func makeAgent(provider: LLMProvider, kitchen kitchenNote: CookingPrompt.Kitchen?) -> LocalCookingAgent {
+        LocalCookingAgent(
+            timerManager: self, recipeEditor: self, shoppingList: kitchen == nil ? nil : self,
+            kitchen: kitchenNote, provider: provider)
+    }
+
+    /// What the inventory says about `recipe`, or nil when the user keeps no inventory.
+    private func kitchenNote(for recipe: Recipe) -> CookingPrompt.Kitchen? {
+        guard let kitchen, kitchen.isTrackingInventory else { return nil }
+        return CookingPrompt.Kitchen(missing: kitchen.availability(of: recipe).missingNames)
+    }
+
+    /// Loads the on-device model and reads the cooking prompt for `recipe` in while its page is
+    /// open, so starting the cook has nothing left to read and the first question reads only
+    /// itself. Called from the recipe page.
+    ///
+    /// Waits a moment first, and a page closed during that wait reads nothing, so scrolling
+    /// through recipes doesn't start a read for each one. Once started it runs to the end even if
+    /// the page closes, because closing it is usually the cook starting, which wants exactly this.
+    /// Does nothing during a cook, on BigBro, or for a model that isn't downloaded. The prompt is
+    /// the one the cook will build — same instructions, recipe and kitchen line — and the cook
+    /// finds it in `PromptPrefixCache`, which reuses only an exact match.
+    func readAhead(for recipe: Recipe) async {
+        guard currentSession == nil, llmService.currentProvider == .local else { return }
+        do { try await Task.sleep(nanoseconds: 1_500_000_000) } catch { return }
+        guard currentSession == nil else { return }
+        let kitchenNote = kitchenNote(for: recipe)
+        Task { [weak self] in
+            guard let self else { return }
+            await self.llmService.prepareForSession(provider: .local)
+            // A cook of another recipe started meanwhile: its own read-ahead is the one wanted.
+            if let session = self.currentSession, session.sourceRecipeID != recipe.id { return }
+            await self.makeAgent(provider: .local, kitchen: kitchenNote).prewarm(recipe: Self.recipeAsCooked(recipe))
+        }
     }
 
     private func storedVoiceSettings() -> LocalVoiceSettings {
@@ -176,6 +220,7 @@ class CookingSessionManager: ObservableObject, TimerManager {
     }
 
     func endCookingSession() {
+        kitchenNote = nil
         warmUpTask?.cancel()
         warmUpTask = nil
         promptPrewarmTask?.cancel()
@@ -222,6 +267,25 @@ class CookingSessionManager: ObservableObject, TimerManager {
         // then the question.
         let history = session.conversationHistory
         let recipe = createRecipeFromSession(session)
+
+        // "Start the timer", "how long is left", "repeat that": answered at once, without the
+        // model. The turn still goes into the conversation, so the model sees it later.
+        let lastReply = history.last { !$0.isUser && !$0.content.isEmpty }?.content
+        if let answer = CookingCommand.answer(
+            to: query, recipe: recipe, lastReply: lastReply, tools: CookingTools(timerManager: self)
+        ) {
+            dprint("⚡️ Answered without the model: \(query)")
+            currentSession?.conversationHistory.append(
+                Message(id: UUID(), role: "user", content: query, timestamp: Date()))
+            currentSession?.conversationHistory.append(
+                Message(id: UUID(), role: "assistant", content: answer, timestamp: Date()))
+            if let onSentence {
+                var sentences = SentenceSplitter()
+                sentences.append(answer).forEach(onSentence)
+                if let rest = sentences.flush() { onSentence(rest) }
+            }
+            return answer
+        }
 
         currentSession?.conversationHistory.append(
             Message(id: UUID(), role: "user", content: query, timestamp: Date())
@@ -321,19 +385,28 @@ class CookingSessionManager: ObservableObject, TimerManager {
     }
 
     private func createRecipeFromSession(_ session: CookingSession) -> Recipe {
-        return Recipe(
-            id: session.sourceRecipeID ?? session.id,
-            title: session.recipe.title,
-            description: session.recipe.description,
-            servings: session.recipe.servings,
-            prepTime: session.recipe.prepTime,
-            cookTime: session.recipe.cookTime,
-            ingredients: session.recipe.ingredients,
-            instructions: session.recipe.instructions,
-            tags: session.recipe.tags,
-            sourceUrl: session.recipe.sourceUrl,
-            cuisineType: session.recipe.cuisineType,
-            difficulty: session.recipe.difficulty,
+        Self.recipe(from: session.recipe, id: session.sourceRecipeID ?? session.id)
+    }
+
+    /// `recipe` as a cook of it hands it to the assistant, for reading its prompt in ahead.
+    private static func recipeAsCooked(_ recipe: Recipe) -> Recipe {
+        Self.recipe(from: RecipeBase(from: recipe), id: recipe.id)
+    }
+
+    private static func recipe(from base: RecipeBase, id: UUID) -> Recipe {
+        Recipe(
+            id: id,
+            title: base.title,
+            description: base.description,
+            servings: base.servings,
+            prepTime: base.prepTime,
+            cookTime: base.cookTime,
+            ingredients: base.ingredients,
+            instructions: base.instructions,
+            tags: base.tags,
+            sourceUrl: base.sourceUrl,
+            cuisineType: base.cuisineType,
+            difficulty: base.difficulty,
             createdAt: Date(),
             updatedAt: Date()
         )
@@ -472,7 +545,7 @@ class CookingSessionManager: ObservableObject, TimerManager {
 
     /// Adds a timer from the UI, stopped — the card's play button starts it.
     ///
-    /// Same rule as the assistant's `create_timer`: creating a timer and running it are two
+    /// Same rule as the assistant's `timer` tool: creating a timer and running it are two
     /// decisions, and a timer that starts the moment it is added gives no chance to fix a
     /// mistyped duration.
     ///
@@ -678,5 +751,17 @@ extension CookingSessionManager: RecipeEditing {
             return nil
         }
         return trimmed
+    }
+}
+
+// MARK: - Shopping list
+
+/// `add_to_shopping_list`, onto the kitchen's list, labelled with the recipe being cooked.
+extension CookingSessionManager: ShoppingListWriting {
+    func addShoppingItems(_ names: [String]) -> [String] {
+        guard let kitchen else { return [] }
+        let title = currentSession?.recipe.title
+        let recipeTitle = title?.isEmpty == false ? title : nil
+        return names.filter { kitchen.addToShoppingList([$0], recipeTitle: recipeTitle) == 1 }
     }
 }

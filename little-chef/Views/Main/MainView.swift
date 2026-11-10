@@ -43,6 +43,8 @@ struct MainView: View {
         .environmentObject(recipeManager)
         .environmentObject(kitchenManager)
         .environment(\.selectedTab, $selectedTab)
+        // The cooking assistant reads the inventory and adds to the shopping list.
+        .onAppear { cookingSessionManager.kitchen = kitchenManager }
     }
 
     private var mainTabView: some View {

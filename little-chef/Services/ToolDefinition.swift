@@ -96,6 +96,15 @@ protocol RecipeEditing {
     ) -> [String]
 }
 
+// MARK: - Shopping List Protocol
+
+/// The user's shopping list, for the assistant to add to while they cook.
+@MainActor
+protocol ShoppingListWriting {
+    /// Adds each name the list doesn't already have. Returns the ones that were new.
+    func addShoppingItems(_ names: [String]) -> [String]
+}
+
 // MARK: - Tool specs
 
 /// One tool, in the one place both backends read it from.
@@ -176,11 +185,14 @@ struct CookingTools {
     /// The session's recipe, when this cook has one to edit. Nil leaves the recipe tools off the
     /// list entirely rather than offering tools that would answer every call with a refusal.
     let recipeEditor: RecipeEditing?
+    /// The user's shopping list. Nil leaves `add_to_shopping_list` off the list.
+    let shoppingList: ShoppingListWriting?
     private let loopGuard: ToolLoopGuard
 
-    init(timerManager: TimerManager, recipeEditor: RecipeEditing? = nil) {
+    init(timerManager: TimerManager, recipeEditor: RecipeEditing? = nil, shoppingList: ShoppingListWriting? = nil) {
         self.timerManager = timerManager
         self.recipeEditor = recipeEditor
+        self.shoppingList = shoppingList
         self.loopGuard = ToolLoopGuard()
     }
 
@@ -194,73 +206,55 @@ struct CookingTools {
     func beginToolLoop() { loopGuard.beginLoop() }
 
     /// Every tool this session offers, backend-agnostic.
+    ///
+    /// Five at most, where there were twelve. The definitions are the largest part of the cooking
+    /// prompt (about 1,800 tokens for twelve), every one of them is read before a cook's first
+    /// answer, and a small model picks the right tool more often from fewer. See CLAUDE.md, "The
+    /// cooking tools".
     var toolSpecs: [CookingToolSpec] {
-        recipeEditor == nil ? Self.timerToolSpecs : Self.timerToolSpecs + Self.recipeToolSpecs
+        var specs = Self.timerToolSpecs
+        if recipeEditor != nil { specs += Self.recipeToolSpecs }
+        if shoppingList != nil { specs.append(Self.shoppingToolSpec) }
+        return specs
     }
 
     /// Native MLX tool specs for passing to UserInput
     var nativeToolSpecs: [ToolSpec] { toolSpecs.map(\.mlxToolSpec) }
 
-    // MARK: - Timer tools
+    // MARK: - Timer tool
 
+    /// One tool for every timer action, where there were five. The names it replaced
+    /// (`create_timer`, `start_timer`...) are still executed, for the models that copy them out of
+    /// an earlier turn or their training.
     static let timerToolSpecs: [CookingToolSpec] = [
         CookingToolSpec(
-            name: "create_timer",
-            description: "Create a new cooking timer, stopped. This does NOT start it — the user must ask separately before you call start_timer. Provide minutes, seconds, or both (e.g. 30s → seconds:30, 1m30s → minutes:1 seconds:30).",
+            name: "timer",
+            description: "Create, start, stop, change or delete a cooking timer. create makes it stopped: start it only when the user asks to, never in the same reply. Give durations as minutes, seconds or both (90 seconds is minutes 1, seconds 30).",
             parameters: [
-                .init(name: "name", type: "string", description: "Timer label e.g. pasta, chicken", isRequired: true),
-                .init(name: "minutes", type: "integer", description: "Whole minutes (omit or 0 if under a minute)"),
-                .init(name: "seconds", type: "integer", description: "Additional seconds 0-59")
-            ]
-        ),
-        CookingToolSpec(
-            name: "start_timer",
-            description: "Start or resume an existing timer by name. Only call this when the user asks to start it, never in the same reply that created it.",
-            parameters: [
-                .init(name: "name", type: "string", description: "Timer name to start", isRequired: true)
-            ]
-        ),
-        CookingToolSpec(
-            name: "stop_timer",
-            description: "Stop a running timer by name, keeping the time left so it can be resumed",
-            parameters: [
-                .init(name: "name", type: "string", description: "Timer name to stop", isRequired: true)
-            ]
-        ),
-        CookingToolSpec(
-            name: "update_timer",
-            description: "Change an existing timer's duration, its name, or both. Give the timer's current name plus whatever is changing.",
-            parameters: [
-                .init(name: "name", type: "string", description: "The timer's current name", isRequired: true),
-                .init(name: "new_name", type: "string", description: "New label, if renaming"),
-                .init(name: "minutes", type: "integer", description: "New duration, whole minutes (omit if only renaming)"),
-                .init(name: "seconds", type: "integer", description: "New duration, additional seconds 0-59")
-            ]
-        ),
-        CookingToolSpec(
-            name: "delete_timer",
-            description: "Delete a timer by name",
-            parameters: [
-                .init(name: "name", type: "string", description: "Timer name to delete", isRequired: true)
+                .init(name: "action", type: "string", description: "create, start, stop, change or delete", isRequired: true),
+                .init(name: "name", type: "string", description: "The timer's label, e.g. pasta. For change, its current label", isRequired: true),
+                .init(name: "minutes", type: "integer", description: "Whole minutes, for create or change"),
+                .init(name: "seconds", type: "integer", description: "Additional seconds 0-59, for create or change"),
+                .init(name: "new_name", type: "string", description: "For change: a new label")
             ]
         ),
     ]
 
     // MARK: - Recipe tools
 
-    /// The recipe tools, one per kind of edit and each taking a *list*.
+    /// The recipe tools: one per section, each taking lists.
     ///
-    /// Batched rather than one line per call, and that is the whole point of the shape. A cook
-    /// says "I used two eggs, some flour and a splash of milk" in one breath, and a per-line tool
-    /// answers that with three round trips — three full re-prefills of the conversation, each one
-    /// another chance for a small model to lose the thread of what it has already recorded. One
-    /// call records the lot.
+    /// Lists rather than one line per call, and that is the whole point of the shape. A cook says
+    /// "I used two eggs, some flour and a splash of milk" in one breath, and a per-line tool
+    /// answers that with three calls — on the Mac three round trips, each another chance for a
+    /// small model to lose the thread of what it has already recorded. One call records the lot.
     ///
-    /// Split by section rather than collapsed into a single `edit_recipe`, for two reasons. A
-    /// whole-recipe tool makes the model re-emit every untouched line to change one of them,
-    /// which `RecipeDiff` then reports as the user having edited all of them — its own paraphrase
-    /// presented back as their changes. And a malformed batch of steps would take the ingredient
-    /// edits down with it; separate calls fail separately.
+    /// One tool per section rather than a single `edit_recipe`, for two reasons. A whole-recipe
+    /// tool makes the model re-emit every untouched line to change one of them, which `RecipeDiff`
+    /// then reports as the user having edited all of them — its own paraphrase presented back as
+    /// their changes. And a malformed batch of steps would take the ingredient edits down with it;
+    /// separate calls fail separately. Add, change and remove share a tool: they were six tools
+    /// until November 2026, and their definitions alone were a third of the prompt.
     ///
     /// The lists are `string` rather than `array` because the schema both backends project from
     /// ``CookingToolSpec`` is flat — `BigBroTool.Definition.Parameters.Property` is a `type` and a
@@ -269,47 +263,23 @@ struct CookingTools {
     /// JSON array too, for the models that send one anyway.
     static let recipeToolSpecs: [CookingToolSpec] = [
         CookingToolSpec(
-            name: "add_ingredients",
-            description: "Record one or more ingredients in the recipe being cooked. Pass every ingredient at once, one per line, with the amount in the line itself — 'two cloves of garlic, minced\ntwo eggs\n300 grams plain flour'. Never call this once per ingredient.",
+            name: "edit_ingredients",
+            description: "Change the ingredient list of the recipe being cooked. Use add, change or remove, as many as the message needs, each one entry per line — everything from one message in one call.",
             parameters: [
-                .init(name: "items", type: "string", description: "The ingredient lines, one per line, each including its amount", isRequired: true),
-                .init(name: "position", type: "integer", description: "Where the first of them goes in the list, counting from 1. Omit to add them at the end.")
+                .init(name: "add", type: "string", description: "Ingredients to add, one per line, each with its amount: 'two eggs\n300 grams flour'"),
+                .init(name: "change", type: "string", description: "Rewrites, one per line, as 'the line as it reads now -> the whole new line'"),
+                .init(name: "remove", type: "string", description: "Ingredients to remove, one per line, as the recipe lists them"),
+                .init(name: "position", type: "integer", description: "Where the first added ingredient goes, counting from 1. Omit to add at the end.")
             ]
         ),
         CookingToolSpec(
-            name: "update_ingredients",
-            description: "Rewrite ingredients the recipe already lists — a different amount, a substitution. One change per line, written as 'the line as it reads now -> the whole replacement line'. Pass every change at once.",
+            name: "edit_steps",
+            description: "Change the steps of the recipe being cooked. Use add, change or remove, as many as the message needs, each one entry per line — everything from one message in one call.",
             parameters: [
-                .init(name: "changes", type: "string", description: "One change per line, as 'existing ingredient -> replacement ingredient, amount included'", isRequired: true)
-            ]
-        ),
-        CookingToolSpec(
-            name: "remove_ingredients",
-            description: "Remove one or more ingredients from the recipe being cooked. One per line, quoted as the recipe lists them.",
-            parameters: [
-                .init(name: "items", type: "string", description: "The ingredients to remove, one per line", isRequired: true)
-            ]
-        ),
-        CookingToolSpec(
-            name: "add_steps",
-            description: "Record one or more steps in the recipe's method, in the order they happened. One step per line, each written as an instruction — 'Fry the onions until soft, about eight minutes\nAdd the garlic and cook for one minute'. Never call this once per step.",
-            parameters: [
-                .init(name: "steps", type: "string", description: "The steps, one per line, each written as an instruction", isRequired: true),
-                .init(name: "position", type: "integer", description: "Which step number the first of them becomes, counting from 1. Omit to add them at the end.")
-            ]
-        ),
-        CookingToolSpec(
-            name: "update_steps",
-            description: "Rewrite steps the recipe already has. One change per line, written as 'step number or a quote from it -> the whole replacement step'. Pass every change at once.",
-            parameters: [
-                .init(name: "changes", type: "string", description: "One change per line, as 'step number or quote -> the whole replacement step'", isRequired: true)
-            ]
-        ),
-        CookingToolSpec(
-            name: "remove_steps",
-            description: "Remove one or more of the recipe's steps. One per line, given as a step number or a quote from the step.",
-            parameters: [
-                .init(name: "steps", type: "string", description: "The steps to remove, one per line, each a number or a quote", isRequired: true)
+                .init(name: "add", type: "string", description: "Steps to add, one per line, each an instruction, in the order they happened"),
+                .init(name: "change", type: "string", description: "Rewrites, one per line, as 'step number or a quote from it -> the whole new step'"),
+                .init(name: "remove", type: "string", description: "Steps to remove, one per line, each a step number or a quote"),
+                .init(name: "position", type: "integer", description: "Which step number the first added step becomes. Omit to add at the end.")
             ]
         ),
         CookingToolSpec(
@@ -327,6 +297,16 @@ struct CookingTools {
             ]
         ),
     ]
+
+    // MARK: - Shopping list tool
+
+    static let shoppingToolSpec = CookingToolSpec(
+        name: "add_to_shopping_list",
+        description: "Put things on the user's shopping list, when they ask to.",
+        parameters: [
+            .init(name: "items", type: "string", description: "What to buy, one per line, as plain names: 'shallots\nheavy cream'", isRequired: true)
+        ]
+    )
 
     /// What a tool call produced, told twice — because a tool result has two possible audiences
     /// and they want different things.
@@ -361,10 +341,105 @@ struct CookingTools {
     /// shown and spoken. So anything said only to steer the model belongs in `forModel` alone.
     @MainActor
     func execute(toolName: String, arguments: [String: Any]) -> ToolOutcome {
+        switch toolName {
+        case "timer":
+            return executeTimer(arguments: arguments)
+        case "edit_ingredients":
+            return executeSectionEdit(arguments: arguments, add: "add_ingredients", change: "update_ingredients",
+                                      remove: "remove_ingredients", label: "Ingredients", numbered: false)
+        case "edit_steps":
+            return executeSectionEdit(arguments: arguments, add: "add_steps", change: "update_steps",
+                                      remove: "remove_steps", label: "Steps", numbered: true)
+        case "add_to_shopping_list":
+            return executeShoppingList(arguments: arguments)
+        default:
+            break
+        }
         if let outcome = executeRecipeTool(toolName: toolName, arguments: arguments) {
             return outcome
         }
         return executeTimerTool(toolName: toolName, arguments: arguments)
+    }
+
+    /// `timer`, by running the single-action tool its `action` names.
+    @MainActor
+    private func executeTimer(arguments: [String: Any]) -> ToolOutcome {
+        let action = string(arguments["action"])?.lowercased() ?? ""
+        let tool: String
+        switch action {
+        case "create", "set", "add", "new", "make": tool = "create_timer"
+        case "start", "resume", "run": tool = "start_timer"
+        case "stop", "pause": tool = "stop_timer"
+        case "change", "update", "edit", "rename", "adjust": tool = "update_timer"
+        case "delete", "cancel", "remove", "clear": tool = "delete_timer"
+        default:
+            return ToolOutcome("Error: 'action' must be create, start, stop, change or delete")
+        }
+        return executeTimerTool(toolName: tool, arguments: arguments)
+    }
+
+    /// `edit_ingredients` and `edit_steps`: each of `change`, `remove` and `add` that was given,
+    /// run as the single-purpose tool it replaced.
+    ///
+    /// Changes and removals first, while step numbers still mean what they meant in the recipe the
+    /// model was shown; additions last. The model hears the list once, at the end, rather than
+    /// after each part.
+    @MainActor
+    private func executeSectionEdit(
+        arguments: [String: Any], add: String, change: String, remove: String, label: String, numbered: Bool
+    ) -> ToolOutcome {
+        guard let editor = recipeEditor else { return Self.noRecipeToEdit }
+        var parts: [(tool: String, arguments: [String: Any])] = []
+        if let changes = arguments["change"] ?? arguments["changes"] {
+            parts.append((change, ["changes": changes]))
+        }
+        if let removals = arguments["remove"] {
+            parts.append((remove, ["items": removals, "steps": removals]))
+        }
+        if let additions = arguments["add"] {
+            var added: [String: Any] = ["items": additions, "steps": additions]
+            if let position = arguments["position"] { added["position"] = position }
+            parts.append((add, added))
+        }
+        // The shape of the tools this replaced — `action` plus `items` — for a model that sends it.
+        if parts.isEmpty, let action = string(arguments["action"])?.lowercased(),
+           let entries = arguments["items"] ?? arguments["steps"] ?? arguments["changes"] {
+            switch action {
+            case "add":
+                var added: [String: Any] = ["items": entries, "steps": entries]
+                if let position = arguments["position"] { added["position"] = position }
+                parts.append((add, added))
+            case "change", "update": parts.append((change, ["changes": entries]))
+            case "remove", "delete": parts.append((remove, ["items": entries, "steps": entries]))
+            default: break
+            }
+        }
+        guard !parts.isEmpty else { return ToolOutcome("Error: give add, change or remove") }
+
+        let before = numbered ? editor.currentSteps : editor.currentIngredients
+        let spoken = parts
+            .map { executeRecipeTool(toolName: $0.tool, arguments: $0.arguments)?.forUser ?? "" }
+            .filter { !$0.isEmpty }
+            .joined(separator: " ")
+        let after = numbered ? editor.currentSteps : editor.currentIngredients
+        var forModel = [spoken, Self.currentList(label, after, numbered: numbered)]
+        if after != before { forModel.append(Self.notSavedYet) }
+        return ToolOutcome(forModel: forModel.joined(separator: " "), forUser: spoken)
+    }
+
+    @MainActor
+    private func executeShoppingList(arguments: [String: Any]) -> ToolOutcome {
+        guard let shoppingList else { return ToolOutcome("There is no shopping list to add to.") }
+        let items = lines(from: arguments, keys: ["items", "item", "names", "name", "ingredients"])
+        guard !items.isEmpty else { return ToolOutcome("Error: missing 'items'") }
+        let added = shoppingList.addShoppingItems(items)
+        let alreadyThere = items.filter { item in !added.contains { $0.caseInsensitiveCompare(item) == .orderedSame } }
+        var sentences: [String] = []
+        if !added.isEmpty { sentences.append("Added \(CookingPrompt.list(added)) to your shopping list.") }
+        if !alreadyThere.isEmpty {
+            sentences.append("\(CookingPrompt.list(alreadyThere)) \(alreadyThere.count == 1 ? "was" : "were") already on it.")
+        }
+        return ToolOutcome(sentences.joined(separator: " "))
     }
 
     @MainActor

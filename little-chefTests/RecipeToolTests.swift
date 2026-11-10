@@ -256,10 +256,7 @@ struct RecipeToolTests {
         let (tools, _) = harness()
         let names = Set(tools.toolSpecs.map(\.name))
 
-        #expect(names.isSuperset(of: [
-            "add_ingredients", "update_ingredients", "remove_ingredients",
-            "add_steps", "update_steps", "remove_steps", "set_recipe_details",
-        ]))
+        #expect(names == ["timer", "edit_ingredients", "edit_steps", "set_recipe_details"])
     }
 
     @Test func noRecipeMeansNoRecipeTools() {
