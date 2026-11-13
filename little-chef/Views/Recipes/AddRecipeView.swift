@@ -33,21 +33,13 @@ struct AddRecipeView: View {
                 VStack(spacing: 24) {
                     // Input type selector
                     VStack(spacing: 16) {
-                        Text("Recipe Source")
-                            .font(.headline)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                        
-                        LazyVGrid(columns: Array(repeating: GridItem(.flexible()), count: 3), spacing: 12) {
+                        Picker("Recipe Source", selection: $selectedInputType) {
                             ForEach(availableInputTypes, id: \.self) { inputType in
-                                InputTypeCard(
-                                    inputType: inputType,
-                                    isSelected: selectedInputType == inputType
-                                ) {
-                                    selectedInputType = inputType
-                                    clearInputs()
-                                }
+                                Text(inputType.displayName).tag(inputType)
                             }
                         }
+                        .pickerStyle(.segmented)
+                        .onChange(of: selectedInputType) { _, _ in clearInputs() }
 
                         if !llmRecipeParsingEnabled {
                             Text("Text and image import need the AI assistant. \(LLMService.shared.unavailableReason ?? "The model on this device can't read recipes.") Import from a recipe URL instead.")
@@ -79,20 +71,16 @@ struct AddRecipeView: View {
                             HStack {
                                 if isParsingRecipe {
                                     ProgressView()
-                                        .progressViewStyle(CircularProgressViewStyle(tint: .white))
-                                        .scaleEffect(0.8)
                                 } else {
                                     Image(systemName: "wand.and.stars")
                                 }
                                 Text(isParsingRecipe ? "Parsing Recipe..." : "Parse Recipe")
                             }
                             .font(.headline)
-                            .foregroundColor(.white)
                             .frame(maxWidth: .infinity)
-                            .padding()
-                            .background(canParseRecipe ? Color.orange : Color.gray)
-                            .cornerRadius(12)
                         }
+                        .buttonStyle(.borderedProminent)
+                        .controlSize(.large)
                         .disabled(!canParseRecipe || isParsingRecipe)
                         .padding(.horizontal)
 
@@ -240,34 +228,6 @@ struct AddRecipeView: View {
             
             isParsingRecipe = false
         }
-    }
-}
-
-// MARK: - Input Type Card
-struct InputTypeCard: View {
-    let inputType: RecipeInputType
-    let isSelected: Bool
-    let action: () -> Void
-    
-    var body: some View {
-        Button(action: action) {
-            VStack(spacing: 8) {
-                Image(systemName: inputType.icon)
-                    .font(.title2)
-                    .foregroundColor(isSelected ? .white : .orange)
-                
-                Text(inputType.displayName)
-                    .font(.caption)
-                    .fontWeight(.medium)
-                    .foregroundColor(isSelected ? .white : .primary)
-                    .multilineTextAlignment(.center)
-            }
-            .frame(maxWidth: .infinity)
-            .padding(.vertical, 16)
-            .background(isSelected ? Color.orange : Color(.systemGray6))
-            .cornerRadius(12)
-        }
-        .buttonStyle(PlainButtonStyle())
     }
 }
 
@@ -510,17 +470,10 @@ struct ParsedRecipePreview: View {
                 Spacer()
                 
                 Button(action: onEdit) {
-                    HStack {
-                        Image(systemName: "pencil")
-                        Text("Edit & Save")
-                    }
-                    .font(.subheadline)
-                    .foregroundColor(.white)
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 8)
-                    .background(Color.orange)
-                    .cornerRadius(8)
+                    Label("Edit & Save", systemImage: "pencil")
+                        .font(.subheadline)
                 }
+                .buttonStyle(.borderedProminent)
             }
             
             // Recipe preview
