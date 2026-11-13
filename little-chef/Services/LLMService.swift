@@ -709,7 +709,9 @@ class LLMService: ObservableObject {
         promptCacheKey: String?,
         onChunk: ((String) -> Void)?
     ) async throws -> String {
+        let asked = Date()
         let container = try await downloadedModelContainer(modelId: modelId)
+        let loaded = Date()
 
         let chat = Self.chatMessages(messages)
         let toolSpecs = tools?.nativeToolSpecs
@@ -722,6 +724,7 @@ class LLMService: ObservableObject {
             ? promptCacheKey.map { "\($0)|\(modelId ?? activeOnDeviceModel?.modelId ?? "")" }
             : nil
 
+        let reuse = ReuseCount()
         let stream: AsyncStream<Generation> = try await container.perform { (context: ModelContext) in
             let lmInput = try await context.processor.prepare(input: userInput)
             var parameters = GenerateParameters(
@@ -751,11 +754,15 @@ class LLMService: ObservableObject {
                 boundary: PromptPrefixCache.boundary(prompt: prompt, placeholderPrompt: placeholderPrompt),
                 key: cacheKey, model: context.model, parameters: parameters)
             dprint("🤖 [LLM] prompt \(prompt.count) tokens, \(prefixCache.lastReusedTokenCount) already read, \(prepared.suffix.count) after the settled part")
+            reuse.set(prompt: prompt.count, reused: prefixCache.lastReusedTokenCount)
             return try MLXLMCommon.generate(
                 input: LMInput(tokens: MLXArray(prepared.suffix.map(Int32.init))),
                 cache: prepared.cache, parameters: parameters, context: context, tools: toolSpecs)
         }
 
+        let prepared = Date()
+        var firstToken: Date?
+        var info: GenerateCompletionInfo?
         var output = ""
         var toolCalls: [(name: String, arguments: [String: Any])] = []
         var filter = StreamingReplyFilter()
@@ -764,6 +771,7 @@ class LLMService: ObservableObject {
         for await generation in stream {
             switch generation {
             case .chunk(let chunk):
+                if firstToken == nil { firstToken = Date() }
                 output += chunk
                 if let onChunk {
                     let visible = filter.feed(chunk)
@@ -773,7 +781,10 @@ class LLMService: ObservableObject {
                     }
                 }
             case .toolCall(let call):
+                if firstToken == nil { firstToken = Date() }
                 toolCalls.append((call.function.name, call.function.arguments.mapValues { $0.anyValue }))
+            case .info(let completion):
+                info = completion
             default:
                 // Reasoning, completion info, rejected tool calls: none of it is the answer.
                 break
@@ -787,6 +798,8 @@ class LLMService: ObservableObject {
             }
         }
         dprint("🤖 [LLM] output: '\(output.prefix(200))' | tool calls: \(toolCalls.count)")
+        Self.logTiming(asked: asked, loaded: loaded, prepared: prepared, firstToken: firstToken,
+                       info: info, reuse: reuse, footprint: Self.footprint)
 
         let reply = finishOnDeviceReply(output, toolCalls: toolCalls, tools: tools)
         // Tool results arrive at the end, after the text. Streamed too, so they are shown and
@@ -972,6 +985,26 @@ class LLMService: ObservableObject {
         }
     }
 
+    /// Where an on-device reply's time went, in the unified log so a Release build reports it
+    /// too (Console, or `log collect` from a device). Numbers only, never the conversation.
+    private static let perfLog = Logger(subsystem: "NagataInc.little-chef", category: "llm-timing")
+
+    private static func logTiming(
+        asked: Date, loaded: Date, prepared: Date, firstToken: Date?,
+        info: GenerateCompletionInfo?, reuse: ReuseCount, footprint: UInt64
+    ) {
+        func s(_ t: TimeInterval) -> String { String(format: "%.2f", t) }
+        let counts = reuse.get()
+        let first = firstToken.map { s($0.timeIntervalSince(asked)) } ?? "-"
+        let line = "reply: load \(s(loaded.timeIntervalSince(asked)))s, settled part \(s(prepared.timeIntervalSince(loaded)))s "
+            + "(prompt \(counts.prompt), kept \(counts.reused)), first token \(first)s, "
+            + "rest of prompt \(info.map { String(format: "%.0f", $0.promptTokensPerSecond) } ?? "-") tok/s, "
+            + "decode \(info.map { String(format: "%.1f", $0.tokensPerSecond) } ?? "-") tok/s over \(info?.generationTokenCount ?? 0) tokens, "
+            + "footprint \(gib(footprint)), thermal \(ProcessInfo.processInfo.thermalState.rawValue)"
+        perfLog.notice("\(line, privacy: .public)")
+        dprint("🤖 [LLM] \(line)")
+    }
+
     /// What the cooking assistant has already read, kept between questions. One at a time: a
     /// new cook, another model or an unload starts it over. See `PromptPrefixCache`.
     private let promptPrefixCache = PromptPrefixCache()
@@ -1041,4 +1074,13 @@ enum LLMError: LocalizedError {
             return "There isn't enough free memory to load \(name) right now. Close other apps and ask again."
         }
     }
+}
+
+/// The prompt's size and how much of it was kept, carried out of `container.perform`.
+private final class ReuseCount: @unchecked Sendable {
+    private let lock = NSLock()
+    private var prompt = 0
+    private var reused = 0
+    func set(prompt: Int, reused: Int) { lock.withLock { self.prompt = prompt; self.reused = reused } }
+    func get() -> (prompt: Int, reused: Int) { lock.withLock { (prompt, reused) } }
 }
