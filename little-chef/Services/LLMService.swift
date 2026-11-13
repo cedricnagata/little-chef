@@ -989,8 +989,11 @@ class LLMService: ObservableObject {
             let additionalContext = model.templateContext
             let chat = Self.chatMessages([system])
             let prefixCache = promptPrefixCache
-            let started = Date()
-            try await container.perform { (context: ModelContext) in
+            let queued = Date()
+            let read = try await container.perform { (context: ModelContext) -> (waited: TimeInterval, read: TimeInterval) in
+                // Timed from here, not from the call: a read-ahead that waited behind another
+                // one for the container read nothing itself, and would otherwise log the wait.
+                let started = Date()
                 func tokens(_ question: String) async throws -> [Int] {
                     try await context.processor.prepare(input: UserInput(
                         chat: chat + [.user(question)], tools: toolSpecs, additionalContext: additionalContext
@@ -1005,8 +1008,9 @@ class LLMService: ObservableObject {
                     prompt: prompt,
                     boundary: PromptPrefixCache.boundary(prompt: prompt, placeholderPrompt: placeholderPrompt),
                     key: "\(promptCacheKey)|\(model.modelId)", model: context.model, parameters: parameters)
+                return (started.timeIntervalSince(queued), Date().timeIntervalSince(started))
             }
-            dprint("🤖 [LLM] Read the cook's prompt ahead in \(String(format: "%.1f", Date().timeIntervalSince(started)))s")
+            dprint("🤖 [LLM] Read the cook's prompt ahead in \(String(format: "%.1f", read.read))s (\(prefixCache.lastReusedTokenCount) tokens already read, \(String(format: "%.1f", read.waited))s waiting)")
         } catch {
             dprint("🤖 [LLM] ⚠️ Couldn't read the cook's prompt ahead: \(error.localizedDescription)")
         }
