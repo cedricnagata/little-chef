@@ -222,9 +222,11 @@ would have gone back to mlx-swift 0.32, since #630 is based on upstream as of 20
 
 1. Find the first upstream commit or release with `prism_hadamard_qwen35` in
    `Libraries/MLXLLM/LLMModelFactory.swift` that still accepts mlx-swift 0.33, **and** that
-   doesn't read the vision tower for a text model (`excludedCheckpointNamespaces` on
-   `Qwen35Model`; offer `bf55422` upstream if it isn't there). Without it, the 9B's load peaks
-   0.85 GiB higher, which got the app killed on an iPhone 14 Pro.
+   doesn't read the vision tower for a text model. Upstream has that since
+   [#711](https://github.com/ml-explore/mlx-swift-lm/pull/711) (`c9a9a3d`, 2026-11-10), by a
+   different route (checkpoint layouts: a component the model doesn't have is never read), so
+   `bf55422` needn't go upstream. Without it the 9B's load peaks 0.85 GiB higher, which got the
+   app killed on an iPhone 14 Pro. Measure the 9B's load peak with bonsai-check after the move.
 2. In `project.pbxproj`, point the `mlx-swift-lm` package reference back at
    `https://github.com/ml-explore/mlx-swift-lm`: that revision, or a version requirement once a
    tagged release has both. Update `Package.resolved` to match (`tools/mac-test` saves Xcode's
