@@ -266,6 +266,16 @@ interactively. Models are stored under Application Support in the hub's
   6 GB phone the limit isn't the only ceiling: the whole device runs short first. The 4B ran
   there without a warning (1.84 GiB peak) but its advice was poor: pancetta replaced by "an equal
   amount" of olive oil, "150 ml, roughly 1 cup". Cedric judged it not good enough to use.
+- **A memory warning keeps the model** unless the app has under 0.75 GiB of headroom left
+  (`memoryWarningUnloadHeadroom`); it clears MLX's buffer cache either way. Unloading on every
+  warning, as before, threw the 9B and its kept prompt away every few minutes of a cook on a 6 GB
+  phone, and the next question waited 30-40 s (Release, iPhone 14 Pro, 2026-11-13: 1.5-2 s to
+  the first token with the prompt kept, 31-40 s without; full prefill ~83 tok/s, decode ~14.5).
+- **Timing is in the unified log**, Release builds included: subsystem `NagataInc.little-chef`,
+  category `llm-timing`, numbers only. Each on-device reply (load, settled part, prompt and kept
+  tokens, first token, prefill and decode speed, footprint, thermal state), each load, unload
+  and memory warning. From a device: `sudo log collect --device-udid <udid>`, then `log show
+  --predicate 'subsystem == "NagataInc.little-chef"'` on the archive.
 - **A load waits for memory** (`waitForMemory(toLoad:)`): 5 s after a memory warning, then up
   to 10 s for `os_proc_available_memory()` to cover the model's `memoryNeeded` less the app's
   0.5 GiB, which the footprint already counts. Failing that, the question fails with "There

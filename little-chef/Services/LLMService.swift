@@ -235,10 +235,13 @@ class LLMService: ObservableObject {
         // Restore BigBro auto-reconnect from previous launches.
         bigBroClient.resumeAutoReconnectIfEnabled()
 
-        // A resident 8B model is several gigabytes the system can't reclaim on its own, and iOS
-        // kills the app rather than asking twice. Dropping the weights on the warning turns an
-        // out-of-memory termination into a reload on the next question. Mid-generation is the
-        // one time to hold on: unloading there fails the answer the user is waiting for.
+        // A memory warning drops the model only when this app is itself close to its limit.
+        // It used to drop it on every warning, and on a 6 GB iPhone a warning comes every few
+        // minutes of a cook whatever the app does: the 9B was unloaded between questions, and
+        // the next one waited 30-40 s to load it and read the whole prompt again (Release build,
+        // iPhone 14 Pro, 2026-11-13). The warning is about the device, and iOS ends background
+        // apps first; what puts this one at risk is its own headroom. Mid-generation and
+        // mid-load it holds on regardless: unloading there fails the answer being waited for.
         //
         // The observer is never removed because the service is a process-lifetime singleton —
         // there is no point at which it should stop listening.
@@ -251,11 +254,20 @@ class LLMService: ObservableObject {
                 self?.lastMemoryWarning = Date()
                 guard let self, !self.loadedModelIds.isEmpty,
                       !self.isGenerating, self.currentlyLoadingModelId == nil else { return }
-                dprint("🤖 [LLM] ⚠️ Memory warning — unloading resident models")
-                self.unloadModel()
+                MLX.Memory.clearCache()
+                let available = UInt64(os_proc_available_memory())
+                let unload = available > 0 && available < Self.memoryWarningUnloadHeadroom
+                Self.perfLog.notice("memory warning: footprint \(Self.gib(Self.footprint), privacy: .public), available \(Self.gib(available), privacy: .public), \(unload ? "unloading" : "keeping", privacy: .public) the model")
+                dprint("🤖 [LLM] ⚠️ Memory warning — \(unload ? "unloading resident models" : "keeping the model"), \(Self.gib(available)) available")
+                if unload { self.unloadModel() }
             }
         }
     }
+
+    /// Below this much headroom a memory warning unloads the model. A reply's prefill peaks
+    /// 0.3-0.9 GiB above the weights (the 9B: 2.36 GiB of weights, 3.22 GiB at an 8.6k-token
+    /// prompt), so less than this left could not answer a long question anyway.
+    private static let memoryWarningUnloadHeadroom: UInt64 = 768 * 1024 * 1024
 
     /// Refresh which models are cached on disk.
     func refreshDownloadedModels() {
@@ -337,6 +349,7 @@ class LLMService: ObservableObject {
 
             dprint("🤖 [LLM] ✅ Model \(id) loaded successfully")
             Self.logMemory("after loading \(id)")
+            Self.perfLog.notice("loaded \(id, privacy: .public): footprint \(Self.gib(Self.footprint), privacy: .public)")
             self.modelContainers[id] = container
             loadedModelIds = Set(modelContainers.keys)
             loadProgress = 1.0
@@ -421,6 +434,7 @@ class LLMService: ObservableObject {
     }
 
     func unloadModel(modelId: String? = nil) {
+        if !modelContainers.isEmpty { Self.perfLog.notice("unloading \(modelId ?? "every model", privacy: .public)") }
         let unloadedSomething: Bool
         if let modelId {
             unloadedSomething = modelContainers.removeValue(forKey: modelId) != nil
