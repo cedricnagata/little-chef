@@ -11,7 +11,7 @@ Available on [TestFlight](https://testflight.apple.com/join/Rz11FzNk)
 - Ask natural language questions: "How long do I cook this?" or "Can I substitute butter with oil?"
 - Two hands-free modes, chosen when you start the loop:
   - **Hands-free** — answers everything it hears, for cooking alone
-  - **Wait for "hey little chef"** — only answers when called by name, for a busy kitchen. The wake word is editable in Settings
+  - **Wait for "hey little chef"** — only answers when called by name, for a busy kitchen
 - Push-to-talk dictation as an alternative: one utterance lands in the text field, where a misheard ingredient can be corrected before it becomes a question
 - Auto-speak responses, with the voice matched to the active AI backend. Replies are spoken sentence by sentence as they generate, rather than after the whole answer
 
@@ -33,7 +33,9 @@ Available on [TestFlight](https://testflight.apple.com/join/Rz11FzNk)
 - Every import opens for review before it's saved
 
 ### Kitchen: Inventory and Shopping List
-- Keep a list of the ingredients you have, with a Staples section (salt, oil, flour…) that counts as always on hand
+- Keep a list of the ingredients you have, grouped by kind (produce, proteins, dairy and eggs, grains, seasonings and more), with suggestions from about 350 common ingredients as you type
+- After a cook, **What's Left?** asks which of the ingredients it used you still have, takes the used-up ones off the inventory and puts them on the shopping list
+- **Add Ingredients to Shopping List** from any recipe's menu adds everything you don't have
 - A shopping list: add items by hand or a recipe's missing ingredients in one tap, then tick them off and move them into the inventory with **Done Shopping**
 - Recipes show what you have and what's missing, and you're warned before starting a cook that needs something you don't have
 - Filter recipes to those you **Can Make Now** or are **Missing a Few** (one or two) ingredients for
@@ -68,7 +70,7 @@ A device whose limit is 9 GiB or more (in practice an iPad with 16 GB) can also 
 
 Only the 27B and 9B models support tool use. Below them, recipe import still works from recipe websites via structured data, and timers are set manually. Thinking is turned off on every model.
 
-- Models are downloaded only when you tap Download in Settings, with the size shown and a warning on cellular
+- Models are downloaded only when you tap Download in Settings, with the size shown and a warning on cellular. The download carries on in the background if you switch apps
 - No internet required after the download
 - Full privacy — all inference runs on-device
 
@@ -190,6 +192,6 @@ That package links the app's Foundation-only files and the same test folder, so 
 | --- | --- | --- |
 | `unit-tests.yml` | every pull request and push to `main` | The unit tests on Linux |
 | `pr-build.yml` | every pull request | An unsigned Release build for iOS devices with Xcode 26, to catch a broken build before merge |
-| `deploy-ios-testflight.yml` | a PR merged with the `deploy-ios` label, or run by hand | Archives, signs and uploads to TestFlight |
+| `deploy-ios-testflight.yml` | a PR merged with the `deploy-ios-internal` label (TestFlight internal testing only, the default) or `deploy-ios`, or run by hand | Archives, signs and uploads to TestFlight |
 
 How the deploy signs, where its secrets live and what each failure means is in CLAUDE.md, "TestFlight deploy pipeline".
