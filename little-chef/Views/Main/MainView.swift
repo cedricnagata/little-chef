@@ -31,6 +31,7 @@ struct MainView: View {
     /// recipe filters and the pre-cook check read.
     @StateObject private var kitchenManager = KitchenManager()
     @State private var selectedTab = 0
+    @Environment(\.scenePhase) private var scenePhase
 
     var body: some View {
         Group {
@@ -44,7 +45,14 @@ struct MainView: View {
         .environmentObject(kitchenManager)
         .environment(\.selectedTab, $selectedTab)
         // The cooking assistant reads the inventory and adds to the shopping list.
-        .onAppear { cookingSessionManager.kitchen = kitchenManager }
+        .onAppear {
+            cookingSessionManager.kitchen = kitchenManager
+            cookingSessionManager.restoreSavedCook()
+        }
+        // iOS may end the app any time after it leaves the foreground, without telling it.
+        .onChange(of: scenePhase) { _, phase in
+            if phase != .active { cookingSessionManager.saveCookNow() }
+        }
     }
 
     private var mainTabView: some View {

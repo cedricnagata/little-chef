@@ -266,6 +266,12 @@ interactively. Models are stored under Application Support in the hub's
   6 GB phone the limit isn't the only ceiling: the whole device runs short first. The 4B ran
   there without a warning (1.84 GiB peak) but its advice was poor: pancetta replaced by "an equal
   amount" of olive oil, "150 ml, roughly 1 cup". Cedric judged it not good enough to use.
+- **A cook survives iOS ending the app** (`SavedCook`, `current-cook.json` in Application
+  Support). It is saved a second after each change and as the app leaves the foreground, and
+  restored at launch if under 12 hours old: recipe, conversation, edits, the kitchen line and
+  the timers, a running one counted down by the time the app was gone. The model isn't saved; the
+  cooking view warms it up again. Ending the cook removes the file. Before this, switching to the
+  camera and a browser mid-cook on an iPhone 14 Pro lost the whole cook (2026-11-12).
 - **A memory warning keeps the model** unless the app has under 0.75 GiB of headroom left
   (`memoryWarningUnloadHeadroom`); it clears MLX's buffer cache either way. Unloading on every
   warning, as before, threw the 9B and its kept prompt away every few minutes of a cook on a 6 GB

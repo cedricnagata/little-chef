@@ -31,7 +31,7 @@ struct CookingPrompt {
     /// What the inventory says about the recipe, worked out by `IngredientMatcher` when the cook
     /// starts. Nil when the user keeps no inventory, so the assistant doesn't claim they have
     /// nothing.
-    struct Kitchen: Equatable {
+    struct Kitchen: Equatable, Codable {
         /// What the recipe needs and the inventory doesn't list, as names to shop for.
         var missing: [String]
     }

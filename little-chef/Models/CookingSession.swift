@@ -47,7 +47,7 @@ struct CookingSession: Codable, Identifiable {
     var isBuildingNewRecipe: Bool { sourceRecipeID == nil }
 
     enum CodingKeys: String, CodingKey {
-        case recipe
+        case id, recipe
         case sourceRecipeID = "source_recipe_id"
         case baselineRecipe = "baseline_recipe"
         case conversationHistory = "conversation_history"

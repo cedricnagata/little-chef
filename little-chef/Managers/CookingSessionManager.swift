@@ -8,10 +8,13 @@
 
 import Foundation
 import SwiftUI
+import ActivityKit
 
 @MainActor
 class CookingSessionManager: ObservableObject, TimerManager {
-    @Published var currentSession: CookingSession?
+    @Published var currentSession: CookingSession? {
+        didSet { scheduleSave() }
+    }
     @Published var isLoading = false
     @Published var error: String?
     @Published var localTimers: [LocalTimer] = []
@@ -60,12 +63,56 @@ class CookingSessionManager: ObservableObject, TimerManager {
     /// `warmUpTask`, which is nil both before a warm-up and when there was nothing to warm.
     private var hasWarmedUp = false
 
+    /// Where the cook in progress is kept between launches. See `SavedCook`.
+    private let cookStore: SavedCookStore
+    private var saveTask: Task<Void, Never>?
+
     convenience init() {
         self.init(llmService: .shared)
     }
 
-    init(llmService: LLMService) {
+    init(llmService: LLMService, cookStore: SavedCookStore = .standard) {
         self.llmService = llmService
+        self.cookStore = cookStore
+    }
+
+    // MARK: - Surviving a relaunch
+
+    /// Saves the cook a moment after it changes. A reply rewrites its message as it streams, and
+    /// one write when it settles is enough.
+    private func scheduleSave() {
+        saveTask?.cancel()
+        guard currentSession != nil else { return }
+        saveTask = Task { [weak self] in
+            try? await Task.sleep(for: .seconds(1))
+            guard !Task.isCancelled else { return }
+            self?.saveCookNow()
+        }
+    }
+
+    /// Saves the cook now. Called as the app leaves the foreground, the last moment before iOS
+    /// may end it, so the timers are saved as they stand.
+    func saveCookNow() {
+        saveTask?.cancel()
+        guard let session = currentSession else { return }
+        cookStore.save(SavedCook(session: session, provider: sessionProvider, kitchen: kitchenNote,
+                                 timers: localTimers.map(\.saved)))
+    }
+
+    /// Puts back a cook that iOS ended the app during, if there is one. Called once at launch;
+    /// the cooking view's own appearance warms the model up again (`initAgentForSession`).
+    func restoreSavedCook() {
+        guard currentSession == nil, let cook = cookStore.load() else { return }
+        // Activities outlive the app; their timers come back with new ones.
+        for activity in Activity<TimerActivityAttributes>.activities {
+            Task { await activity.end(nil, dismissalPolicy: .immediate) }
+        }
+        sessionProvider = cook.provider
+        kitchenNote = cook.kitchen
+        localTimers = cook.timers.map { LocalTimer.restoring($0.resumed()) }
+        hasWarmedUp = false
+        currentSession = cook.session
+        dprint("🔵 Restored the cook in progress from \(cook.savedAt)")
     }
 
     // MARK: - Session Management
@@ -220,6 +267,8 @@ class CookingSessionManager: ObservableObject, TimerManager {
     }
 
     func endCookingSession() {
+        saveTask?.cancel()
+        cookStore.clear()
         kitchenNote = nil
         warmUpTask?.cancel()
         warmUpTask = nil
