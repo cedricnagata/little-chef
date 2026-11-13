@@ -18,7 +18,7 @@ let package = Package(
     platforms: [.macOS(.v14)],
     dependencies: [
         .package(url: "https://github.com/ml-explore/mlx-swift", exact: "0.33.0"),
-        .package(url: "https://github.com/cedricnagata/mlx-swift-lm", revision: "7a5ff87473419be495faf3c57bfb95fe587c9897"),
+        .package(url: "https://github.com/cedricnagata/mlx-swift-lm", revision: "bf5542243feb08d4c1a9c7a3b89db22894422930"),
         .package(url: "https://github.com/huggingface/swift-huggingface", from: "0.13.0"),
         .package(url: "https://github.com/huggingface/swift-transformers", from: "1.3.5"),
     ],

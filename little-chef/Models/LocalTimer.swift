@@ -205,3 +205,27 @@ class LocalTimer: ObservableObject, Identifiable {
         return Double(durationSeconds - remainingSeconds) / Double(durationSeconds)
     }
 }
+
+// MARK: - Saving
+
+extension LocalTimer {
+    /// The timer as the saved cook keeps it. See `SavedCook`.
+    var saved: SavedTimer {
+        SavedTimer(id: id, label: label, durationSeconds: durationSeconds, remainingSeconds: remainingSeconds,
+                   status: status, createdAt: createdAt, startedAt: startedAt,
+                   endDate: status == .running ? endDate : nil)
+    }
+
+    /// A timer back from a saved cook, already brought up to now with `SavedTimer.resumed`. A
+    /// running one starts again against the time it had left, which reschedules its notification
+    /// under the same id and gives it a new Live Activity.
+    static func restoring(_ saved: SavedTimer) -> LocalTimer {
+        let timer = LocalTimer(
+            id: saved.id, label: saved.label, durationSeconds: saved.durationSeconds,
+            remainingSeconds: saved.remainingSeconds,
+            status: saved.status == .running ? .paused : saved.status, createdAt: saved.createdAt)
+        timer.startedAt = saved.startedAt
+        if saved.status == .running { timer.start() }
+        return timer
+    }
+}

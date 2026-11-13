@@ -71,6 +71,11 @@ class LLMService: ObservableObject {
     private static var appMemoryLimit: UInt64 {
         let available = UInt64(os_proc_available_memory())
         guard available > 0 else { return 0 }
+        return available + footprint
+    }
+
+    /// The memory iOS counts against this process: what it compares with the limit.
+    private static var footprint: UInt64 {
         var info = task_vm_info_data_t()
         var count = mach_msg_type_number_t(MemoryLayout<task_vm_info_data_t>.size / MemoryLayout<integer_t>.size)
         let result = withUnsafeMutablePointer(to: &info) {
@@ -78,7 +83,18 @@ class LLMService: ObservableObject {
                 task_info(mach_task_self_, task_flavor_t(TASK_VM_INFO), $0, &count)
             }
         }
-        return available + (result == KERN_SUCCESS ? info.phys_footprint : 0)
+        return result == KERN_SUCCESS ? info.phys_footprint : 0
+    }
+
+    private static func gib(_ bytes: UInt64) -> String {
+        String(format: "%.2f GiB", Double(bytes) / 1_073_741_824)
+    }
+
+    /// The limit, the footprint and what is left, for device logs. The limit is otherwise only
+    /// inferred from the size at which iOS terminated the app.
+    private static func logMemory(_ when: String) {
+        let available = UInt64(os_proc_available_memory())
+        dprint("🤖 [LLM] Memory \(when): footprint \(gib(footprint)), available \(gib(available)), limit \(gib(available + footprint))")
     }
 
     /// The on-device model in use: the one picked in Settings if this device can run it,
@@ -204,6 +220,7 @@ class LLMService: ObservableObject {
 
     private init() {
         _ = Self.onDeviceModelOptions
+        Self.logMemory("at launch")
         if let stored = UserDefaults.standard.string(forKey: Self.onDeviceModelKey),
            let choice = CookingModelChoice(storedValue: stored) {
             preferredOnDeviceModel = choice
@@ -218,10 +235,13 @@ class LLMService: ObservableObject {
         // Restore BigBro auto-reconnect from previous launches.
         bigBroClient.resumeAutoReconnectIfEnabled()
 
-        // A resident 8B model is several gigabytes the system can't reclaim on its own, and iOS
-        // kills the app rather than asking twice. Dropping the weights on the warning turns an
-        // out-of-memory termination into a reload on the next question. Mid-generation is the
-        // one time to hold on: unloading there fails the answer the user is waiting for.
+        // A memory warning drops the model only when this app is itself close to its limit.
+        // It used to drop it on every warning, and on a 6 GB iPhone a warning comes every few
+        // minutes of a cook whatever the app does: the 9B was unloaded between questions, and
+        // the next one waited 30-40 s to load it and read the whole prompt again (Release build,
+        // iPhone 14 Pro, 2026-11-13). The warning is about the device, and iOS ends background
+        // apps first; what puts this one at risk is its own headroom. Mid-generation and
+        // mid-load it holds on regardless: unloading there fails the answer being waited for.
         //
         // The observer is never removed because the service is a process-lifetime singleton —
         // there is no point at which it should stop listening.
@@ -231,13 +251,23 @@ class LLMService: ObservableObject {
             queue: .main
         ) { [weak self] _ in
             Task { @MainActor in
+                self?.lastMemoryWarning = Date()
                 guard let self, !self.loadedModelIds.isEmpty,
                       !self.isGenerating, self.currentlyLoadingModelId == nil else { return }
-                dprint("🤖 [LLM] ⚠️ Memory warning — unloading resident models")
-                self.unloadModel()
+                MLX.Memory.clearCache()
+                let available = UInt64(os_proc_available_memory())
+                let unload = available > 0 && available < Self.memoryWarningUnloadHeadroom
+                Self.perfLog.notice("memory warning: footprint \(Self.gib(Self.footprint), privacy: .public), available \(Self.gib(available), privacy: .public), \(unload ? "unloading" : "keeping", privacy: .public) the model")
+                dprint("🤖 [LLM] ⚠️ Memory warning — \(unload ? "unloading resident models" : "keeping the model"), \(Self.gib(available)) available")
+                if unload { self.unloadModel() }
             }
         }
     }
+
+    /// Below this much headroom a memory warning unloads the model. A reply's prefill peaks
+    /// 0.3-0.9 GiB above the weights (the 9B: 2.36 GiB of weights, 3.22 GiB at an 8.6k-token
+    /// prompt), so less than this left could not answer a long question anyway.
+    private static let memoryWarningUnloadHeadroom: UInt64 = 768 * 1024 * 1024
 
     /// Refresh which models are cached on disk.
     func refreshDownloadedModels() {
@@ -291,6 +321,15 @@ class LLMService: ObservableObject {
 
         MLX.Memory.cacheLimit = 20 * 1024 * 1024
 
+        do {
+            try await waitForMemory(toLoad: id)
+        } catch {
+            loadError = error.localizedDescription
+            isLoadingModel = false
+            currentlyLoadingModelId = nil
+            throw error
+        }
+
         let config = ModelConfiguration(id: id, defaultPrompt: "You are a helpful assistant.")
 
         do {
@@ -309,6 +348,8 @@ class LLMService: ObservableObject {
             }
 
             dprint("🤖 [LLM] ✅ Model \(id) loaded successfully")
+            Self.logMemory("after loading \(id)")
+            Self.perfLog.notice("loaded \(id, privacy: .public): footprint \(Self.gib(Self.footprint), privacy: .public)")
             self.modelContainers[id] = container
             loadedModelIds = Set(modelContainers.keys)
             loadProgress = 1.0
@@ -323,6 +364,43 @@ class LLMService: ObservableObject {
             isLoadingModel = false
             currentlyLoadingModelId = nil
             throw error
+        }
+    }
+
+    /// When iOS last warned that memory is low. See ``waitForMemory(toLoad:)``.
+    private var lastMemoryWarning: Date?
+
+    /// How long after a memory warning a load waits. The warning means the whole device is
+    /// short, and other apps are still being terminated to make room: on an iPhone 14 Pro a
+    /// reload started right after the warning had unloaded the 9B was itself terminated.
+    private static let memoryWarningSettleTime: TimeInterval = 5
+
+    /// How long a load waits for this process's allowance to cover the model before giving up.
+    private static let memoryWaitLimit: TimeInterval = 10
+
+    /// Wait until loading `id` should fit, or throw ``LLMError/notEnoughMemory``.
+    ///
+    /// iOS terminates an app that crosses its limit with no error and no second chance, so a
+    /// cook whose model can't fit right now is better told so than ended. The model's
+    /// ``CookingModelChoice/memoryNeeded`` includes the rest of the app, which the footprint
+    /// already counts, so what has to be available is that less ``CookingModelChoice/appAllowance``.
+    private func waitForMemory(toLoad id: String) async throws {
+        guard let model = CookingModelChoice(modelId: id), os_proc_available_memory() > 0 else { return }
+        if let warned = lastMemoryWarning {
+            let settle = Self.memoryWarningSettleTime - Date().timeIntervalSince(warned)
+            if settle > 0 {
+                dprint("🤖 [LLM] Memory warning \(String(format: "%.1f", Self.memoryWarningSettleTime - settle))s ago — waiting before loading \(id)")
+                try await Task.sleep(for: .seconds(settle))
+            }
+        }
+        let needed = UInt64((model.memoryNeeded - CookingModelChoice.appAllowance) * 1_073_741_824)
+        let deadline = Date().addingTimeInterval(Self.memoryWaitLimit)
+        while UInt64(os_proc_available_memory()) < needed {
+            guard Date() < deadline else {
+                Self.logMemory("refusing to load \(id), which needs \(Self.gib(needed))")
+                throw LLMError.notEnoughMemory(model.displayName)
+            }
+            try await Task.sleep(for: .milliseconds(500))
         }
     }
 
@@ -356,6 +434,7 @@ class LLMService: ObservableObject {
     }
 
     func unloadModel(modelId: String? = nil) {
+        if !modelContainers.isEmpty { Self.perfLog.notice("unloading \(modelId ?? "every model", privacy: .public)") }
         let unloadedSomething: Bool
         if let modelId {
             unloadedSomething = modelContainers.removeValue(forKey: modelId) != nil
@@ -644,12 +723,12 @@ class LLMService: ObservableObject {
         promptCacheKey: String?,
         onChunk: ((String) -> Void)?
     ) async throws -> String {
+        let asked = Date()
         let container = try await downloadedModelContainer(modelId: modelId)
+        let loaded = Date()
 
-        let chat = Self.chatMessages(messages)
         let toolSpecs = tools?.nativeToolSpecs
         let additionalContext = templateContext(for: modelId)
-        let userInput = UserInput(chat: chat, tools: toolSpecs, additionalContext: additionalContext)
         let prefixCache = promptPrefixCache
         // A cooking conversation keeps what the model has already read between questions; see
         // `PromptPrefixCache`. Everything else is read from the start, and leaves it alone.
@@ -657,7 +736,11 @@ class LLMService: ObservableObject {
             ? promptCacheKey.map { "\($0)|\(modelId ?? activeOnDeviceModel?.modelId ?? "")" }
             : nil
 
+        let reuse = ReuseCount()
         let stream: AsyncStream<Generation> = try await container.perform { (context: ModelContext) in
+            // Built here rather than captured: MLX's chat types aren't Sendable, `ChatMessage` is.
+            let chat = Self.chatMessages(messages)
+            let userInput = UserInput(chat: chat, tools: toolSpecs, additionalContext: additionalContext)
             let lmInput = try await context.processor.prepare(input: userInput)
             var parameters = GenerateParameters(
                 maxTokens: maxTokens ?? 2048,
@@ -686,11 +769,15 @@ class LLMService: ObservableObject {
                 boundary: PromptPrefixCache.boundary(prompt: prompt, placeholderPrompt: placeholderPrompt),
                 key: cacheKey, model: context.model, parameters: parameters)
             dprint("🤖 [LLM] prompt \(prompt.count) tokens, \(prefixCache.lastReusedTokenCount) already read, \(prepared.suffix.count) after the settled part")
+            reuse.set(prompt: prompt.count, reused: prefixCache.lastReusedTokenCount)
             return try MLXLMCommon.generate(
                 input: LMInput(tokens: MLXArray(prepared.suffix.map(Int32.init))),
                 cache: prepared.cache, parameters: parameters, context: context, tools: toolSpecs)
         }
 
+        let prepared = Date()
+        var firstToken: Date?
+        var info: GenerateCompletionInfo?
         var output = ""
         var toolCalls: [(name: String, arguments: [String: Any])] = []
         var filter = StreamingReplyFilter()
@@ -699,6 +786,7 @@ class LLMService: ObservableObject {
         for await generation in stream {
             switch generation {
             case .chunk(let chunk):
+                if firstToken == nil { firstToken = Date() }
                 output += chunk
                 if let onChunk {
                     let visible = filter.feed(chunk)
@@ -708,7 +796,10 @@ class LLMService: ObservableObject {
                     }
                 }
             case .toolCall(let call):
+                if firstToken == nil { firstToken = Date() }
                 toolCalls.append((call.function.name, call.function.arguments.mapValues { $0.anyValue }))
+            case .info(let completion):
+                info = completion
             default:
                 // Reasoning, completion info, rejected tool calls: none of it is the answer.
                 break
@@ -722,6 +813,8 @@ class LLMService: ObservableObject {
             }
         }
         dprint("🤖 [LLM] output: '\(output.prefix(200))' | tool calls: \(toolCalls.count)")
+        Self.logTiming(asked: asked, loaded: loaded, prepared: prepared, firstToken: firstToken,
+                       info: info, reuse: reuse, footprint: Self.footprint)
 
         let reply = finishOnDeviceReply(output, toolCalls: toolCalls, tools: tools)
         // Tool results arrive at the end, after the text. Streamed too, so they are shown and
@@ -897,7 +990,7 @@ class LLMService: ObservableObject {
     }
 
     /// The app's messages as mlx-swift-lm's.
-    private static func chatMessages(_ messages: [ChatMessage]) -> [Chat.Message] {
+    private nonisolated static func chatMessages(_ messages: [ChatMessage]) -> [Chat.Message] {
         messages.map { message -> Chat.Message in
             switch message.role {
             case .system: return .system(message.content)
@@ -905,6 +998,26 @@ class LLMService: ObservableObject {
             case .assistant: return .assistant(message.content)
             }
         }
+    }
+
+    /// Where an on-device reply's time went, in the unified log so a Release build reports it
+    /// too (Console, or `log collect` from a device). Numbers only, never the conversation.
+    private static let perfLog = Logger(subsystem: "NagataInc.little-chef", category: "llm-timing")
+
+    private static func logTiming(
+        asked: Date, loaded: Date, prepared: Date, firstToken: Date?,
+        info: GenerateCompletionInfo?, reuse: ReuseCount, footprint: UInt64
+    ) {
+        func s(_ t: TimeInterval) -> String { String(format: "%.2f", t) }
+        let counts = reuse.get()
+        let first = firstToken.map { s($0.timeIntervalSince(asked)) } ?? "-"
+        let line = "reply: load \(s(loaded.timeIntervalSince(asked)))s, settled part \(s(prepared.timeIntervalSince(loaded)))s "
+            + "(prompt \(counts.prompt), kept \(counts.reused)), first token \(first)s, "
+            + "rest of prompt \(info.map { String(format: "%.0f", $0.promptTokensPerSecond) } ?? "-") tok/s, "
+            + "decode \(info.map { String(format: "%.1f", $0.tokensPerSecond) } ?? "-") tok/s over \(info?.generationTokenCount ?? 0) tokens, "
+            + "footprint \(gib(footprint)), thermal \(ProcessInfo.processInfo.thermalState.rawValue)"
+        perfLog.notice("\(line, privacy: .public)")
+        dprint("🤖 [LLM] \(line)")
     }
 
     /// What the cooking assistant has already read, kept between questions. One at a time: a
@@ -922,10 +1035,13 @@ class LLMService: ObservableObject {
             let container = try await downloadedModelContainer(modelId: model.modelId)
             let toolSpecs = tools?.nativeToolSpecs
             let additionalContext = model.templateContext
-            let chat = Self.chatMessages([system])
             let prefixCache = promptPrefixCache
-            let started = Date()
-            try await container.perform { (context: ModelContext) in
+            let queued = Date()
+            let read = try await container.perform { (context: ModelContext) -> (waited: TimeInterval, read: TimeInterval) in
+                // Timed from here, not from the call: a read-ahead that waited behind another
+                // one for the container read nothing itself, and would otherwise log the wait.
+                let started = Date()
+                let chat = Self.chatMessages([system])
                 func tokens(_ question: String) async throws -> [Int] {
                     try await context.processor.prepare(input: UserInput(
                         chat: chat + [.user(question)], tools: toolSpecs, additionalContext: additionalContext
@@ -940,8 +1056,9 @@ class LLMService: ObservableObject {
                     prompt: prompt,
                     boundary: PromptPrefixCache.boundary(prompt: prompt, placeholderPrompt: placeholderPrompt),
                     key: "\(promptCacheKey)|\(model.modelId)", model: context.model, parameters: parameters)
+                return (started.timeIntervalSince(queued), Date().timeIntervalSince(started))
             }
-            dprint("🤖 [LLM] Read the cook's prompt ahead in \(String(format: "%.1f", Date().timeIntervalSince(started)))s")
+            dprint("🤖 [LLM] Read the cook's prompt ahead in \(String(format: "%.1f", read.read))s (\(prefixCache.lastReusedTokenCount) tokens already read, \(String(format: "%.1f", read.waited))s waiting)")
         } catch {
             dprint("🤖 [LLM] ⚠️ Couldn't read the cook's prompt ahead: \(error.localizedDescription)")
         }
@@ -960,6 +1077,7 @@ enum LLMError: LocalizedError {
     case modelNotDownloaded(String)
     case loadFailed(String)
     case generationFailed(String)
+    case notEnoughMemory(String)
 
     var errorDescription: String? {
         switch self {
@@ -967,6 +1085,17 @@ enum LLMError: LocalizedError {
             return "\(name) isn't downloaded yet. Download it in Settings to use the on-device assistant."
         case .loadFailed(let msg): return "Failed to load model: \(msg)"
         case .generationFailed(let msg): return "Generation failed: \(msg)"
+        case .notEnoughMemory(let name):
+            return "There isn't enough free memory to load \(name) right now. Close other apps and ask again."
         }
     }
+}
+
+/// The prompt's size and how much of it was kept, carried out of `container.perform`.
+private final class ReuseCount: @unchecked Sendable {
+    private let lock = NSLock()
+    private var prompt = 0
+    private var reused = 0
+    func set(prompt: Int, reused: Int) { lock.withLock { self.prompt = prompt; self.reused = reused } }
+    func get() -> (prompt: Int, reused: Int) { lock.withLock { (prompt, reused) } }
 }

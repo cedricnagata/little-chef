@@ -47,7 +47,7 @@ class RecipeManager: ObservableObject {
     }
 
     func createRecipe(_ recipeData: RecipeData) async -> Bool {
-        let result = await withLoading {
+        let result: Void? = await withLoading {
             let recipeEntity = try self.dataManager.createRecipe(recipeData)
             // Front, not `append`. `fetchAllRecipes` sorts newest-first, so appending put a
             // just-saved recipe at the bottom of the list — below every older one — until the
@@ -58,7 +58,7 @@ class RecipeManager: ObservableObject {
     }
 
     func updateRecipe(id: UUID, with recipeData: RecipeData) async -> Bool {
-        let result = await withLoading {
+        let result: Void? = await withLoading {
             try self.dataManager.updateRecipe(id: id, with: recipeData)
             await self.loadRecipes()
         }
@@ -72,7 +72,7 @@ class RecipeManager: ObservableObject {
     /// recipe writes *and* the list they have to show up in. A cook can run for an hour, so the
     /// list is reloaded outright rather than patched.
     func saveSessionRecipe(_ recipeData: RecipeData, replacing id: UUID?) async -> Bool {
-        let result = await withLoading {
+        let result: Void? = await withLoading {
             // Falls back to creating when the target has gone (Delete All Data mid-cook, say):
             // answering an hour of edits with "recipe not found" would lose them.
             let existing = try id.flatMap { try self.dataManager.fetchRecipe(id: $0) }
@@ -87,7 +87,7 @@ class RecipeManager: ObservableObject {
     }
 
     func deleteRecipe(_ recipe: Recipe) async -> Bool {
-        let result = await withLoading {
+        let result: Void? = await withLoading {
             try self.dataManager.deleteRecipe(id: recipe.id)
             self.recipes.removeAll { $0.id == recipe.id }
         }
