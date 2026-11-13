@@ -27,6 +27,8 @@ struct RecipeDetailView: View {
     @State private var missingCheck: MissingIngredientsCheck?
     /// How many items the last "add missing" put on the shopping list, for the confirmation line.
     @State private var addedToShoppingList: Int?
+    /// The outcome of the menu's Add to Shopping List, while its alert is up.
+    @State private var shoppingListResult: String?
 
     /// What this recipe needs that the inventory doesn't have. Nil until the user keeps an
     /// inventory, so a recipe isn't shown as missing everything before they've started.
@@ -83,6 +85,9 @@ struct RecipeDetailView: View {
                         Button(action: { startEditing() }) {
                             Label("Edit Recipe", systemImage: "pencil")
                         }
+                        Button(action: { addIngredientsToShoppingList() }) {
+                            Label("Add Ingredients to Shopping List", systemImage: "cart.badge.plus")
+                        }
                         Button(role: .destructive, action: { showingDeleteAlert = true }) {
                             Label("Delete Recipe", systemImage: "trash")
                         }
@@ -93,6 +98,14 @@ struct RecipeDetailView: View {
             }
         }
         .missingIngredientsDialog($missingCheck) { _ in beginCooking() }
+        .alert(
+            "Shopping List",
+            isPresented: Binding(get: { shoppingListResult != nil }, set: { if !$0 { shoppingListResult = nil } })
+        ) {
+            Button("OK") { shoppingListResult = nil }
+        } message: {
+            Text(shoppingListResult ?? "")
+        }
         .alert("Delete Recipe", isPresented: $showingDeleteAlert) {
             Button("Cancel", role: .cancel) { }
             Button("Delete", role: .destructive) {
@@ -104,6 +117,22 @@ struct RecipeDetailView: View {
         } message: {
             Text("Are you sure you want to delete '\(currentRecipe.title)'? This action cannot be undone.")
         }
+    }
+
+    /// Everything the recipe needs that the inventory doesn't have goes on the shopping list.
+    /// Unlike the inline button this works before the user keeps an inventory: with nothing in
+    /// it, every ingredient is missing, which is the shopping list they want.
+    private func addIngredientsToShoppingList() {
+        let missing = kitchenManager.availability(of: currentRecipe).missingNames
+        guard !missing.isEmpty else {
+            shoppingListResult = "You have everything \(currentRecipe.title) needs."
+            return
+        }
+        let added = kitchenManager.addToShoppingList(missing, recipeTitle: currentRecipe.title)
+        addedToShoppingList = added
+        shoppingListResult = added == 0
+            ? "Everything you're missing is already on your shopping list."
+            : "Added \(added) \(added == 1 ? "ingredient" : "ingredients") to your shopping list."
     }
 
     // MARK: - Display Content (read-only)

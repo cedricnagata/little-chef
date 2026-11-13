@@ -66,8 +66,18 @@ struct InventoryView: View {
         searchText.isEmpty || item.name.localizedCaseInsensitiveContains(searchText)
     }
 
-    private var ingredients: [PantryItem] { kitchenManager.pantry.filter { !$0.isStaple && matches($0) } }
-    private var staples: [PantryItem] { kitchenManager.pantry.filter { $0.isStaple && matches($0) } }
+    /// The inventory by kind, in the catalog's section order, empty sections left out.
+    private var sections: [(category: IngredientCategory, items: [PantryItem])] {
+        let grouped = Dictionary(grouping: kitchenManager.pantry.filter(matches)) { IngredientCatalog.category(of: $0.name) }
+        return IngredientCategory.allCases.compactMap { category in
+            grouped[category].map { (category, $0) }
+        }
+    }
+
+    /// Common ingredients matching what's being typed that the inventory doesn't have yet.
+    private var suggestions: [String] {
+        IngredientCatalog.suggestions(for: newItem, excluding: kitchenManager.inventoryNames)
+    }
 
     var body: some View {
         List {
@@ -84,41 +94,43 @@ struct InventoryView: View {
                     .disabled(newItem.trimmingCharacters(in: .whitespaces).isEmpty)
                     .tint(.orange)
                 }
+                ForEach(suggestions, id: \.self) { name in
+                    Button {
+                        add(name)
+                    } label: {
+                        HStack {
+                            Label(name, systemImage: "plus")
+                                .foregroundColor(.primary)
+                            Spacer()
+                            Text(IngredientCatalog.category(of: name).rawValue)
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                        }
+                    }
+                }
+            } footer: {
+                if !suggestions.isEmpty {
+                    Text("Tap a suggestion to add it, or tap + to add what you typed.")
+                }
             }
 
-            Section {
-                if ingredients.isEmpty {
+            if sections.isEmpty {
+                Section {
                     Text(searchText.isEmpty
                          ? "Nothing here yet. Add what's in your fridge and cupboards, and recipes will show what you can make."
                          : "No matches.")
                         .font(.subheadline)
                         .foregroundColor(.secondary)
                 }
-                ForEach(ingredients) { item in
-                    row(for: item)
-                        .swipeActions(edge: .leading) {
-                            Button("Staple") { kitchenManager.setStaple(item, isStaple: true) }
-                                .tint(.blue)
-                        }
-                }
-                .onDelete { offsets in kitchenManager.removeFromPantry(offsets.map { ingredients[$0] }) }
-            } header: {
-                Text("Ingredients")
             }
 
-            Section {
-                ForEach(staples) { item in
-                    row(for: item)
-                        .swipeActions(edge: .leading) {
-                            Button("Not a staple") { kitchenManager.setStaple(item, isStaple: false) }
-                                .tint(.gray)
-                        }
+            ForEach(sections, id: \.category) { section in
+                Section(section.category.rawValue) {
+                    ForEach(section.items) { item in
+                        row(for: item)
+                    }
+                    .onDelete { offsets in kitchenManager.removeFromPantry(offsets.map { section.items[$0] }) }
                 }
-                .onDelete { offsets in kitchenManager.removeFromPantry(offsets.map { staples[$0] }) }
-            } header: {
-                Text("Staples")
-            } footer: {
-                Text("Staples count as always on hand. Swipe right on an ingredient to make it a staple, or left to remove it.")
             }
         }
         .listStyle(.insetGrouped)
@@ -153,7 +165,11 @@ struct InventoryView: View {
     }
 
     private func add() {
-        kitchenManager.addToPantry(newItem)
+        add(newItem)
+    }
+
+    private func add(_ name: String) {
+        kitchenManager.addToPantry(name)
         newItem = ""
         addFieldFocused = true
     }

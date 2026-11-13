@@ -183,7 +183,8 @@ enum IngredientMatcher {
 
     // MARK: - Staples
 
-    /// Seeded into a new inventory's staples section. The user can remove any of them.
+    /// Seeded into a new inventory: basics most kitchens have. They appear in their sections
+    /// like anything else, and the user can remove any of them.
     static let defaultStaples = [
         "Salt", "Black pepper", "Olive oil", "Vegetable oil", "Butter", "Sugar", "All-purpose flour",
         "Baking soda", "Baking powder", "Garlic", "Onion",

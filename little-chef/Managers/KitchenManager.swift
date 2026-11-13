@@ -85,10 +85,6 @@ final class KitchenManager: ObservableObject {
         perform { _ = try self.dataManager.addPantryItem(name: trimmed, isStaple: isStaple) }
     }
 
-    func setStaple(_ item: PantryItem, isStaple: Bool) {
-        perform { try self.dataManager.updatePantryItem(id: item.id, isStaple: isStaple) }
-    }
-
     func setNote(_ item: PantryItem, note: String) {
         let trimmed = note.trimmingCharacters(in: .whitespacesAndNewlines)
         perform { try self.dataManager.updatePantryItem(id: item.id, note: .some(trimmed.isEmpty ? nil : trimmed)) }
