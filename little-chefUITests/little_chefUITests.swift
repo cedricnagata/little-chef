@@ -229,20 +229,12 @@ final class little_chefUITests: XCTestCase {
         XCTAssertTrue(deleteAll.exists && deleteAll.isHittable)
         attach(app, name: "09-settings-tab")
 
-        // Exercise (but don't confirm) the destructive delete-all-data dialog. It is a
-        // confirmationDialog, so XCUITest sees a Sheet titled with its question. Older iOS
-        // shows an action sheet with Cancel; iOS 26 a popover with no Cancel, which a tap
-        // outside it dismisses.
+        // Exercise (but don't confirm) the destructive delete-all-data alert.
         deleteAll.tap()
-        let dialog = app.sheets["Delete all data?"]
+        let dialog = app.alerts["Delete All Data?"]
         XCTAssertTrue(dialog.waitForExistence(timeout: 3))
         XCTAssertTrue(dialog.buttons["Delete All Data"].exists)
-        let cancel = dialog.buttons["Cancel"]
-        if cancel.exists {
-            cancel.tap()
-        } else {
-            app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.8)).tap()
-        }
+        dialog.buttons["Cancel"].tap()
         XCTAssertTrue(dialog.waitForNonExistence(timeout: 3))
     }
 

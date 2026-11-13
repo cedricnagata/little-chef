@@ -204,20 +204,15 @@ struct ProfileSettingsView: View {
         .onChange(of: voiceIdentifier) { _, _ in saveIfLoaded() }
         .onChange(of: autoSpeakResponses) { _, _ in saveIfLoaded() }
         .onChange(of: bigBroVoice) { _, _ in saveIfLoaded() }
-        .confirmationDialog(
-            "Delete all data?",
-            isPresented: $confirmingDeleteAll,
-            titleVisibility: .visible
-        ) {
+        .alert("Delete All Data?", isPresented: $confirmingDeleteAll) {
             Button("Delete All Data", role: .destructive) { deleteAllData() }
             Button("Cancel", role: .cancel) {}
         } message: {
             Text("Your recipes, inventory, shopping list and settings, downloaded AI models, and paired Macs will be deleted from this device. Export your profile first if you want to keep them. This can't be undone.")
         }
-        .confirmationDialog(
-            "Import this profile?",
+        .alert(
+            "Import This Profile?",
             isPresented: Binding(get: { pendingImport != nil }, set: { if !$0 { pendingImport = nil } }),
-            titleVisibility: .visible,
             presenting: pendingImport
         ) { backup in
             Button("Import") { importProfile(backup) }

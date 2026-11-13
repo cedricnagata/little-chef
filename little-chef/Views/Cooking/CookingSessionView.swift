@@ -69,36 +69,26 @@ struct StartCookingView: View {
             Spacer()
 
             VStack(spacing: 16) {
-                Button(action: {
+                Button {
                     showingRecipeSelector = true
-                }) {
-                    HStack {
-                        Image(systemName: "book.fill")
-                        Text("Choose Recipe")
-                            .fontWeight(.semibold)
-                    }
-                    .frame(maxWidth: .infinity)
-                    .padding()
-                    .background(Color.orange)
-                    .foregroundColor(.white)
-                    .cornerRadius(12)
+                } label: {
+                    Label("Choose Recipe", systemImage: "book.fill")
+                        .fontWeight(.semibold)
+                        .frame(maxWidth: .infinity)
                 }
+                .buttonStyle(.borderedProminent)
+                .controlSize(.large)
                 .disabled(recipeManager.recipes.isEmpty)
 
-                Button(action: {
+                Button {
                     Task { await cookingSessionManager.startFreestyleSession() }
-                }) {
-                    HStack {
-                        Image(systemName: "square.and.pencil")
-                        Text("Cook Without a Recipe")
-                            .fontWeight(.semibold)
-                    }
-                    .frame(maxWidth: .infinity)
-                    .padding()
-                    .background(Color.orange.opacity(0.12))
-                    .foregroundColor(.orange)
-                    .cornerRadius(12)
+                } label: {
+                    Label("Cook Without a Recipe", systemImage: "square.and.pencil")
+                        .fontWeight(.semibold)
+                        .frame(maxWidth: .infinity)
                 }
+                .buttonStyle(.bordered)
+                .controlSize(.large)
                 .disabled(!canCookWithoutRecipe)
 
                 if !canCookWithoutRecipe {
@@ -164,11 +154,6 @@ struct ActiveCookingView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            CollapsibleRecipeHeader(
-                isExpanded: $isRecipeExpanded,
-                onEndSession: endSession
-            )
-
             // Belt and braces, because no single mechanism covers every way out: a tap on the
             // pane handles the empty spaces the scroll view hit-tests for itself, the
             // whole-screen catcher below handles everything outside the panes, dragging the
@@ -206,6 +191,15 @@ struct ActiveCookingView: View {
         }
         .dismissesKeyboardOnTap()
         .ignoresSafeArea(.container, edges: .bottom)
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .topBarLeading) {
+                Button("End", action: endSession)
+            }
+            ToolbarItem(placement: .principal) {
+                RecipeTitleButton(isExpanded: $isRecipeExpanded)
+            }
+        }
         .animation(.easeInOut(duration: 0.3), value: isRecipeExpanded)
         .animation(.easeInOut(duration: 0.2), value: cookingSessionManager.isPreparingModel)
         .onReceive(NotificationCenter.default.publisher(for: .timerNotificationTapped)) { _ in
@@ -319,80 +313,56 @@ struct ActiveCookingView: View {
     }
 }
 
-// MARK: - Collapsible Recipe Header
+// MARK: - Recipe Title
 
-struct CollapsibleRecipeHeader: View {
+/// The cook's title in the navigation bar. Tapping it switches between the recipe and the chat.
+struct RecipeTitleButton: View {
     @EnvironmentObject var cookingSessionManager: CookingSessionManager
     @Binding var isExpanded: Bool
-    let onEndSession: () -> Void
 
     var body: some View {
         if let session = cookingSessionManager.currentSession {
-            HStack(spacing: 0) {
-                Button(action: onEndSession) {
-                    Image(systemName: "chevron.left")
-                        .font(.title3)
-                        .foregroundColor(.orange)
-                        .frame(width: 44, height: 44)
-                }
-                .buttonStyle(PlainButtonStyle())
+            Button { isExpanded.toggle() } label: {
+                VStack(spacing: 2) {
+                    HStack(spacing: 4) {
+                        Text(session.recipe.displayTitle)
+                            .font(.headline)
+                            .foregroundColor(.primary)
+                            .lineLimit(1)
 
-                Button(action: { isExpanded.toggle() }) {
-                    HStack(spacing: 8) {
-                        Spacer()
-
-                        VStack(alignment: .center, spacing: 4) {
-                            HStack(spacing: 5) {
-                                Text(session.recipe.displayTitle)
-                                    .font(.headline)
-                                    .fontWeight(.semibold)
-                                    .foregroundColor(.primary)
-                                    .lineLimit(1)
-
-                                // The recipe on screen has drifted from the one that is stored.
-                                // Worth a mark of its own: the assistant edits quietly while you
-                                // are looking at the chat, and finding out only at the exit
-                                // prompt is finding out too late to remember what you agreed to.
-                                if cookingSessionManager.hasPendingRecipeWork {
-                                    Image(systemName: "pencil.circle.fill")
-                                        .font(.caption)
-                                        .foregroundColor(.orange)
-                                        .accessibilityLabel("Unsaved recipe changes")
-                                }
-                            }
-
-                            if !isExpanded {
-                                HStack(spacing: 12) {
-                                    if let prepTime = session.recipe.prepTime {
-                                        Label("\(prepTime)m", systemImage: "clock")
-                                            .font(.caption)
-                                    }
-                                    if let cookTime = session.recipe.cookTime {
-                                        Label("\(cookTime)m", systemImage: "flame")
-                                            .font(.caption)
-                                    }
-                                    Label("\(session.recipe.servings)", systemImage: "person.2")
-                                        .font(.caption)
-                                }
-                                .foregroundColor(.secondary)
-                            }
+                        // The recipe on screen has drifted from the one that is stored.
+                        // Worth a mark of its own: the assistant edits quietly while you
+                        // are looking at the chat, and finding out only at the exit
+                        // prompt is finding out too late to remember what you agreed to.
+                        if cookingSessionManager.hasPendingRecipeWork {
+                            Image(systemName: "pencil.circle.fill")
+                                .font(.caption)
+                                .foregroundColor(.orange)
+                                .accessibilityLabel("Unsaved recipe changes")
                         }
 
-                        Spacer()
-
                         Image(systemName: isExpanded ? "chevron.up" : "chevron.down")
-                            .font(.title3)
-                            .foregroundColor(.orange)
-                            .frame(width: 44, height: 44)
+                            .font(.caption.weight(.semibold))
+                            .foregroundColor(.secondary)
+                    }
+
+                    if !isExpanded {
+                        HStack(spacing: 10) {
+                            if let prepTime = session.recipe.prepTime {
+                                Label("\(prepTime)m", systemImage: "clock")
+                            }
+                            if let cookTime = session.recipe.cookTime {
+                                Label("\(cookTime)m", systemImage: "flame")
+                            }
+                            Label("\(session.recipe.servings)", systemImage: "person.2")
+                        }
+                        .font(.caption2)
+                        .foregroundColor(.secondary)
                     }
                 }
-                .buttonStyle(PlainButtonStyle())
             }
-            .padding(.vertical, 12)
-            .padding(.horizontal, 8)
-            .background(Color(.systemGray6))
-
-            Divider()
+            .buttonStyle(.plain)
+            .accessibilityHint(isExpanded ? "Shows the chat" : "Shows the recipe")
         }
     }
 }

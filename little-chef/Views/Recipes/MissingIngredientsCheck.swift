@@ -35,10 +35,9 @@ private struct MissingIngredientsDialog: ViewModifier {
     @EnvironmentObject var kitchenManager: KitchenManager
 
     func body(content: Content) -> some View {
-        content.confirmationDialog(
+        content.alert(
             title,
             isPresented: Binding(get: { check != nil }, set: { if !$0 { check = nil } }),
-            titleVisibility: .visible,
             presenting: check
         ) { check in
             Button("Cook Anyway") { onCook(check.recipe) }
