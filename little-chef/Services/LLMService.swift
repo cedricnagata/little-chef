@@ -727,10 +727,8 @@ class LLMService: ObservableObject {
         let container = try await downloadedModelContainer(modelId: modelId)
         let loaded = Date()
 
-        let chat = Self.chatMessages(messages)
         let toolSpecs = tools?.nativeToolSpecs
         let additionalContext = templateContext(for: modelId)
-        let userInput = UserInput(chat: chat, tools: toolSpecs, additionalContext: additionalContext)
         let prefixCache = promptPrefixCache
         // A cooking conversation keeps what the model has already read between questions; see
         // `PromptPrefixCache`. Everything else is read from the start, and leaves it alone.
@@ -740,6 +738,9 @@ class LLMService: ObservableObject {
 
         let reuse = ReuseCount()
         let stream: AsyncStream<Generation> = try await container.perform { (context: ModelContext) in
+            // Built here rather than captured: MLX's chat types aren't Sendable, `ChatMessage` is.
+            let chat = Self.chatMessages(messages)
+            let userInput = UserInput(chat: chat, tools: toolSpecs, additionalContext: additionalContext)
             let lmInput = try await context.processor.prepare(input: userInput)
             var parameters = GenerateParameters(
                 maxTokens: maxTokens ?? 2048,
@@ -989,7 +990,7 @@ class LLMService: ObservableObject {
     }
 
     /// The app's messages as mlx-swift-lm's.
-    private static func chatMessages(_ messages: [ChatMessage]) -> [Chat.Message] {
+    private nonisolated static func chatMessages(_ messages: [ChatMessage]) -> [Chat.Message] {
         messages.map { message -> Chat.Message in
             switch message.role {
             case .system: return .system(message.content)
@@ -1034,13 +1035,13 @@ class LLMService: ObservableObject {
             let container = try await downloadedModelContainer(modelId: model.modelId)
             let toolSpecs = tools?.nativeToolSpecs
             let additionalContext = model.templateContext
-            let chat = Self.chatMessages([system])
             let prefixCache = promptPrefixCache
             let queued = Date()
             let read = try await container.perform { (context: ModelContext) -> (waited: TimeInterval, read: TimeInterval) in
                 // Timed from here, not from the call: a read-ahead that waited behind another
                 // one for the container read nothing itself, and would otherwise log the wait.
                 let started = Date()
+                let chat = Self.chatMessages([system])
                 func tokens(_ question: String) async throws -> [Int] {
                     try await context.processor.prepare(input: UserInput(
                         chat: chat + [.user(question)], tools: toolSpecs, additionalContext: additionalContext

@@ -76,7 +76,7 @@ struct little_chefApp: App {
                 .environmentObject(voiceAssistant)
                 .environmentObject(llmService)
                 .task {
-                    await TimerNotificationManager.shared.requestAuthorization()
+                    _ = await TimerNotificationManager.shared.requestAuthorization()
                 }
         }
     }

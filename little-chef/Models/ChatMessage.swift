@@ -8,8 +8,8 @@
 
 import Foundation
 
-struct ChatMessage {
-    enum Role {
+struct ChatMessage: Sendable {
+    enum Role: Sendable {
         case system, user, assistant
     }
     let role: Role
