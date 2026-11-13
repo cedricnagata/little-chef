@@ -710,9 +710,11 @@ fails. Each runs `EVAL_RUNS` times
 As shipped (2026-11-13, 29 cases): **9B 79/87, 4B 68/87.** The four judgement cases came in at
 78/87 for both, with the bad swap (olive oil for cream) recorded as a change and milk for cream
 called a plain yes. The two swap lines in `CookingPrompt` took the 9B's judgement cases to
-11/12. On the cases that must record, the 9B's misses are mostly saying "I've recorded…" with
-no call (batch, step made) and folding "a pinch of chili flakes" into the garlic line rather
-than adding it. The 4B lost more there, and is chat-only in the app anyway. Before the judgement
+11/12. Telling it an added ingredient is its own line and only a tool call records fixed
+"extra" (0 → 3/3) and "batch" (2 → 3/3) for the same total, 79/87: it still says "I've
+recorded…" or "I've paused…" with no call now and then (left out, step made, timer stop), and
+reads "how much longer on the chicken?" as the recipe's time (0/3; in the app a named timer's
+time left is answered without the model). The 4B lost more there, and is chat-only in the app anyway. Before the judgement
 cases (2026-11-10, 25 cases): 9B 75/75, 4B 70/75.
 
 ## Ingredient scaling
