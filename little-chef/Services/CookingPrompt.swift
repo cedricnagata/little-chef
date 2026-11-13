@@ -46,6 +46,10 @@ struct CookingPrompt {
         // read out, while the cook waits with their hands full.
         var prompt = "You are LittleChef, a cooking assistant. The user is cooking right now. "
             + "Answer in one to three short sentences unless they ask for more detail."
+            // Both on-device models answered "can I use olive oil instead of the cream?" with
+            // "yes, I'll record that", and called milk for cream a plain yes (eval, 2026-11-13).
+            + " When they ask whether a swap or change would work, answer as an experienced cook:"
+            + " say honestly whether it works and how it changes the dish, and steer them off a bad idea."
 
         if provider == .bigBro {
             prompt += """
@@ -152,7 +156,8 @@ struct CookingPrompt {
                 did another way — record it with update_ingredients, add_ingredients, \
                 remove_ingredients, update_steps, add_steps or remove_steps. Only record what the \
                 user actually did or asked you to change; never edit the recipe to match a \
-                suggestion of your own, and never edit it because they asked a question about it. \
+                suggestion of your own, and never edit it because they asked a question about it, \
+                such as whether a swap would work. \
                 Nothing you record is saved — they are shown every change when the cook ends and \
                 choose then whether to keep it — so do not tell them the recipe has been updated \
                 or saved.
