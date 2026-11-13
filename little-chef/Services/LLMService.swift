@@ -7,6 +7,7 @@
 //  whichever backend was asked for.
 //
 
+import Combine
 import Foundation
 import UIKit
 import os
@@ -152,6 +153,9 @@ class LLMService: ObservableObject {
             guard let model = activeOnDeviceModel else {
                 return "This device can't run the AI assistant itself. Pair a Mac in Settings to use it."
             }
+            if downloadingModelId == model.modelId {
+                return "The AI model is downloading (\(Int(downloadProgress * 100))%). The assistant is ready when it finishes."
+            }
             if currentlyLoadingModelId == model.modelId {
                 return "The AI model is downloading (\(Int(loadProgress * 100))%). The assistant is ready when it finishes."
             }
@@ -181,6 +185,11 @@ class LLMService: ObservableObject {
     @Published var loadProgress: Double = 0.0
     @Published var isLoadingModel = false
     @Published var downloadedModelIds: Set<String> = []
+    /// The model ``ModelDownloader`` is fetching, its progress, and why the last one stopped.
+    /// Mirrored here so the views that watch this service redraw as it goes.
+    @Published private(set) var downloadingModelId: String?
+    @Published private(set) var downloadProgress: Double = 0
+    @Published private(set) var downloadError: String?
     /// Which model ids currently hold weights in memory.
     ///
     /// Mirrors `modelContainers`, which is private and not observable. Settings needs to show
@@ -232,6 +241,12 @@ class LLMService: ObservableObject {
         currentProvider = LLMService.deviceSupportsLocalModels ? (storedProvider ?? .local) : .bigBro
         refreshDownloadedModels()
         Self.removeLegacyDownloads()
+        let downloader = ModelDownloader.shared
+        downloader.$modelId.assign(to: &$downloadingModelId)
+        downloader.$progress.assign(to: &$downloadProgress)
+        downloader.$error.assign(to: &$downloadError)
+        downloader.onFinished = { [weak self] _ in self?.refreshDownloadedModels() }
+        downloader.resume()
         // Restore BigBro auto-reconnect from previous launches.
         bigBroClient.resumeAutoReconnectIfEnabled()
 
@@ -417,15 +432,14 @@ class LLMService: ObservableObject {
         return try await loadModel(modelId: id)
     }
 
-    /// Download a model to disk cache without keeping it loaded in memory.
-    func downloadModel(modelId: String) async throws {
-        _ = try await loadModel(modelId: modelId)
-        // Unload from memory — the files stay cached on disk
-        modelContainers.removeValue(forKey: modelId)
-        loadedModelIds = Set(modelContainers.keys)
-        MLX.Memory.clearCache()
-        refreshDownloadedModels()
-        dprint("🤖 [LLM] Downloaded \(modelId) to cache, unloaded from memory")
+    /// Starts downloading a model to the disk cache, in the background (see ``ModelDownloader``).
+    /// Returns once the download is under way; ``downloadingModelId`` and ``downloadProgress``
+    /// follow it, and ``downloadedModelIds`` gains the model when it lands.
+    ///
+    /// It used to load the model, which downloaded it as a side effect: over a session iOS stops
+    /// when the app leaves the screen, and into memory the user hadn't asked to spend yet.
+    func downloadModel(modelId: String) async {
+        await ModelDownloader.shared.start(modelId: modelId)
     }
 
     /// Download and load a model into memory (used internally).
@@ -521,7 +535,7 @@ class LLMService: ObservableObject {
         guard !isGenerating else {
             throw LLMError.generationFailed("Can't remove a model while it's answering. Try again in a moment.")
         }
-        guard currentlyLoadingModelId != modelId else {
+        guard currentlyLoadingModelId != modelId, downloadingModelId != modelId else {
             throw LLMError.generationFailed("Can't remove a model while it's downloading.")
         }
 
@@ -550,7 +564,7 @@ class LLMService: ObservableObject {
     ///
     /// - Throws: ``LLMError/generationFailed`` while a model is answering or downloading.
     func deleteAllModels() throws {
-        guard !isGenerating, currentlyLoadingModelId == nil else {
+        guard !isGenerating, currentlyLoadingModelId == nil, downloadingModelId == nil else {
             throw LLMError.generationFailed("Can't remove models while one is answering or downloading. Try again in a moment.")
         }
         unloadModel()

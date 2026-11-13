@@ -20,6 +20,16 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
         return true
     }
 
+    // iOS relaunched the app to hand over a model download's finished files.
+    func application(
+        _ application: UIApplication,
+        handleEventsForBackgroundURLSession identifier: String,
+        completionHandler: @escaping () -> Void
+    ) {
+        ModelDownloader.shared.backgroundEventsCompletion = completionHandler
+        ModelDownloader.shared.resume()
+    }
+
     // Called when user taps a timer completion notification
     func userNotificationCenter(
         _ center: UNUserNotificationCenter,

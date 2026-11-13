@@ -308,7 +308,7 @@ struct ProfileSettingsView: View {
     private func startPendingDownload() {
         guard let choice = pendingDownload else { return }
         pendingDownload = nil
-        Task { try? await llmService.downloadModel(modelId: choice.modelId) }
+        Task { await llmService.downloadModel(modelId: choice.modelId) }
     }
 
     // MARK: - Provider Picker Section
@@ -368,7 +368,7 @@ struct ProfileSettingsView: View {
             )
         }
 
-        if let error = llmService.loadError {
+        if let error = llmService.downloadError ?? llmService.loadError {
             Text(error)
                 .font(.caption)
                 .foregroundColor(.red)
@@ -391,7 +391,10 @@ struct ProfileSettingsView: View {
     /// killing the app, and no way to reclaim the disk at all.
     @ViewBuilder
     private func modelRow(for choice: CookingModelChoice, usage: String) -> some View {
-        let isDownloading = llmService.currentlyLoadingModelId == choice.modelId
+        let isDownloading = llmService.downloadingModelId == choice.modelId
+            || llmService.currentlyLoadingModelId == choice.modelId
+        let progress = llmService.downloadingModelId == choice.modelId
+            ? llmService.downloadProgress : llmService.loadProgress
         let isDownloaded = llmService.downloadedModelIds.contains(choice.modelId)
         let isLoaded = llmService.loadedModelIds.contains(choice.modelId)
 
@@ -409,10 +412,10 @@ struct ProfileSettingsView: View {
 
                 if isDownloading {
                     HStack(spacing: 6) {
-                        ProgressView(value: llmService.loadProgress, total: 1.0)
+                        ProgressView(value: progress, total: 1.0)
                             .frame(width: 60)
                             .tint(.orange)
-                        Text("\(Int(llmService.loadProgress * 100))%")
+                        Text("\(Int(progress * 100))%")
                             .font(.caption2)
                             .foregroundColor(.secondary)
                             .monospacedDigit()
@@ -427,7 +430,7 @@ struct ProfileSettingsView: View {
                     }
                     .buttonStyle(.bordered)
                     .tint(.orange)
-                    .disabled(llmService.isLoadingModel)
+                    .disabled(llmService.isLoadingModel || llmService.downloadingModelId != nil)
                 }
             }
 

@@ -253,6 +253,21 @@ macros, because `xcodebuild` won't run a package's macros in CI until someone tr
 interactively. Models are stored under Application Support in the hub's
 `models--<org>--<name>` layout. Caches is not used, because iOS can empty it.
 
+**Downloads run in a background `URLSession`** (`ModelDownloader.swift`), not through the hub
+client, so they carry on while the user is in another app and after iOS ends LittleChef. The
+hub client can't use a background session (swift-huggingface #99 swaps one for an ordinary
+session), and its ordinary session stopped with "the network connection was lost" a few seconds
+after the app left the screen (2026-11-13). The hub is asked only for the commit and its file
+list; the plan is written to `littlechef-download.json` in the model's cache directory, because
+a relaunch that hears about a finished file needs it. Each file lands in `blobs/<etag>`, and
+only when all are in are the `snapshots/<commit>/` symlinks and `refs/main` written
+(`ModelDownloadPlan.swift`, Foundation-only and tested on Linux), so a half-done download never
+counts as downloaded. The loader then finds every file in the cache and fetches nothing. A
+download interrupted by a force-quit, which cancels background transfers, restarts its missing
+files at the next launch; a file that fails is retried three times, then the download stops and
+Settings says to tap Download, which keeps the files already fetched. A model that finishes
+while the app is away posts a notification.
+
 ### The models
 
 | Choice | Repository | Download | Weights in memory | Peak at 8.6k tokens | Needs an app limit of |
