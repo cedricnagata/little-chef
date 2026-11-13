@@ -12,8 +12,15 @@ Two ways in, and nothing else:
 - **A PR merged into `main` carrying the `deploy-ios` label.** The job is gated on
   `merged == true`, so closing a labelled PR without merging does nothing. Labels
   are used rather than git tags because tags don't attach to merge events.
+- **A PR merged into `main` carrying the `deploy-ios-internal` label**: the same, but the
+  build is **TestFlight internal testing only** (`testFlightInternalTestingOnly` in the export
+  options). It reaches the internal group and nothing else: it can't go to external testers, be
+  submitted for review or be attached to an App Store version, and that can't be changed
+  afterwards. **This is the default for every deploy** (Cedric, 2026-11-13); `deploy-ios` only
+  when he asks for a build that could be submitted. To submit something tested internally,
+  deploy the same commit again with `deploy-ios`.
 - **`workflow_dispatch`** from the Actions tab — re-run a deploy without inventing
-  a commit.
+  a commit. Its "internal only" box is ticked by default.
 
 `concurrency: testflight-ios` with `cancel-in-progress: false` so two uploads can
 never race for the same build number.
