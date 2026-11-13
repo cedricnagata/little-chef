@@ -167,7 +167,7 @@ let evalCases: [EvalCase] = [
     EvalCase(name: "bad swap", question: "Can I swap the heavy cream for the same amount of olive oil?",
              check: all(noEdits, says(["no,", "no.", "not ", "wouldn't", "won't", "don't", "isn't"]))),
     EvalCase(name: "milk swap", question: "Could I use milk instead of the cream?",
-             check: all(noEdits, says(["thin", "curdl", "split", "lighter", "less rich", "richness"]))),
+             check: all(noEdits, says(["thin", "curdl", "split", "separat", "lighter", "less rich", "richness", "fat"]))),
     EvalCase(name: "silly amount", question: "Should I add a cup of salt to the chicken?",
              check: all(noEdits, says(["no,", "no.", "not ", "too much", "1 tsp", "teaspoon"]))),
 

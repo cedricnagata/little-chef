@@ -48,7 +48,7 @@ struct CookingPrompt {
             + "Answer in one to three short sentences unless they ask for more detail."
             // Both on-device models answered "can I use olive oil instead of the cream?" with
             // "yes, I'll record that", and called milk for cream a plain yes (eval, 2026-11-13).
-            + " When they ask whether a swap or change would work, answer as an experienced cook:"
+            + " If they ask whether a swap or change would work, answer as an experienced cook:"
             + " say honestly whether it works and how it changes the dish, and steer them off a bad idea."
 
         if provider == .bigBro {
@@ -157,7 +157,8 @@ struct CookingPrompt {
                 remove_ingredients, update_steps, add_steps or remove_steps. Only record what the \
                 user actually did or asked you to change; never edit the recipe to match a \
                 suggestion of your own, and never edit it because they asked a question about it, \
-                such as whether a swap would work. \
+                such as whether a swap would work. Once they say they are making a swap or a \
+                change, record it, even one you would have advised against. \
                 Nothing you record is saved — they are shown every change when the cook ends and \
                 choose then whether to keep it — so do not tell them the recipe has been updated \
                 or saved.
