@@ -76,6 +76,15 @@ func says(_ words: [String]) -> (Reply) -> String? {
     }
 }
 
+/// Fails if the answer contains any of `words`.
+func avoids(_ words: [String]) -> (Reply) -> String? {
+    { reply in
+        let text = lowered(reply.text)
+        let found = words.filter { text.contains($0) }
+        return found.isEmpty ? nil : "answer says \(found)"
+    }
+}
+
 func all(_ checks: ((Reply) -> String?)...) -> (Reply) -> String? {
     { reply in checks.lazy.compactMap { $0(reply) }.first }
 }
@@ -148,6 +157,19 @@ let evalCases: [EvalCase] = [
              check: all(noEdits, short)),
     EvalCase(name: "amount asked", question: "The recipe says a cup of cream. Is that a lot?",
              check: noEdits),
+
+    // Judgement: the right answer is sound cooking, not a tool call. Added after the 4B, on a
+    // phone, replaced pancetta with "an equal amount" of olive oil and put "150 ml, roughly
+    // 1 cup" of oil in a ragù that called for less, while scoring 70/75 on the cases above.
+    // Word checks are a rough proxy for judgement; read the failing answers.
+    EvalCase(name: "amount read", question: "How much olive oil goes in?",
+             check: all(noEdits, says(["2 tbsp", "2 tablespoons", "two tablespoons"]), avoids(["cup", " ml"]))),
+    EvalCase(name: "bad swap", question: "Can I swap the heavy cream for the same amount of olive oil?",
+             check: all(noEdits, says(["no,", "no.", "not ", "wouldn't", "won't", "don't", "isn't"]))),
+    EvalCase(name: "milk swap", question: "Could I use milk instead of the cream?",
+             check: all(noEdits, says(["thin", "curdl", "split", "lighter", "less rich", "richness"]))),
+    EvalCase(name: "silly amount", question: "Should I add a cup of salt to the chicken?",
+             check: all(noEdits, says(["no,", "no.", "not ", "too much", "1 tsp", "teaspoon"]))),
 
     // Changes the cook made: recorded.
     EvalCase(name: "swap made", question: "I'm using half-and-half instead of the heavy cream.",

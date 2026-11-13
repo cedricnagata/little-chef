@@ -71,6 +71,11 @@ class LLMService: ObservableObject {
     private static var appMemoryLimit: UInt64 {
         let available = UInt64(os_proc_available_memory())
         guard available > 0 else { return 0 }
+        return available + footprint
+    }
+
+    /// The memory iOS counts against this process: what it compares with the limit.
+    private static var footprint: UInt64 {
         var info = task_vm_info_data_t()
         var count = mach_msg_type_number_t(MemoryLayout<task_vm_info_data_t>.size / MemoryLayout<integer_t>.size)
         let result = withUnsafeMutablePointer(to: &info) {
@@ -78,7 +83,18 @@ class LLMService: ObservableObject {
                 task_info(mach_task_self_, task_flavor_t(TASK_VM_INFO), $0, &count)
             }
         }
-        return available + (result == KERN_SUCCESS ? info.phys_footprint : 0)
+        return result == KERN_SUCCESS ? info.phys_footprint : 0
+    }
+
+    private static func gib(_ bytes: UInt64) -> String {
+        String(format: "%.2f GiB", Double(bytes) / 1_073_741_824)
+    }
+
+    /// The limit, the footprint and what is left, for device logs. The limit is otherwise only
+    /// inferred from the size at which iOS terminated the app.
+    private static func logMemory(_ when: String) {
+        let available = UInt64(os_proc_available_memory())
+        dprint("🤖 [LLM] Memory \(when): footprint \(gib(footprint)), available \(gib(available)), limit \(gib(available + footprint))")
     }
 
     /// The on-device model in use: the one picked in Settings if this device can run it,
@@ -204,6 +220,7 @@ class LLMService: ObservableObject {
 
     private init() {
         _ = Self.onDeviceModelOptions
+        Self.logMemory("at launch")
         if let stored = UserDefaults.standard.string(forKey: Self.onDeviceModelKey),
            let choice = CookingModelChoice(storedValue: stored) {
             preferredOnDeviceModel = choice
@@ -231,6 +248,7 @@ class LLMService: ObservableObject {
             queue: .main
         ) { [weak self] _ in
             Task { @MainActor in
+                self?.lastMemoryWarning = Date()
                 guard let self, !self.loadedModelIds.isEmpty,
                       !self.isGenerating, self.currentlyLoadingModelId == nil else { return }
                 dprint("🤖 [LLM] ⚠️ Memory warning — unloading resident models")
@@ -291,6 +309,15 @@ class LLMService: ObservableObject {
 
         MLX.Memory.cacheLimit = 20 * 1024 * 1024
 
+        do {
+            try await waitForMemory(toLoad: id)
+        } catch {
+            loadError = error.localizedDescription
+            isLoadingModel = false
+            currentlyLoadingModelId = nil
+            throw error
+        }
+
         let config = ModelConfiguration(id: id, defaultPrompt: "You are a helpful assistant.")
 
         do {
@@ -309,6 +336,7 @@ class LLMService: ObservableObject {
             }
 
             dprint("🤖 [LLM] ✅ Model \(id) loaded successfully")
+            Self.logMemory("after loading \(id)")
             self.modelContainers[id] = container
             loadedModelIds = Set(modelContainers.keys)
             loadProgress = 1.0
@@ -323,6 +351,43 @@ class LLMService: ObservableObject {
             isLoadingModel = false
             currentlyLoadingModelId = nil
             throw error
+        }
+    }
+
+    /// When iOS last warned that memory is low. See ``waitForMemory(toLoad:)``.
+    private var lastMemoryWarning: Date?
+
+    /// How long after a memory warning a load waits. The warning means the whole device is
+    /// short, and other apps are still being terminated to make room: on an iPhone 14 Pro a
+    /// reload started right after the warning had unloaded the 9B was itself terminated.
+    private static let memoryWarningSettleTime: TimeInterval = 5
+
+    /// How long a load waits for this process's allowance to cover the model before giving up.
+    private static let memoryWaitLimit: TimeInterval = 10
+
+    /// Wait until loading `id` should fit, or throw ``LLMError/notEnoughMemory``.
+    ///
+    /// iOS terminates an app that crosses its limit with no error and no second chance, so a
+    /// cook whose model can't fit right now is better told so than ended. The model's
+    /// ``CookingModelChoice/memoryNeeded`` includes the rest of the app, which the footprint
+    /// already counts, so what has to be available is that less ``CookingModelChoice/appAllowance``.
+    private func waitForMemory(toLoad id: String) async throws {
+        guard let model = CookingModelChoice(modelId: id), os_proc_available_memory() > 0 else { return }
+        if let warned = lastMemoryWarning {
+            let settle = Self.memoryWarningSettleTime - Date().timeIntervalSince(warned)
+            if settle > 0 {
+                dprint("🤖 [LLM] Memory warning \(String(format: "%.1f", Self.memoryWarningSettleTime - settle))s ago — waiting before loading \(id)")
+                try await Task.sleep(for: .seconds(settle))
+            }
+        }
+        let needed = UInt64((model.memoryNeeded - CookingModelChoice.appAllowance) * 1_073_741_824)
+        let deadline = Date().addingTimeInterval(Self.memoryWaitLimit)
+        while UInt64(os_proc_available_memory()) < needed {
+            guard Date() < deadline else {
+                Self.logMemory("refusing to load \(id), which needs \(Self.gib(needed))")
+                throw LLMError.notEnoughMemory(model.displayName)
+            }
+            try await Task.sleep(for: .milliseconds(500))
         }
     }
 
@@ -960,6 +1025,7 @@ enum LLMError: LocalizedError {
     case modelNotDownloaded(String)
     case loadFailed(String)
     case generationFailed(String)
+    case notEnoughMemory(String)
 
     var errorDescription: String? {
         switch self {
@@ -967,6 +1033,8 @@ enum LLMError: LocalizedError {
             return "\(name) isn't downloaded yet. Download it in Settings to use the on-device assistant."
         case .loadFailed(let msg): return "Failed to load model: \(msg)"
         case .generationFailed(let msg): return "Generation failed: \(msg)"
+        case .notEnoughMemory(let name):
+            return "There isn't enough free memory to load \(name) right now. Close other apps and ask again."
         }
     }
 }

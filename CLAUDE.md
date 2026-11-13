@@ -204,10 +204,13 @@ nonsense. Upstream mlx-swift-lm can't load them yet. Support is
 open and unreviewed since 2026-10-14. Python mlx-lm merged the equivalent (#1941) on 2026-10-08.
 
 So the app pins **`github.com/cedricnagata/mlx-swift-lm`, branch `little-chef/bonsai-2`,
-revision `7a5ff87`**. That revision is exactly:
+revision `bf55422`**. That revision is exactly:
 
 - upstream `691a19a`, the revision the app pinned before (the first one to accept mlx-swift 0.33),
-- plus PR #630's single commit `a3596e4`, cherry-picked unchanged (`-x`, author kept).
+- plus PR #630's single commit `a3596e4`, cherry-picked unchanged (`-x`, author kept),
+- plus our own `bf55422`: the Qwen3.5 text models leave the vision tower unread
+  (`excludedCheckpointNamespaces`). Upstream read every tensor in the file and dropped the
+  tower afterwards, so a load peaked at the whole file, 0.85 GiB above the 9B's weights.
 
 Nothing else differs. The fork is public because GitHub forks of public repos can't be private,
 and that is also what lets CI fetch it with no extra secret. Pinning the PR's own branch instead
@@ -218,7 +221,10 @@ would have gone back to mlx-swift 0.32, since #630 is based on upstream as of 20
 **Retiring the fork, once #630 (or an equivalent) is merged upstream:**
 
 1. Find the first upstream commit or release with `prism_hadamard_qwen35` in
-   `Libraries/MLXLLM/LLMModelFactory.swift` that still accepts mlx-swift 0.33.
+   `Libraries/MLXLLM/LLMModelFactory.swift` that still accepts mlx-swift 0.33, **and** that
+   doesn't read the vision tower for a text model (`excludedCheckpointNamespaces` on
+   `Qwen35Model`; offer `bf55422` upstream if it isn't there). Without it, the 9B's load peaks
+   0.85 GiB higher, which got the app killed on an iPhone 14 Pro.
 2. In `project.pbxproj`, point the `mlx-swift-lm` package reference back at
    `https://github.com/ml-explore/mlx-swift-lm`: that revision, or a version requirement once a
    tagged release has both. Update `Package.resolved` to match (`tools/mac-test` saves Xcode's
@@ -248,7 +254,23 @@ interactively. Models are stored under Application Support in the hub's
 | `bonsai2_2B` | `prism-ml/Ternary-Bonsai-2-2B-mlx-2bit` | 1.2 GB | 0.50 GiB | 0.98 GiB | 1.5 GiB |
 
 - **Downloads include a vision tower** (0.6–0.9 GiB) in the same safetensors file, and the 9B and
-  4B also carry an `mtp/` speculative-decoding head. The text loader leaves both unloaded.
+  4B also carry an `mtp/` speculative-decoding head. The text loader leaves both unread: `mtp/`
+  is never selected, and the fork's `bf55422` excludes the tower from the read. Before it the
+  tower was read and then dropped, so every load peaked at the whole file (9B: 3.23 GiB, against
+  2.39 without the tower). Nothing in the app needs it: photo import reads text with Vision OCR
+  on the device and gives the model only text (Cedric, 2026-11-12).
+- **On an iPhone 14 Pro (6 GB, limit 4.0 GiB, iOS 26.6) the 9B got the app killed** before
+  that fix (2026-11-12): once at the 4.0 GiB limit (`highwater`), and once at 3.77 GiB for the
+  device running out of pages (`vm-pageshortage`), each time with dozens of other apps killed.
+  The second came from a reload straight after a memory warning had unloaded the model. On a
+  6 GB phone the limit isn't the only ceiling: the whole device runs short first. The 4B ran
+  there without a warning (1.84 GiB peak) but its advice was poor: pancetta replaced by "an equal
+  amount" of olive oil, "150 ml, roughly 1 cup". Cedric judged it not good enough to use.
+- **A load waits for memory** (`waitForMemory(toLoad:)`): 5 s after a memory warning, then up
+  to 10 s for `os_proc_available_memory()` to cover the model's `memoryNeeded` less the app's
+  0.5 GiB, which the footprint already counts. Failing that, the question fails with "There
+  isn't enough free memory…", not a terminated app. Debug builds log the limit, footprint and
+  what is left at launch and after each load (`🤖 [LLM] Memory …`).
 - **What each threshold covers** (`CookingModelChoice.memoryNeeded`): MLX's peak while reading
   an 8.6k-token prompt, plus about 0.5 GiB for the rest of the app. Measured on a Mac with
   `tools/bonsai-check` (2026-11-09). The app never sends more than about that: recipe source text
@@ -658,10 +680,13 @@ know which step the cook is on.
 ## The cooking test set
 
 `swift run -c release bonsai-check eval [model...]` in `tools/bonsai-check`, on the Mac (put it
-on `caffeinate -i`: a Mac that sleeps mid-run inflates the timings, not the scores). 25 cases, each
+on `caffeinate -i`: a Mac that sleeps mid-run inflates the timings, not the scores). 29 cases, each
 one question in a cook asked with the app's prompt and tools, checked for the tool call or answer
-it should produce: questions that must not edit, changes that must be recorded, timers, the
-kitchen line, the shopping list, and writing a recipe from nothing. Each runs `EVAL_RUNS` times
+it should produce: questions that must not edit, judgement (a bad swap, a silly amount, reading
+an amount right), changes that must be recorded, timers, the kitchen line, the shopping list, and
+writing a recipe from nothing. The judgement cases came after the 4B scored 70/75 here and still
+gave advice Cedric couldn't use on the phone; their word checks are a rough proxy, so read what
+fails. Each runs `EVAL_RUNS` times
 (default 3) at the app's sampling. Run it before and after changing the prompt or the tools.
 
 As shipped (2026-11-10, the twelve tools plus `add_to_shopping_list`): 9B 75/75, 4B 70/75. The

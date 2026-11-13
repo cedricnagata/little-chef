@@ -845,7 +845,7 @@
 			repositoryURL = "https://github.com/cedricnagata/mlx-swift-lm";
 			requirement = {
 				kind = revision;
-				revision = 7a5ff87473419be495faf3c57bfb95fe587c9897;
+				revision = bf5542243feb08d4c1a9c7a3b89db22894422930;
 			};
 		};
 		8BD0A00C2EBF000000BB0001 /* XCRemoteSwiftPackageReference "swift-transformers" */ = {

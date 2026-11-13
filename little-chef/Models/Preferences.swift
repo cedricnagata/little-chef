@@ -64,6 +64,9 @@ enum CookingModelChoice: String, Codable, CaseIterable {
     /// reads an 8.6k-token prompt (longer than anything the app sends) in 128-token steps, plus
     /// about half a GiB for the rest of the app (speech, audio, UI). Peaks measured on a Mac with
     /// `tools/bonsai-check`: 27B 8.51, 9B 3.22, 4B 1.94, 2B 0.98 GiB.
+    /// The part of every ``memoryNeeded`` that is the rest of the app, in GiB.
+    static let appAllowance = 0.5
+
     var memoryNeeded: Double {
         switch self {
         case .bonsai2_27B: return 9.0
