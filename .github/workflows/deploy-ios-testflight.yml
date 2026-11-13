@@ -6,6 +6,11 @@ on:
     branches: [main]
   # Manual escape hatch: deploy the current main without merging a labelled PR.
   workflow_dispatch:
+    inputs:
+      internal_only:
+        description: "TestFlight internal testing only (can't be submitted to the App Store)"
+        type: boolean
+        default: true
 
 # Never let two uploads race for the same build number.
 concurrency:
@@ -17,7 +22,8 @@ jobs:
     if: >-
       github.event_name == 'workflow_dispatch' ||
       (github.event.pull_request.merged == true &&
-       contains(github.event.pull_request.labels.*.name, 'deploy-ios'))
+       (contains(github.event.pull_request.labels.*.name, 'deploy-ios') ||
+        contains(github.event.pull_request.labels.*.name, 'deploy-ios-internal')))
     # Apple rejects uploads built with an SDK older than iOS 26, which ships in
     # Xcode 26. macos-15 images top out at Xcode 16 / iOS 18.5.
     runs-on: macos-26
@@ -32,6 +38,13 @@ jobs:
       # Not secrets — they ship inside every copy of the app.
       APP_BUNDLE_ID: NagataInc.little-chef
       WIDGET_BUNDLE_ID: NagataInc.little-chef.TimerWidget
+      # Internal only unless asked otherwise: a `deploy-ios` merge without `deploy-ios-internal`,
+      # or the manual run with the box unticked. Such a build reaches internal testers alone
+      # and can never be submitted for review or attached to an App Store version.
+      INTERNAL_ONLY: >-
+        ${{ github.event_name == 'workflow_dispatch' && inputs.internal_only ||
+            github.event_name == 'pull_request' &&
+            contains(github.event.pull_request.labels.*.name, 'deploy-ios-internal') }}
 
     steps:
       - uses: actions/checkout@v4
@@ -198,9 +211,11 @@ jobs:
             </dict>
             <key>uploadSymbols</key><true/>
             <key>manageAppVersionAndBuildNumber</key><false/>
+            <key>testFlightInternalTestingOnly</key><$INTERNAL_ONLY/>
           </dict>
           </plist>
           EOF
+          echo "TestFlight internal testing only: $INTERNAL_ONLY"
 
           xcodebuild -exportArchive \
             -archivePath "$ARCHIVE_PATH" \
