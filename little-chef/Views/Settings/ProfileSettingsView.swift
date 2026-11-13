@@ -2,7 +2,7 @@
 //  ProfileSettingsView.swift
 //  little-chef
 //
-//  The Settings tab: AI provider and models, voice, hands-free, exporting and importing the
+//  The Settings tab: AI provider and models, voice, exporting and importing the
 //  profile, and Delete All Data.
 //
 
@@ -22,7 +22,6 @@ struct ProfileSettingsView: View {
     @State private var speechRate: Float = AVSpeechUtteranceDefaultSpeechRate
     @State private var voiceIdentifier = "com.apple.ttsbundle.Samantha-compact"
     @State private var autoSpeakResponses = true
-    @State private var wakePhrase = "hey little chef"
     @State private var bigBroVoice = BigBroClient.defaultVoice
     @State private var hasLoaded = false
     @State private var pendingDownload: CookingModelChoice?
@@ -81,10 +80,6 @@ struct ProfileSettingsView: View {
         )
     }
 
-    /// Whether the typed phrase is long enough for `WakeWord` to gate on. Checked here so the
-    /// mode can be refused up front rather than starting a loop that answers nothing.
-    private var wakePhraseIsUsable: Bool { !WakeWord(wakePhrase).isEmpty }
-
     var body: some View {
         Form {
             // MARK: - AI Provider
@@ -138,25 +133,6 @@ struct ProfileSettingsView: View {
                 }
             } header: {
                 Text("Voice")
-            }
-
-            // MARK: - Hands-free
-            Section {
-                TextField("Wake word", text: $wakePhrase)
-                    .autocorrectionDisabled()
-                    .textInputAutocapitalization(.never)
-
-                if !wakePhraseIsUsable {
-                    Label(
-                        "Too short to gate on — a phrase this brief matches too much ordinary speech.",
-                        systemImage: "exclamationmark.triangle"
-                    )
-                    .font(.caption)
-                    .foregroundColor(.orange)
-                }
-
-            } header: {
-                Text("Hands-free")
             }
 
             // MARK: - Your Data
@@ -227,7 +203,6 @@ struct ProfileSettingsView: View {
         .onChange(of: speechRate) { _, _ in saveIfLoaded() }
         .onChange(of: voiceIdentifier) { _, _ in saveIfLoaded() }
         .onChange(of: autoSpeakResponses) { _, _ in saveIfLoaded() }
-        .onChange(of: wakePhrase) { _, _ in saveIfLoaded() }
         .onChange(of: bigBroVoice) { _, _ in saveIfLoaded() }
         .confirmationDialog(
             "Delete all data?",
@@ -614,7 +589,6 @@ struct ProfileSettingsView: View {
             speechRate = prefs.voiceSettings.speechRate
             voiceIdentifier = prefs.voiceSettings.voiceIdentifier
             autoSpeakResponses = prefs.voiceSettings.autoSpeakResponses
-            wakePhrase = prefs.voiceSettings.wakePhrase
             bigBroVoice = prefs.voiceSettings.bigBroVoice
             llmService.currentProvider = provider
             hasLoaded = true
@@ -628,7 +602,7 @@ struct ProfileSettingsView: View {
             speechRate: speechRate,
             voiceIdentifier: voiceIdentifier,
             autoSpeakResponses: autoSpeakResponses,
-            wakePhrase: wakePhrase,
+            wakePhrase: LocalVoiceSettings.wakePhrase,
             bigBroVoice: bigBroVoice
         )
         // Pushed straight to the assistant as well as saved. A cooking session only reads the
