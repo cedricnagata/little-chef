@@ -180,3 +180,27 @@ private let breakfastTime: Date = {
     #expect(!nonsense.rankedByAI)
     #expect(nonsense.order.count == 2)
 }
+
+struct ItemsUsedTests {
+    private let inventory = ["Eggs", "Butter", "Black pepper", "Milk", "Chicken breast", "Parsley"]
+
+    @Test func findsWhatTheRecipeDrewOn() {
+        let used = IngredientMatcher.itemsUsed(
+            by: ["3 large eggs, beaten", "2 tbsp butter", "Salt and black pepper", "Parsley, to garnish"],
+            inventory: inventory)
+        #expect(used == ["Eggs", "Butter", "Black pepper", "Parsley"])
+    }
+
+    @Test func eitherAlternativeCounts() {
+        #expect(IngredientMatcher.itemsUsed(by: ["1 cup milk or cream"], inventory: inventory) == ["Milk"])
+    }
+
+    @Test func doesNotConfuseSimilarNames() {
+        #expect(IngredientMatcher.itemsUsed(by: ["1 bell pepper", "water"], inventory: inventory).isEmpty)
+    }
+
+    @Test func aRecipeUsingNothingAsksNothing() {
+        #expect(IngredientMatcher.itemsUsed(by: [], inventory: inventory).isEmpty)
+        #expect(IngredientMatcher.itemsUsed(by: ["2 eggs"], inventory: []).isEmpty)
+    }
+}

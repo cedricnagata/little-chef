@@ -67,6 +67,20 @@ enum IngredientMatcher {
         return RecipeAvailability(missing: missing, missingNames: missingNames, requiredCount: required)
     }
 
+    /// The inventory items a cook of `ingredients` drew on, in inventory order: each item that
+    /// covers some name on some line, optional lines included (a garnish still comes out of the
+    /// fridge). What the after-cook check asks about.
+    static func itemsUsed(by ingredients: [String], inventory: [String]) -> [String] {
+        let needed = ingredients.compactMap(parse)
+            .flatMap { $0.names.flatMap { $0 } }
+            .map(normalizedTokens(of:))
+            .filter { !$0.isEmpty }
+        return inventory.filter { item in
+            let have = normalizedTokens(of: item)
+            return needed.contains { covers(have, $0) }
+        }
+    }
+
     /// Whether an inventory item and a recipe ingredient name are the same thing.
     ///
     /// Either side's words being a subset of the other's: "garlic" covers "garlic cloves", and
@@ -183,7 +197,8 @@ enum IngredientMatcher {
 
     // MARK: - Staples
 
-    /// Seeded into a new inventory's staples section. The user can remove any of them.
+    /// Seeded into a new inventory: basics most kitchens have. They appear in their sections
+    /// like anything else, and the user can remove any of them.
     static let defaultStaples = [
         "Salt", "Black pepper", "Olive oil", "Vegetable oil", "Butter", "Sugar", "All-purpose flour",
         "Baking soda", "Baking powder", "Garlic", "Onion",

@@ -144,7 +144,7 @@ private struct HandsFreeButton: View {
                     Button {
                         start(usesWakeWord: true)
                     } label: {
-                        Label("Wait for \"\(voiceAssistant.voiceSettings.wakePhrase)\"",
+                        Label("Wait for \"\(LocalVoiceSettings.wakePhraseDisplay)\"",
                               systemImage: "ear.badge.waveform")
                     }
                     .disabled(!voiceAssistant.wakeWordIsUsable)
@@ -294,7 +294,7 @@ private struct VoiceStatusBar: View {
         switch voiceAssistant.phase {
         case .idle:         return "Voice off"
         case .preparing:    return "Getting ready…"
-        case .armed:        return "Say \"\(voiceAssistant.voiceSettings.wakePhrase)\""
+        case .armed:        return "Say \"\(LocalVoiceSettings.wakePhraseDisplay)\""
         // In wake-word mode this state is only reached by being called by name and asked
         // nothing, and it lapses. Saying "go ahead" is the difference between the user asking
         // their question now and waiting for a prompt that is already expiring.

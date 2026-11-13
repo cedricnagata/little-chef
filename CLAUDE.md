@@ -1,5 +1,143 @@
 # little-chef
 
+LittleChef is an iOS 26 SwiftUI app for cooking with your hands full. You keep recipes and a kitchen
+inventory, then cook one with an AI assistant you talk to. The assistant runs either on the phone
+(PrismML Bonsai models through MLX) or on a paired Mac (BigBro, through BigBroKit). Everything the
+user keeps stays on the device; there is no server. Cedric Nagata owns it; it is in TestFlight and
+not yet released.
+
+This file is the map and the rulebook. **Start here** covers how the code is laid out and the rules
+every change follows; the sections after it go deep on one subsystem each (see *Sections below*).
+`README.md` is the user-facing feature list.
+
+## Start here
+
+### Rules for every change
+
+- **Never submit for review or release.** Not 1.0, not any version, and apple-dev has no tool for
+  it by design. App Privacy answers and content rights are Cedric's to answer, and content rights is
+  never "yes": the app holds no rights to the recipe content users import.
+- **Deploy with the `deploy-ios-internal` label** (TestFlight internal testing only). `deploy-ios`
+  only when Cedric asks for a build that could be submitted. See *TestFlight deploy pipeline*.
+- **Use iOS's own components and flows.** An alert to confirm something, not a
+  `confirmationDialog` (iOS 26 floats an unanchored one as a card mid-screen); system button styles
+  (`.borderedProminent`, `.bordered`), not hand-drawn backgrounds; `Form` and `List` for settings
+  and lists; segmented `Picker` for a choice of modes; titles and bar buttons in the navigation bar
+  through `.toolbar`, not a custom header. Chat bubbles, the chat input bar, step numbers and tag
+  chips are the deliberate exceptions. Accent colour is orange (`MainView`).
+- **Logic goes in Foundation-only files** wherever it can, symlinked into `tools/linux-tests` (and
+  into `tools/bonsai-check` when the model checks need it), so the Linux tests cover it. Test files
+  import only Foundation and Testing. See *Testing*.
+- **This machine may be Linux.** A beepboop session can run the Linux tests and nothing iOS. The
+  iOS compile is CI's `pr-build.yml` on every PR; the Simulator and the UI tests run on the Mac
+  through its Remote Control session (`little-chef-test`, see *Testing on the Mac*); on-device
+  inference, speech and Live Activities need Cedric's iPhone.
+- **Comments say why**, with the date and the evidence when a choice came from a bug or a
+  measurement. Keep this file current in the same PR as the change.
+- **Anything new the app persists** goes into Export Profile (`ProfileBackup`) and Delete All Data
+  too. See *Storage*.
+
+### The app, screen by screen
+
+| Tab / screen | View | State it reads | Notes |
+|---|---|---|---|
+| Tabs, and what's injected into them | `Views/Main/MainView.swift` | owns `RecipeManager`, `KitchenManager` | Tab tags: Recipes 0, Cook 1, Settings 2, Kitchen 3 (`RecipeDetailView` jumps to Cook by tag). Restores a saved cook on appear. |
+| Recipes: list, search, filters (Can Make Now, Missing a Few, Suggested) | `Views/Recipes/RecipeListView.swift` | `RecipeManager`, `KitchenManager` | Suggested is `RecipeSuggester` through the active model, with a non-AI fallback. |
+| A recipe | `Views/Recipes/RecipeDetailView.swift` | same | Menu: Start Cooking, Edit, Add Ingredients to Shopping List, Delete. Edits in place with `RecipeEditor`. |
+| Add Recipe: URL, text or photos, then review | `Views/Recipes/AddRecipeView.swift`, `EditRecipeView.swift`, `RecipeEditor.swift` | `RecipeManager` → `LocalRecipeParser` | Text and photo import need `.full` capability. Photos are read by Vision OCR; the model never sees images. |
+| Missing-ingredients warning before a cook | `Views/Recipes/MissingIngredientsCheck.swift` | `KitchenManager` | An alert: Cook Anyway, Add to Shopping List, Cancel. |
+| Kitchen: inventory and shopping list | `Views/Kitchen/KitchenView.swift` | `KitchenManager` | Inventory in sections by `IngredientCategory`, with catalog suggestions under the add field. |
+| Cook: start a cook | `Views/Cooking/CookingSessionView.swift` (`StartCookingView`, `RecipeSelectorView`) | `CookingSessionManager` | Choose Recipe, or Cook Without a Recipe. |
+| Cook: the cook itself | same file (`ActiveCookingView`), `ChatAreaView`, `InputAreaView`, `TimerViews` | `CookingSessionManager`, `VoiceAssistant`, `LLMService` | End and the recipe title are in the navigation bar; tapping the title switches recipe and chat. |
+| Ending a cook | `SessionChangesView.swift`, then `LeftoversView.swift` | `CookingSessionManager`, `RecipeManager`, `KitchenManager` | Save or discard the assistant's edits, then What's Left? for the inventory items the recipe used. |
+| Settings | `Views/Settings/ProfileSettingsView.swift`, `BigBroPairingView.swift` | `LLMService`, `VoiceAssistant`, `LocalDataManager` | Provider and model (download, load, delete), voice, Export/Import Profile, Delete All Data. |
+| Live Activity for a running timer | `TimerWidget/` | `TimerActivityAttributes` | A separate target. |
+
+### The code, by layer
+
+- **`little-chef/Managers/`**: long-lived `ObservableObject`s the views watch.
+  `CookingSessionManager` (the cook: session, transcript, timers, saving the cook to disk),
+  `RecipeManager` (recipes and every write to them), `KitchenManager` (inventory, shopping list,
+  what each recipe is missing, Suggested), `VoiceAssistant` (voice in and out on either backend),
+  `LocalVoiceSession` (the on-device hands-free loop), `OnDeviceSpeaker` (awaitable TTS).
+- **`little-chef/Models/`**: values and SwiftData entities. `Recipe`/`RecipeData`/`RecipeBase`,
+  `CookingSession`, `LocalTimer`, `Preferences` (plain settings, including the fixed wake phrase),
+  `RecipeDiff`, `SavedCook`, and the `*Entity` SwiftData models.
+- **`little-chef/Services/`**, grouped by what they serve:
+  - *Models and inference*: `LLMService` (provider, model choice, load, memory, chat on both
+    backends), `ModelDownloader` + `ModelDownloadPlan` (background downloads into the Hub cache),
+    `HubModelLoading` (the Hub and tokenizer bridges, the cache location), `PromptPrefixCache`,
+    `ModelReplyText`, `NetworkPathMonitor`.
+  - *The cooking assistant*: `LocalCookingAgent` (briefs the model, one question at a time),
+    `CookingPrompt` (the prompt itself), `ToolDefinition` (`CookingTools`: timer and recipe
+    tools for both backends), `CookingCommand` (things answered without a model),
+    `RecipeLineMatcher`, `IngredientScaler`.
+  - *Recipes*: `LocalRecipeParser` (import from URL, text, photos), `WebScraperService`,
+    `OCRService`, `RecipeExtraction` (schema.org and model JSON), `HTMLText`.
+  - *Kitchen*: `IngredientMatcher` (what a recipe is missing or used, duplicates),
+    `IngredientCatalog` (inventory sections and suggestions), `RecipeSuggester`.
+  - *Voice and timers*: `OnDeviceTranscriber`, `SpeechText`, `TimerNotificationManager`,
+    `TimerAlertPlayer`.
+  - *Storage*: `LocalDataManager` (the SwiftData store), `ProfileBackup` (export/import format).
+  - *Support*: `DebugLog` (`dprint`, Debug only), `ScreenshotFixtures` (App Store screenshots).
+- **`little-chef/Views/`**: by tab, as in the table above; `Support/KeyboardDismissal.swift` is the
+  one way to put the keyboard away.
+- **`little-chefTests/`**: Swift Testing unit tests, run by Xcode and, through symlinks, on Linux.
+  **`little-chefUITests/`**: UI smoke tests and the App Store screenshots; they find controls by
+  visible text, so renaming a button can break them.
+- **`tools/`**: `linux-tests` (the Linux test package), `bonsai-check` (loads and evaluates the
+  real models on a Mac: chat, tools, memory, and the 29-case `eval`), `mac-test` (the Mac session's
+  build-and-test script).
+- **`.github/workflows/`**: `unit-tests.yml`, `pr-build.yml`, `deploy-ios-testflight.yml`.
+- **`docs/`**: the published privacy policy and support page.
+
+### How the main flows run
+
+- **A cook.** `startCookingSession(with:)` or `startFreestyleSession()` makes a `CookingSession`
+  and warms the backend. Each question goes `InputAreaView` → `CookingSessionManager.sendQueryStreaming`
+  → `CookingCommand` (answered at once if it can be) → `LocalCookingAgent.reply` → `LLMService` on
+  the session's pinned provider, with `CookingTools` for timers and recipe edits, streaming into
+  the transcript and, sentence by sentence, the speaker. Edits change the session's copy only. The
+  cook is saved to `current-cook.json` as it goes (`SavedCook`). Ending it: `SessionChangesView`
+  if there are edits, `LeftoversView` if the recipe used the inventory, then `endCookingSession()`.
+- **Importing a recipe.** `AddRecipeView` → `RecipeManager.parseRecipeFrom…` → `LocalRecipeParser`:
+  a URL is scraped (`WebScraperService`) and read from schema.org (`RecipeExtraction`), with the
+  model only as a fallback; text and OCR'd photos go to the model. The result opens in
+  `EditRecipeView` before anything is saved.
+- **Getting a model.** Settings → Download (behind a size and cellular prompt) →
+  `LLMService.downloadModel` → `ModelDownloader` (background `URLSession`, survives leaving the
+  app) → files in the Hub cache. Asking a question → `downloadedModelContainer` → `loadModel`
+  (waits for memory, never downloads) → MLX. See *MLX packages* and *The models*.
+- **What a recipe needs.** `KitchenManager.availability(of:)` → `IngredientMatcher.availability`,
+  deterministic and instant; drives the filters, the recipe page and the pre-cook warning, but
+  only once the user keeps an inventory (`isTrackingInventory`).
+
+### Where to change…
+
+| To change | Look in |
+|---|---|
+| What the assistant is told, or how it behaves | `CookingPrompt.swift`; check with `bonsai-check eval` on the Mac (*The cooking test set*) |
+| A tool the assistant can call | `ToolDefinition.swift` (*The cooking tools*) |
+| Something answered without the model ("how long is left") | `CookingCommand.swift` |
+| Which models exist, their memory needs, the device tiers | `CookingModelChoice` in `Preferences.swift`, `LLMService` (*The models*) |
+| Model download or load | `ModelDownloader.swift`, `ModelDownloadPlan.swift`, `LLMService.loadModel`, `HubModelLoading.swift` |
+| Ingredient matching, inventory sections, suggestions | `IngredientMatcher.swift`, `IngredientCatalog.swift` |
+| Recipe import | `LocalRecipeParser.swift`, `RecipeExtraction.swift`, `WebScraperService.swift` |
+| What's stored, export/import, Delete All Data | `LocalDataManager.swift`, `ProfileBackup.swift`, the `*Entity` models (*Storage*) |
+| Voice, wake word, speech | `VoiceAssistant.swift`, `LocalVoiceSession.swift`, `SpeechText.swift`, `LocalVoiceSettings` in `Preferences.swift` |
+| Timers, notifications, Live Activities | `LocalTimer.swift`, `TimerNotificationManager.swift`, `TimerWidget/` |
+| Builds and deploys | `.github/workflows/` (*TestFlight deploy pipeline*, *Pull request checks*) |
+
+### Sections below
+
+*TestFlight deploy pipeline* (labels, signing, build numbers, secrets, failures) · *MLX packages*
+(the mlx-swift-lm fork, background downloads, the models, memory, device tiers) · *Storage* (and
+Export/Import Profile) · *Privacy promises the code keeps* · *Permission prompts* · *Inventory,
+shopping list and suggestions* · *Editing the recipe mid-cook* · *The cooking prompt, and reusing
+it between questions* · *The cooking tools* · *Commands answered without the model* · *The cooking
+test set* · *Ingredient scaling* · *Recipe import* · *Pull request checks* · *Testing* · *Testing
+on the Mac*.
+
 ## TestFlight deploy pipeline
 
 `.github/workflows/deploy-ios-testflight.yml` archives the app and uploads it to
@@ -253,6 +391,21 @@ macros, because `xcodebuild` won't run a package's macros in CI until someone tr
 interactively. Models are stored under Application Support in the hub's
 `models--<org>--<name>` layout. Caches is not used, because iOS can empty it.
 
+**Downloads run in a background `URLSession`** (`ModelDownloader.swift`), not through the hub
+client, so they carry on while the user is in another app and after iOS ends LittleChef. The
+hub client can't use a background session (swift-huggingface #99 swaps one for an ordinary
+session), and its ordinary session stopped with "the network connection was lost" a few seconds
+after the app left the screen (2026-11-13). The hub is asked only for the commit and its file
+list; the plan is written to `littlechef-download.json` in the model's cache directory, because
+a relaunch that hears about a finished file needs it. Each file lands in `blobs/<etag>`, and
+only when all are in are the `snapshots/<commit>/` symlinks and `refs/main` written
+(`ModelDownloadPlan.swift`, Foundation-only and tested on Linux), so a half-done download never
+counts as downloaded. The loader then finds every file in the cache and fetches nothing. A
+download interrupted by a force-quit, which cancels background transfers, restarts its missing
+files at the next launch; a file that fails is retried three times, then the download stops and
+Settings says to tap Download, which keeps the files already fetched. A model that finishes
+while the app is away posts a notification.
+
 ### The models
 
 | Choice | Repository | Download | Weights in memory | Peak at 8.6k tokens | Needs an app limit of |
@@ -435,6 +588,26 @@ microphone are asked for when voice is first used: push-to-talk in `VoiceAssista
 goes false once the microphone has been refused, and is re-read when the app comes back to the
 front. Do not add a permission request to an `init` or a launch `.task`.
 
+## The on-device voice
+
+Replies are spoken by `AVSpeechSynthesizer` (`OnDeviceSpeaker`) unless the cook is on a Mac, which
+speaks with Kokoro.
+
+- **Siri's voices are not available.** iOS doesn't offer them to other apps, so don't try. The
+  best an app gets is the Enhanced and Premium voices the user downloads in the Settings app
+  (Accessibility → Spoken Content → Voices), and there is no API to list voices not yet downloaded.
+  Settings' voice footer says so.
+- **Automatic is the default** (`voiceIdentifier` empty): `AVSpeechSynthesisVoice.bestInstalled()`
+  takes the highest quality installed for the device's language, preferring the system default on
+  a tie. The default until 2026-11-13, `com.apple.ttsbundle.Samantha-compact`, the lowest
+  quality iOS has and often missing from iOS 26, reads as automatic too (`isAutomatic`).
+- **What the picker offers** is `choosable` (no novelty voices, no Personal Voice), the device's
+  language and English, best first, re-read on `availableVoicesDidChangeNotification`. A chosen
+  voice since deleted stays selected and speaks as automatic, logged.
+- **Choosing a voice or letting go of the rate slider plays a sample**, through the playback
+  category so it is heard with the ring switch on silent. It plays from the user's choice only, not
+  from the form loading.
+
 ## Inventory, shopping list and suggestions
 
 The Kitchen tab keeps two SwiftData models, `PantryItemEntity` and `ShoppingItemEntity`, in the
@@ -460,18 +633,43 @@ the list, with or without an AI backend, so it has to be instant and give the sa
   "cinnamon" also covers "ground cinnamon". A wrong "you have it" costs a substitution, while a
   wrong "missing" hides a recipe the user could have made.
 
-### Staples and duplicates
+### Sections and suggestions
 
-- **Staples.** Common staples are seeded once (`KitchenManager.staplesSeededKey`, which Delete All
-  Data clears), in the inventory's Staples section, and count as always on hand.
+- **The inventory is grouped by kind of ingredient** (`IngredientCategory`: Produce, Fresh Herbs,
+  Proteins, Dairy & Eggs, Grains, Pasta & Bread, Beans & Legumes, Nuts & Seeds, Baking, Seasonings &
+  Spices, Oils & Vinegars, Sauces & Condiments, Canned & Jarred, Frozen, Drinks, Other), worked out
+  from the name on every redraw, not stored. `IngredientCatalog.category(of:)` takes the
+  catalog entry with the same words, else the longest catalog entry or keyword the name contains
+  (ties go to the one with the name's last word: "garlic salt" is a salt), else Other. It uses its
+  own word set rather than `normalizedTokens`, which drops "frozen", "dried" and "crushed": those
+  don't change whether you have something, but they do change where it lives.
+- **Suggestions under the add field** come from the same catalog (about 350 entries): from two
+  letters typed, up to five whose name or a word of it starts with (then contains) the text,
+  leaving out anything `IngredientMatcher.sameItem` says the inventory already has.
+- **There is no Staples section** (until 2026-11-13 there was, and Cedric found it confusing).
+  New inventories are still seeded once with basics (`IngredientMatcher.defaultStaples`,
+  `KitchenManager.staplesSeededKey`, which Delete All Data clears); they show in their sections
+  like anything else. Their `isStaple` flag only tells a seeded inventory from one the user keeps.
 - **Duplicates.** Adding and importing both match by name with `IngredientMatcher.sameItem`, so
   "Eggs" and "egg" are one item. Stores from the iCloud builds can still hold duplicates (a second
   device seeded the staples before the first's arrived), so `fetchPantryItems()` and
   `fetchShoppingItems()` delete the losers as `fetchPreferences()` does, keeping the **oldest** row
   where preferences keep the newest, ties broken on `id`.
-- **No warnings until the inventory is in use.** Recipes show have and missing, and the pre-cook
-  warning appears, only once the user has added an item beyond the staples
-  (`isTrackingInventory`). Before that, every recipe would report everything missing.
+- **No warnings until the inventory is in use.** Recipes show have and missing, the pre-cook
+  warning appears and What's Left? asks, only once the user has added an item beyond the seeded
+  basics (`isTrackingInventory`). Before that, every recipe would report everything missing.
+
+### Shopping list, and what's left after a cook
+
+- **A recipe's menu → Add Ingredients to Shopping List** adds everything
+  `availability(of:)` says is missing, whether or not the user keeps an inventory: with nothing in
+  it every ingredient is missing, which is the list they want. An alert says how many were added.
+  The recipe page's inline "Add N missing" button does the same, shown only with an inventory.
+- **What's Left?** (`LeftoversView`) is the last step of ending a cook whose recipe used inventory
+  items (`IngredientMatcher.itemsUsed`, optional lines included). Each starts switched on as still
+  there; what the user switches off comes off the inventory and, unless unticked, goes on the
+  shopping list. Skip changes nothing. It follows `SessionChangesView` when there are recipe edits,
+  queued until that sheet has closed, since one sheet can't open while another is closing.
 
 ### Suggested ranking
 
@@ -777,8 +975,11 @@ with no copies to keep in step. Two stand-ins cover what those files borrow from
 `MLXLMCommon` target, whose one file is MLX's `ToolSpec` typealias.
 
 Only Foundation-only files can be linked. That is why the testable logic lives in files of its
-own: `IngredientMatcher`, `IngredientScaler`, `RecipeExtraction`, `RecipeLineMatcher`,
-`ModelReplyText`, `SpeechText`, `RecipeSuggester`, `RecipeDiff`, `HTMLText` and `ToolDefinition`.
+own: everything in `tools/linux-tests/Sources/little_chef/` (`ls` it for the current list), among
+them `IngredientMatcher`, `IngredientCatalog`, `IngredientScaler`, `RecipeExtraction`,
+`RecipeLineMatcher`, `ModelReplyText`, `SpeechText`, `RecipeSuggester`, `RecipeDiff`, `HTMLText`,
+`ToolDefinition`, `CookingPrompt`, `CookingCommand`, `Preferences`, `ProfileBackup`, `SavedCook` and
+`ModelDownloadPlan`.
 
 - **Adding a test for an existing linked file** needs nothing extra.
 - **Linking a new file:** keep it Foundation-only, and add its symlink under

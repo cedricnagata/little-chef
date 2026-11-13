@@ -2,7 +2,7 @@
 //  ProfileSettingsView.swift
 //  little-chef
 //
-//  The Settings tab: AI provider and models, voice, hands-free, exporting and importing the
+//  The Settings tab: AI provider and models, voice, exporting and importing the
 //  profile, and Delete All Data.
 //
 
@@ -20,9 +20,12 @@ struct ProfileSettingsView: View {
     /// Absolute `AVSpeechUtterance.rate`, where `AVSpeechUtteranceDefaultSpeechRate` is normal
     /// speed. Shown to the user as a multiple of that via `speechRateMultiplier`.
     @State private var speechRate: Float = AVSpeechUtteranceDefaultSpeechRate
-    @State private var voiceIdentifier = "com.apple.ttsbundle.Samantha-compact"
+    @State private var voiceIdentifier = AVSpeechSynthesisVoice.automaticIdentifier
+    /// The voices to offer, re-read when one is downloaded or deleted in the Settings app.
+    @State private var voices: [AVSpeechSynthesisVoice] = []
+    /// Plays the sample when a voice or rate is chosen.
+    @State private var sampleSpeaker = OnDeviceSpeaker()
     @State private var autoSpeakResponses = true
-    @State private var wakePhrase = "hey little chef"
     @State private var bigBroVoice = BigBroClient.defaultVoice
     @State private var hasLoaded = false
     @State private var pendingDownload: CookingModelChoice?
@@ -48,24 +51,39 @@ struct ProfileSettingsView: View {
         var id: Int { self == .wifiConfirm ? 0 : 1 }
     }
 
-    /// Voices actually installed on this device.
+    /// The voices to offer: the device's language and English, novelty voices left out
+    /// (`AVSpeechSynthesisVoice.choosable`), best quality first.
     ///
-    /// This was previously a hardcoded list of legacy `com.apple.ttsbundle.*` identifiers.
-    /// Modern iOS ships `com.apple.voice.compact.*` forms and the old ones are frequently
-    /// absent, so `AVSpeechSynthesisVoice(identifier:)` returned nil and the synthesizer fell
-    /// back to the system default without any error — the picker changed but the voice did not.
-    /// Enumerating the device guarantees every option resolves.
-    private var availableVoices: [AVSpeechSynthesisVoice] {
+    /// Enumerated from the device rather than listed by hand: a hardcoded list of legacy
+    /// `com.apple.ttsbundle.*` identifiers mostly didn't resolve on modern iOS, so the picker
+    /// changed and the voice did not.
+    private static func installedVoices() -> [AVSpeechSynthesisVoice] {
         let deviceLanguage = Locale.current.language.languageCode?.identifier ?? "en"
         let wanted = Set(["en", deviceLanguage])
-        return AVSpeechSynthesisVoice.speechVoices()
+        return AVSpeechSynthesisVoice.choosable
             .filter { voice in wanted.contains { voice.language.hasPrefix($0) } }
-            .sorted { ($0.name, $0.language) < ($1.name, $1.language) }
+            .sorted { ($1.quality.rawValue, $0.name, $0.language) < ($0.quality.rawValue, $1.name, $1.language) }
     }
 
     private func voiceLabel(_ voice: AVSpeechSynthesisVoice) -> String {
         let language = Locale.current.localizedString(forIdentifier: voice.language) ?? voice.language
-        return "\(voice.name) (\(language))"
+        return [voice.name, voice.qualityName].compactMap { $0 }.joined(separator: " ") + " (\(language))"
+    }
+
+    private var automaticLabel: String {
+        guard let voice = AVSpeechSynthesisVoice.bestInstalled() else { return "Automatic" }
+        return "Automatic (\([voice.name, voice.qualityName].compactMap { $0 }.joined(separator: " ")))"
+    }
+
+    private func playSample() {
+        let voice = AVSpeechSynthesisVoice.resolving(voiceIdentifier)
+        let rate = speechRate
+        sampleSpeaker.stop()
+        // Playback, so the sample is heard with the ring switch on silent. No cook is running
+        // while Settings is open, so nothing else holds the audio session.
+        try? AVAudioSession.sharedInstance().setCategory(.playback, mode: .spokenAudio, options: [.duckOthers])
+        try? AVAudioSession.sharedInstance().setActive(true)
+        Task { await sampleSpeaker.speak("Preheat the oven to 200 degrees, then chop the onion.", voice: voice, rate: rate) }
     }
 
     /// Presents the stored rate as a multiple of normal speed, so "normal" reads as 1.0x.
@@ -80,10 +98,6 @@ struct ProfileSettingsView: View {
             set: { speechRate = $0 * AVSpeechUtteranceDefaultSpeechRate }
         )
     }
-
-    /// Whether the typed phrase is long enough for `WakeWord` to gate on. Checked here so the
-    /// mode can be refused up front rather than starting a loop that answers nothing.
-    private var wakePhraseIsUsable: Bool { !WakeWord(wakePhrase).isEmpty }
 
     var body: some View {
         Form {
@@ -110,17 +124,25 @@ struct ProfileSettingsView: View {
                             bigBroVoice: $bigBroVoice
                         )
                     } else {
-                        Picker("Voice", selection: $voiceIdentifier) {
-                            // A saved voice that is no longer installed would otherwise drop out
-                            // of the picker and silently reset the selection on the next render.
-                            if !availableVoices.contains(where: { $0.identifier == voiceIdentifier }) {
-                                Text("System Default").tag(voiceIdentifier)
-                                Divider()
+                        // The sample plays from the user's choice only, not from loading the form.
+                        Picker("Voice", selection: Binding(
+                            get: { voiceIdentifier },
+                            set: { voiceIdentifier = $0; playSample() }
+                        )) {
+                            Text(automaticLabel).tag(AVSpeechSynthesisVoice.automaticIdentifier)
+                            // A saved voice since deleted in the Settings app stays selectable
+                            // rather than silently resetting the choice; it speaks as automatic.
+                            if !AVSpeechSynthesisVoice.isAutomatic(voiceIdentifier),
+                               !voices.contains(where: { $0.identifier == voiceIdentifier }) {
+                                Text("Not installed (using automatic)").tag(voiceIdentifier)
                             }
-                            ForEach(availableVoices, id: \.identifier) { voice in
+                            Divider()
+                            ForEach(voices, id: \.identifier) { voice in
                                 Text(voiceLabel(voice)).tag(voice.identifier)
                             }
                         }
+
+                        Button("Play Sample", systemImage: "speaker.wave.2", action: playSample)
 
                         VStack(alignment: .leading, spacing: 4) {
                             HStack {
@@ -131,32 +153,19 @@ struct ProfileSettingsView: View {
                                     .foregroundColor(.secondary)
                                     .monospacedDigit()
                             }
-                            Slider(value: speechRateMultiplier, in: 0.5...2.0, step: 0.1)
+                            Slider(value: speechRateMultiplier, in: 0.5...2.0, step: 0.1) { editing in
+                                if !editing { playSample() }
+                            }
                                 .tint(.orange)
                         }
                     }
                 }
             } header: {
                 Text("Voice")
-            }
-
-            // MARK: - Hands-free
-            Section {
-                TextField("Wake word", text: $wakePhrase)
-                    .autocorrectionDisabled()
-                    .textInputAutocapitalization(.never)
-
-                if !wakePhraseIsUsable {
-                    Label(
-                        "Too short to gate on — a phrase this brief matches too much ordinary speech.",
-                        systemImage: "exclamationmark.triangle"
-                    )
-                    .font(.caption)
-                    .foregroundColor(.orange)
+            } footer: {
+                if autoSpeakResponses, llmProvider != .bigBro {
+                    Text("iOS doesn't let apps use Siri's voice. For the most natural one, download an Enhanced or Premium voice in the Settings app under Accessibility → Spoken Content → Voices; it appears here when it's done.")
                 }
-
-            } header: {
-                Text("Hands-free")
             }
 
             // MARK: - Your Data
@@ -226,23 +235,21 @@ struct ProfileSettingsView: View {
         }
         .onChange(of: speechRate) { _, _ in saveIfLoaded() }
         .onChange(of: voiceIdentifier) { _, _ in saveIfLoaded() }
+        .onAppear { voices = Self.installedVoices() }
+        .onReceive(NotificationCenter.default.publisher(for: AVSpeechSynthesizer.availableVoicesDidChangeNotification)) { _ in
+            voices = Self.installedVoices()
+        }
         .onChange(of: autoSpeakResponses) { _, _ in saveIfLoaded() }
-        .onChange(of: wakePhrase) { _, _ in saveIfLoaded() }
         .onChange(of: bigBroVoice) { _, _ in saveIfLoaded() }
-        .confirmationDialog(
-            "Delete all data?",
-            isPresented: $confirmingDeleteAll,
-            titleVisibility: .visible
-        ) {
+        .alert("Delete All Data?", isPresented: $confirmingDeleteAll) {
             Button("Delete All Data", role: .destructive) { deleteAllData() }
             Button("Cancel", role: .cancel) {}
         } message: {
             Text("Your recipes, inventory, shopping list and settings, downloaded AI models, and paired Macs will be deleted from this device. Export your profile first if you want to keep them. This can't be undone.")
         }
-        .confirmationDialog(
-            "Import this profile?",
+        .alert(
+            "Import This Profile?",
             isPresented: Binding(get: { pendingImport != nil }, set: { if !$0 { pendingImport = nil } }),
-            titleVisibility: .visible,
             presenting: pendingImport
         ) { backup in
             Button("Import") { importProfile(backup) }
@@ -308,7 +315,7 @@ struct ProfileSettingsView: View {
     private func startPendingDownload() {
         guard let choice = pendingDownload else { return }
         pendingDownload = nil
-        Task { try? await llmService.downloadModel(modelId: choice.modelId) }
+        Task { await llmService.downloadModel(modelId: choice.modelId) }
     }
 
     // MARK: - Provider Picker Section
@@ -368,7 +375,7 @@ struct ProfileSettingsView: View {
             )
         }
 
-        if let error = llmService.loadError {
+        if let error = llmService.downloadError ?? llmService.loadError {
             Text(error)
                 .font(.caption)
                 .foregroundColor(.red)
@@ -391,7 +398,10 @@ struct ProfileSettingsView: View {
     /// killing the app, and no way to reclaim the disk at all.
     @ViewBuilder
     private func modelRow(for choice: CookingModelChoice, usage: String) -> some View {
-        let isDownloading = llmService.currentlyLoadingModelId == choice.modelId
+        let isDownloading = llmService.downloadingModelId == choice.modelId
+            || llmService.currentlyLoadingModelId == choice.modelId
+        let progress = llmService.downloadingModelId == choice.modelId
+            ? llmService.downloadProgress : llmService.loadProgress
         let isDownloaded = llmService.downloadedModelIds.contains(choice.modelId)
         let isLoaded = llmService.loadedModelIds.contains(choice.modelId)
 
@@ -409,10 +419,10 @@ struct ProfileSettingsView: View {
 
                 if isDownloading {
                     HStack(spacing: 6) {
-                        ProgressView(value: llmService.loadProgress, total: 1.0)
+                        ProgressView(value: progress, total: 1.0)
                             .frame(width: 60)
                             .tint(.orange)
-                        Text("\(Int(llmService.loadProgress * 100))%")
+                        Text("\(Int(progress * 100))%")
                             .font(.caption2)
                             .foregroundColor(.secondary)
                             .monospacedDigit()
@@ -427,7 +437,7 @@ struct ProfileSettingsView: View {
                     }
                     .buttonStyle(.bordered)
                     .tint(.orange)
-                    .disabled(llmService.isLoadingModel)
+                    .disabled(llmService.isLoadingModel || llmService.downloadingModelId != nil)
                 }
             }
 
@@ -612,9 +622,9 @@ struct ProfileSettingsView: View {
             let provider: LLMProvider = LLMService.deviceSupportsLocalModels ? prefs.llmProvider : .bigBro
             llmProvider = provider
             speechRate = prefs.voiceSettings.speechRate
-            voiceIdentifier = prefs.voiceSettings.voiceIdentifier
+            voiceIdentifier = AVSpeechSynthesisVoice.isAutomatic(prefs.voiceSettings.voiceIdentifier)
+                ? AVSpeechSynthesisVoice.automaticIdentifier : prefs.voiceSettings.voiceIdentifier
             autoSpeakResponses = prefs.voiceSettings.autoSpeakResponses
-            wakePhrase = prefs.voiceSettings.wakePhrase
             bigBroVoice = prefs.voiceSettings.bigBroVoice
             llmService.currentProvider = provider
             hasLoaded = true
@@ -628,7 +638,7 @@ struct ProfileSettingsView: View {
             speechRate: speechRate,
             voiceIdentifier: voiceIdentifier,
             autoSpeakResponses: autoSpeakResponses,
-            wakePhrase: wakePhrase,
+            wakePhrase: LocalVoiceSettings.wakePhrase,
             bigBroVoice: bigBroVoice
         )
         // Pushed straight to the assistant as well as saved. A cooking session only reads the
@@ -660,7 +670,7 @@ private struct BigBroVoicePicker: View {
             // Offered even while disconnected so the choice can be made before pairing.
             Picker("Voice", selection: $bigBroVoice) {
                 ForEach(Self.availableVoices, id: \.self) { voice in
-                    Text(voice).tag(voice)
+                    Text(Self.label(for: voice)).tag(voice)
                 }
             }
 
@@ -678,6 +688,15 @@ private struct BigBroVoicePicker: View {
         "af_nova", "af_river", "af_sarah", "af_sky", "am_adam", "am_echo", "am_eric",
         "am_fenrir", "am_liam", "am_michael", "am_onyx", "am_puck", "am_santa",
     ]
+
+    /// "af_heart" → "Heart (female)": Kokoro's ids put the accent and voice in a prefix.
+    private static func label(for id: String) -> String {
+        let parts = id.split(separator: "_", maxSplits: 1)
+        guard parts.count == 2 else { return id }
+        let kind = parts[0].hasSuffix("f") ? "female" : parts[0].hasSuffix("m") ? "male" : nil
+        let name = parts[1].prefix(1).uppercased() + parts[1].dropFirst()
+        return kind.map { "\(name) (\($0))" } ?? name
+    }
 
     private var footnote: String {
         guard client.isConnected else {

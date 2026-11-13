@@ -125,74 +125,25 @@ struct AddTimerView: View {
     @State private var selectedMinutes = 5
     @State private var selectedSeconds = 0
 
-    private let minuteOptions = Array(0...59)
-    private let secondOptions = Array(0...59)
-
     var body: some View {
         NavigationStack {
-            VStack(spacing: 20) {
-                VStack(alignment: .leading, spacing: 8) {
-                    Text("Timer Label")
-                        .font(.headline)
-
+            Form {
+                Section("Label") {
                     TextField("e.g., Pasta, Chicken, etc.", text: $timerLabel)
-                        .textFieldStyle(RoundedBorderTextFieldStyle())
                 }
 
-                VStack(alignment: .leading, spacing: 8) {
-                    Text("Duration")
-                        .font(.headline)
-
-                    HStack {
-                        VStack {
-                            Text("Minutes")
-                                .font(.caption)
-                                .foregroundColor(.secondary)
-
-                            Picker("Minutes", selection: $selectedMinutes) {
-                                ForEach(minuteOptions, id: \.self) { minute in
-                                    Text("\(minute)").tag(minute)
-                                }
-                            }
-                            .pickerStyle(.wheel)
-                            .frame(width: 80, height: 120)
-                        }
-
-                        VStack {
-                            Text("Seconds")
-                                .font(.caption)
-                                .foregroundColor(.secondary)
-
-                            Picker("Seconds", selection: $selectedSeconds) {
-                                ForEach(secondOptions, id: \.self) { second in
-                                    Text("\(second)").tag(second)
-                                }
-                            }
-                            .pickerStyle(.wheel)
-                            .frame(width: 80, height: 120)
-                        }
-
-                        Spacer()
-
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text("Total Duration")
-                                .font(.caption)
-                                .foregroundColor(.secondary)
-
-                            Text(formattedDuration)
-                                .font(.title2)
-                                .fontWeight(.semibold)
-                                .foregroundColor(.orange)
-                        }
+                Section {
+                    HStack(spacing: 0) {
+                        durationWheel("Minutes", unit: "min", selection: $selectedMinutes)
+                        durationWheel("Seconds", unit: "sec", selection: $selectedSeconds)
                     }
+                } header: {
+                    Text("Duration")
+                } footer: {
+                    Text(formattedDuration)
                 }
-
-                Spacer()
             }
-            .padding()
-            // The duration pickers sit right under the label field, and a keyboard covering
-            // them is a sheet with no visible way forward.
-            .dismissesKeyboardOnTap()
+            .scrollDismissesKeyboard(.interactively)
             .navigationTitle("Add Timer")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -206,6 +157,22 @@ struct AddTimerView: View {
                 }
             }
         }
+    }
+
+    /// One wheel with its unit beside the selected row, as the Clock app's timer draws it.
+    private func durationWheel(_ title: String, unit: String, selection: Binding<Int>) -> some View {
+        HStack(spacing: 4) {
+            Picker(title, selection: selection) {
+                ForEach(0...59, id: \.self) { value in
+                    Text("\(value)").tag(value)
+                }
+            }
+            .pickerStyle(.wheel)
+            .labelsHidden()
+            Text(unit)
+                .font(.headline)
+        }
+        .frame(maxWidth: .infinity)
     }
 
     private var isValid: Bool {

@@ -130,17 +130,23 @@ struct LocalVoiceSettings: Codable, Equatable {
     var speechRate: Float
     var voiceIdentifier: String
     var autoSpeakResponses: Bool
-    /// What the assistant answers to in wake-word hands-free mode. Free text, because the
-    /// whole point is that it is the user's name for it — but a phrase too short to gate on is
-    /// refused by `WakeWord` rather than silently matching nothing.
-    var wakePhrase: String = "hey little chef"
+    /// No longer read: the wake phrase is always ``LocalVoiceSettings/wakePhrase`` (2026-11-13,
+    /// when Settings lost its wake word field). Kept so profiles and preferences saved by earlier
+    /// builds, and read by them, still decode.
+    var wakePhrase: String = LocalVoiceSettings.wakePhrase
+
+    /// What the assistant answers to in wake-word hands-free mode, for everyone.
+    static let wakePhrase = "hey little chef"
+    /// The same, as the app shows it.
+    static let wakePhraseDisplay = "Hey Little Chef"
     /// Kokoro voice id for the Mac's synthesizer. Separate from `voiceIdentifier`, which names
     /// an `AVSpeechSynthesisVoice` — the two backends share no vocabulary of voices.
     var bigBroVoice: String = "af_heart"
 
     static let defaultSettings = LocalVoiceSettings(
         speechRate: 0.5,
-        voiceIdentifier: "com.apple.ttsbundle.Samantha-compact",
+        // Automatic: the best voice installed (`AVSpeechSynthesisVoice.bestInstalled`).
+        voiceIdentifier: "",
         autoSpeakResponses: true
     )
 }

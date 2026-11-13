@@ -91,7 +91,7 @@ final class VoiceAssistant: NSObject, ObservableObject {
     private(set) var provider: LLMProvider = .local
 
     /// The wake phrase as the kit understands it, with its mishearing tolerance.
-    var wakeWord: WakeWord { WakeWord(voiceSettings.wakePhrase) }
+    var wakeWord: WakeWord { WakeWord(LocalVoiceSettings.wakePhrase) }
     /// False when the configured phrase is too short to gate on — a phrase that brief matches
     /// too much ordinary speech, and `WakeWord` refuses it rather than silently matching
     /// nothing.
@@ -212,7 +212,7 @@ final class VoiceAssistant: NSObject, ObservableObject {
         // open the microphone, hear everything and answer none of it — which looks exactly
         // like a broken microphone.
         guard !wantsWakeWord || wakeWordIsUsable else {
-            error = "\"\(voiceSettings.wakePhrase)\" is too short to use as a wake word."
+            error = "\"\(LocalVoiceSettings.wakePhraseDisplay)\" is too short to use as a wake word."
             return
         }
         // The Mac does the listening, the thinking and the talking on this path. Started

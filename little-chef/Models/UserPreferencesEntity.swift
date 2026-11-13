@@ -17,7 +17,9 @@ import SwiftData
 final class UserPreferencesEntity {
     var id: UUID = UUID()
     var speechRate: Float = 0.5
-    var voiceIdentifier: String = "com.apple.ttsbundle.Samantha-compact"
+    /// Empty for automatic. Stores from before 2026-11-13 hold the old Samantha default, which
+    /// reads as automatic too (`AVSpeechSynthesisVoice.isAutomatic`).
+    var voiceIdentifier: String = ""
     var autoSpeakResponses: Bool = true
     /// What the assistant answers to in wake-word hands-free mode.
     var wakePhrase: String = "hey little chef"

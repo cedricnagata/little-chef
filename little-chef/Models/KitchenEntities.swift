@@ -17,7 +17,9 @@ final class PantryItemEntity {
     var name: String = ""
     /// Free text, e.g. "half a bag". Never parsed.
     var note: String?
-    /// Counts as always on hand: salt, oil and the like. Shown in its own section.
+    /// One of the basics seeded into a new inventory (``IngredientMatcher/defaultStaples``).
+    /// Shown in its section like any other item since 2026-11-13; the flag only lets
+    /// ``KitchenManager/isTrackingInventory`` tell a seeded inventory from one the user keeps.
     var isStaple: Bool = false
     var createdAt: Date = Date()
     var updatedAt: Date = Date()
