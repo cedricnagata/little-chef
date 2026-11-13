@@ -145,7 +145,8 @@ struct LocalVoiceSettings: Codable, Equatable {
 
     static let defaultSettings = LocalVoiceSettings(
         speechRate: 0.5,
-        voiceIdentifier: "com.apple.ttsbundle.Samantha-compact",
+        // Automatic: the best voice installed (`AVSpeechSynthesisVoice.bestInstalled`).
+        voiceIdentifier: "",
         autoSpeakResponses: true
     )
 }

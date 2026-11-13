@@ -20,7 +20,11 @@ struct ProfileSettingsView: View {
     /// Absolute `AVSpeechUtterance.rate`, where `AVSpeechUtteranceDefaultSpeechRate` is normal
     /// speed. Shown to the user as a multiple of that via `speechRateMultiplier`.
     @State private var speechRate: Float = AVSpeechUtteranceDefaultSpeechRate
-    @State private var voiceIdentifier = "com.apple.ttsbundle.Samantha-compact"
+    @State private var voiceIdentifier = AVSpeechSynthesisVoice.automaticIdentifier
+    /// The voices to offer, re-read when one is downloaded or deleted in the Settings app.
+    @State private var voices: [AVSpeechSynthesisVoice] = []
+    /// Plays the sample when a voice or rate is chosen.
+    @State private var sampleSpeaker = OnDeviceSpeaker()
     @State private var autoSpeakResponses = true
     @State private var bigBroVoice = BigBroClient.defaultVoice
     @State private var hasLoaded = false
@@ -47,24 +51,39 @@ struct ProfileSettingsView: View {
         var id: Int { self == .wifiConfirm ? 0 : 1 }
     }
 
-    /// Voices actually installed on this device.
+    /// The voices to offer: the device's language and English, novelty voices left out
+    /// (`AVSpeechSynthesisVoice.choosable`), best quality first.
     ///
-    /// This was previously a hardcoded list of legacy `com.apple.ttsbundle.*` identifiers.
-    /// Modern iOS ships `com.apple.voice.compact.*` forms and the old ones are frequently
-    /// absent, so `AVSpeechSynthesisVoice(identifier:)` returned nil and the synthesizer fell
-    /// back to the system default without any error — the picker changed but the voice did not.
-    /// Enumerating the device guarantees every option resolves.
-    private var availableVoices: [AVSpeechSynthesisVoice] {
+    /// Enumerated from the device rather than listed by hand: a hardcoded list of legacy
+    /// `com.apple.ttsbundle.*` identifiers mostly didn't resolve on modern iOS, so the picker
+    /// changed and the voice did not.
+    private static func installedVoices() -> [AVSpeechSynthesisVoice] {
         let deviceLanguage = Locale.current.language.languageCode?.identifier ?? "en"
         let wanted = Set(["en", deviceLanguage])
-        return AVSpeechSynthesisVoice.speechVoices()
+        return AVSpeechSynthesisVoice.choosable
             .filter { voice in wanted.contains { voice.language.hasPrefix($0) } }
-            .sorted { ($0.name, $0.language) < ($1.name, $1.language) }
+            .sorted { ($1.quality.rawValue, $0.name, $0.language) < ($0.quality.rawValue, $1.name, $1.language) }
     }
 
     private func voiceLabel(_ voice: AVSpeechSynthesisVoice) -> String {
         let language = Locale.current.localizedString(forIdentifier: voice.language) ?? voice.language
-        return "\(voice.name) (\(language))"
+        return [voice.name, voice.qualityName].compactMap { $0 }.joined(separator: " ") + " (\(language))"
+    }
+
+    private var automaticLabel: String {
+        guard let voice = AVSpeechSynthesisVoice.bestInstalled() else { return "Automatic" }
+        return "Automatic (\([voice.name, voice.qualityName].compactMap { $0 }.joined(separator: " ")))"
+    }
+
+    private func playSample() {
+        let voice = AVSpeechSynthesisVoice.resolving(voiceIdentifier)
+        let rate = speechRate
+        sampleSpeaker.stop()
+        // Playback, so the sample is heard with the ring switch on silent. No cook is running
+        // while Settings is open, so nothing else holds the audio session.
+        try? AVAudioSession.sharedInstance().setCategory(.playback, mode: .spokenAudio, options: [.duckOthers])
+        try? AVAudioSession.sharedInstance().setActive(true)
+        Task { await sampleSpeaker.speak("Preheat the oven to 200 degrees, then chop the onion.", voice: voice, rate: rate) }
     }
 
     /// Presents the stored rate as a multiple of normal speed, so "normal" reads as 1.0x.
@@ -105,17 +124,25 @@ struct ProfileSettingsView: View {
                             bigBroVoice: $bigBroVoice
                         )
                     } else {
-                        Picker("Voice", selection: $voiceIdentifier) {
-                            // A saved voice that is no longer installed would otherwise drop out
-                            // of the picker and silently reset the selection on the next render.
-                            if !availableVoices.contains(where: { $0.identifier == voiceIdentifier }) {
-                                Text("System Default").tag(voiceIdentifier)
-                                Divider()
+                        // The sample plays from the user's choice only, not from loading the form.
+                        Picker("Voice", selection: Binding(
+                            get: { voiceIdentifier },
+                            set: { voiceIdentifier = $0; playSample() }
+                        )) {
+                            Text(automaticLabel).tag(AVSpeechSynthesisVoice.automaticIdentifier)
+                            // A saved voice since deleted in the Settings app stays selectable
+                            // rather than silently resetting the choice; it speaks as automatic.
+                            if !AVSpeechSynthesisVoice.isAutomatic(voiceIdentifier),
+                               !voices.contains(where: { $0.identifier == voiceIdentifier }) {
+                                Text("Not installed (using automatic)").tag(voiceIdentifier)
                             }
-                            ForEach(availableVoices, id: \.identifier) { voice in
+                            Divider()
+                            ForEach(voices, id: \.identifier) { voice in
                                 Text(voiceLabel(voice)).tag(voice.identifier)
                             }
                         }
+
+                        Button("Play Sample", systemImage: "speaker.wave.2", action: playSample)
 
                         VStack(alignment: .leading, spacing: 4) {
                             HStack {
@@ -126,13 +153,19 @@ struct ProfileSettingsView: View {
                                     .foregroundColor(.secondary)
                                     .monospacedDigit()
                             }
-                            Slider(value: speechRateMultiplier, in: 0.5...2.0, step: 0.1)
+                            Slider(value: speechRateMultiplier, in: 0.5...2.0, step: 0.1) { editing in
+                                if !editing { playSample() }
+                            }
                                 .tint(.orange)
                         }
                     }
                 }
             } header: {
                 Text("Voice")
+            } footer: {
+                if autoSpeakResponses, llmProvider != .bigBro {
+                    Text("iOS doesn't let apps use Siri's voice. For the most natural one, download an Enhanced or Premium voice in the Settings app under Accessibility → Spoken Content → Voices; it appears here when it's done.")
+                }
             }
 
             // MARK: - Your Data
@@ -202,6 +235,10 @@ struct ProfileSettingsView: View {
         }
         .onChange(of: speechRate) { _, _ in saveIfLoaded() }
         .onChange(of: voiceIdentifier) { _, _ in saveIfLoaded() }
+        .onAppear { voices = Self.installedVoices() }
+        .onReceive(NotificationCenter.default.publisher(for: AVSpeechSynthesizer.availableVoicesDidChangeNotification)) { _ in
+            voices = Self.installedVoices()
+        }
         .onChange(of: autoSpeakResponses) { _, _ in saveIfLoaded() }
         .onChange(of: bigBroVoice) { _, _ in saveIfLoaded() }
         .alert("Delete All Data?", isPresented: $confirmingDeleteAll) {
@@ -585,7 +622,8 @@ struct ProfileSettingsView: View {
             let provider: LLMProvider = LLMService.deviceSupportsLocalModels ? prefs.llmProvider : .bigBro
             llmProvider = provider
             speechRate = prefs.voiceSettings.speechRate
-            voiceIdentifier = prefs.voiceSettings.voiceIdentifier
+            voiceIdentifier = AVSpeechSynthesisVoice.isAutomatic(prefs.voiceSettings.voiceIdentifier)
+                ? AVSpeechSynthesisVoice.automaticIdentifier : prefs.voiceSettings.voiceIdentifier
             autoSpeakResponses = prefs.voiceSettings.autoSpeakResponses
             bigBroVoice = prefs.voiceSettings.bigBroVoice
             llmService.currentProvider = provider
@@ -632,7 +670,7 @@ private struct BigBroVoicePicker: View {
             // Offered even while disconnected so the choice can be made before pairing.
             Picker("Voice", selection: $bigBroVoice) {
                 ForEach(Self.availableVoices, id: \.self) { voice in
-                    Text(voice).tag(voice)
+                    Text(Self.label(for: voice)).tag(voice)
                 }
             }
 
@@ -650,6 +688,15 @@ private struct BigBroVoicePicker: View {
         "af_nova", "af_river", "af_sarah", "af_sky", "am_adam", "am_echo", "am_eric",
         "am_fenrir", "am_liam", "am_michael", "am_onyx", "am_puck", "am_santa",
     ]
+
+    /// "af_heart" → "Heart (female)": Kokoro's ids put the accent and voice in a prefix.
+    private static func label(for id: String) -> String {
+        let parts = id.split(separator: "_", maxSplits: 1)
+        guard parts.count == 2 else { return id }
+        let kind = parts[0].hasSuffix("f") ? "female" : parts[0].hasSuffix("m") ? "male" : nil
+        let name = parts[1].prefix(1).uppercased() + parts[1].dropFirst()
+        return kind.map { "\(name) (\($0))" } ?? name
+    }
 
     private var footnote: String {
         guard client.isConnected else {

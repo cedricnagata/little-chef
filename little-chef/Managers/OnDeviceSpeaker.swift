@@ -96,18 +96,62 @@ extension OnDeviceSpeaker: @preconcurrency AVSpeechSynthesizerDelegate {
 // MARK: - Voice resolution
 
 extension AVSpeechSynthesisVoice {
-    /// Resolves a stored voice identifier, falling back explicitly when it is not installed.
+    /// The stored voice setting for "the best voice installed for the device's language".
+    static let automaticIdentifier = ""
+
+    /// The default before 2026-11-13: a compact voice, the lowest quality iOS has, under a legacy
+    /// identifier that iOS 26 often doesn't carry at all. Read as automatic, so everyone who never
+    /// chose a voice gets the best one they have instead.
+    static let legacyDefaultIdentifier = "com.apple.ttsbundle.Samantha-compact"
+
+    /// Whether a stored setting means automatic.
+    static func isAutomatic(_ identifier: String) -> Bool {
+        identifier == automaticIdentifier || identifier == legacyDefaultIdentifier
+    }
+
+    /// Resolves a stored voice setting to a voice.
     ///
     /// `AVSpeechSynthesisVoice(identifier:)` is failable, and assigning its nil result to an
-    /// utterance makes the synthesizer fall back to the system default *silently* — which
-    /// reads as "I picked a different voice and nothing changed". Logging the miss makes the
-    /// cause visible.
+    /// utterance makes the synthesizer fall back to the system default *silently*, which reads
+    /// as "I picked a different voice and nothing changed". A voice that has gone (deleted in
+    /// the Settings app) falls back to the best installed one, and says so in the log.
     static func resolving(_ identifier: String) -> AVSpeechSynthesisVoice? {
-        if let voice = AVSpeechSynthesisVoice(identifier: identifier) {
-            return voice
+        if !isAutomatic(identifier) {
+            if let voice = AVSpeechSynthesisVoice(identifier: identifier) { return voice }
+            dprint("🔊 Voice '\(identifier)' is not installed on this device — using the best installed voice")
         }
-        dprint("🔊 Voice '\(identifier)' is not installed on this device — using the default")
-        return AVSpeechSynthesisVoice(language: Locale.current.identifier)
-            ?? AVSpeechSynthesisVoice(language: "en-US")
+        return bestInstalled()
+    }
+
+    /// The highest-quality installed voice for `language`: Premium, then Enhanced, then the
+    /// system's own default for it. Siri's voices are not among them: iOS doesn't offer them to
+    /// other apps.
+    static func bestInstalled(language: String = AVSpeechSynthesisVoice.currentLanguageCode()) -> AVSpeechSynthesisVoice? {
+        let systemDefault = AVSpeechSynthesisVoice(language: language)
+        let base = String(language.prefix(2))
+        let exact = choosable.filter { $0.language == language }
+        let candidates = exact.isEmpty ? choosable.filter { $0.language.hasPrefix(base) } : exact
+        let best = candidates.max { a, b in
+            (a.quality.rawValue, a.identifier == systemDefault?.identifier ? 1 : 0, b.name)
+                < (b.quality.rawValue, b.identifier == systemDefault?.identifier ? 1 : 0, a.name)
+        }
+        return best ?? systemDefault ?? AVSpeechSynthesisVoice(language: "en-US")
+    }
+
+    /// The voices worth offering: installed, not a novelty voice ("Bells", "Bubbles", "Bad News"),
+    /// and not the user's Personal Voice, which needs its own permission.
+    static var choosable: [AVSpeechSynthesisVoice] {
+        speechVoices().filter {
+            !$0.voiceTraits.contains(.isNoveltyVoice) && !$0.voiceTraits.contains(.isPersonalVoice)
+        }
+    }
+
+    /// "Premium", "Enhanced" or nil for a standard voice.
+    var qualityName: String? {
+        switch quality {
+        case .premium: return "Premium"
+        case .enhanced: return "Enhanced"
+        default: return nil
+        }
     }
 }
