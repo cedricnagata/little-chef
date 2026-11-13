@@ -127,9 +127,15 @@ struct ActiveCookingView: View {
     @ObservedObject private var bigBroClient = LLMService.shared.bigBroClient
     /// Observed so the assistant appears when a model download that was running finishes.
     @EnvironmentObject private var llmService: LLMService
+    @EnvironmentObject private var kitchenManager: KitchenManager
     @State private var textInput = ""
     @State private var showingEndSessionAlert = false
     @State private var showingSessionChanges = false
+    /// The after-cook inventory check, while it's up.
+    @State private var leftovers: Leftovers?
+    /// The same, waiting for the changes sheet to finish closing: one sheet can't open while
+    /// another is still going.
+    @State private var queuedLeftovers: Leftovers?
     @State private var isRecipeExpanded: Bool = {
         #if DEBUG
         // The App Store's cooking screenshot shows the conversation.
@@ -211,11 +217,21 @@ struct ActiveCookingView: View {
         } message: {
             Text("Are you sure you want to end this cooking session?")
         }
-        .sheet(isPresented: $showingSessionChanges) {
+        .sheet(isPresented: $showingSessionChanges, onDismiss: {
+            if let queued = queuedLeftovers {
+                queuedLeftovers = nil
+                leftovers = queued
+            }
+        }) {
             SessionChangesView(
                 initialTitle: cookingSessionManager.currentSession?.recipe.title ?? "",
                 onEnd: finishSession
             )
+        }
+        .sheet(item: $leftovers) { check in
+            LeftoversView(items: check.items, recipeTitle: check.recipeTitle) {
+                cookingSessionManager.endCookingSession()
+            }
         }
         .onAppear {
             cookingSessionManager.initAgentForSession()
@@ -274,10 +290,26 @@ struct ActiveCookingView: View {
         }
     }
 
+    /// Ends the cook, by way of the inventory check when the recipe used anything in it.
     private func finishSession() {
         voiceAssistant.stopHandsFree()
         voiceAssistant.stopSpeaking()
-        cookingSessionManager.endCookingSession()
+        guard let recipe = cookingSessionManager.currentSession?.recipe else {
+            cookingSessionManager.endCookingSession()
+            return
+        }
+        let items = kitchenManager.itemsUsed(by: recipe)
+        guard !items.isEmpty else {
+            cookingSessionManager.endCookingSession()
+            return
+        }
+        let check = Leftovers(items: items, recipeTitle: recipe.displayTitle)
+        if showingSessionChanges {
+            queuedLeftovers = check
+            showingSessionChanges = false
+        } else {
+            leftovers = check
+        }
     }
 
     private func updateVoiceAssistantSettings() {
@@ -667,4 +699,11 @@ struct RecipeSelectorView: View {
         .environmentObject(RecipeManager())
         .environmentObject(KitchenManager())
         .environmentObject(LLMService.shared)
+}
+
+/// What the after-cook inventory check asks about.
+private struct Leftovers: Identifiable {
+    let id = UUID()
+    let items: [PantryItem]
+    let recipeTitle: String
 }

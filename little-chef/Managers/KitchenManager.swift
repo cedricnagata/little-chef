@@ -130,6 +130,14 @@ final class KitchenManager: ObservableObject {
     /// Every inventory name, staples included: what recipes are matched against.
     var inventoryNames: [String] { pantry.map(\.name) }
 
+    /// The inventory items a cook of `recipe` used, for the after-cook check. Empty until the user
+    /// keeps an inventory: asking about seeded basics they never added would only be noise.
+    func itemsUsed(by recipe: RecipeBase) -> [PantryItem] {
+        guard isTrackingInventory else { return [] }
+        let used = Set(IngredientMatcher.itemsUsed(by: recipe.ingredients, inventory: inventoryNames))
+        return pantry.filter { used.contains($0.name) }
+    }
+
     func availability(of recipe: Recipe) -> RecipeAvailability {
         IngredientMatcher.availability(of: recipe.ingredients, inventory: inventoryNames)
     }
