@@ -588,6 +588,26 @@ microphone are asked for when voice is first used: push-to-talk in `VoiceAssista
 goes false once the microphone has been refused, and is re-read when the app comes back to the
 front. Do not add a permission request to an `init` or a launch `.task`.
 
+## The on-device voice
+
+Replies are spoken by `AVSpeechSynthesizer` (`OnDeviceSpeaker`) unless the cook is on a Mac, which
+speaks with Kokoro.
+
+- **Siri's voices are not available.** iOS doesn't offer them to other apps, so don't try. The
+  best an app gets is the Enhanced and Premium voices the user downloads in the Settings app
+  (Accessibility → Spoken Content → Voices), and there is no API to list voices not yet downloaded.
+  Settings' voice footer says so.
+- **Automatic is the default** (`voiceIdentifier` empty): `AVSpeechSynthesisVoice.bestInstalled()`
+  takes the highest quality installed for the device's language, preferring the system default on
+  a tie. The default until 2026-11-13, `com.apple.ttsbundle.Samantha-compact`, the lowest
+  quality iOS has and often missing from iOS 26, reads as automatic too (`isAutomatic`).
+- **What the picker offers** is `choosable` (no novelty voices, no Personal Voice), the device's
+  language and English, best first, re-read on `availableVoicesDidChangeNotification`. A chosen
+  voice since deleted stays selected and speaks as automatic, logged.
+- **Choosing a voice or letting go of the rate slider plays a sample**, through the playback
+  category so it is heard with the ring switch on silent. It plays from the user's choice only, not
+  from the form loading.
+
 ## Inventory, shopping list and suggestions
 
 The Kitchen tab keeps two SwiftData models, `PantryItemEntity` and `ShoppingItemEntity`, in the
