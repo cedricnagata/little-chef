@@ -84,10 +84,22 @@ enum IngredientCatalog {
             ranked.append((name, rank))
         }
         return ranked
-            .sorted { ($0.rank, $0.name.count, $0.name) < ($1.rank, $1.name.count, $1.name) }
+            .sorted { a, b in
+                let ca = common.contains(a.name) ? 0 : 1, cb = common.contains(b.name) ? 0 : 1
+                return (a.rank, ca, a.name.count, a.name) < (b.rank, cb, b.name.count, b.name)
+            }
             .prefix(limit)
             .map(\.name)
     }
+
+    /// What most kitchens buy most, offered ahead of rarer matches: "chi" is Chicken before
+    /// Chives, though Chives is shorter (Mac session, 2026-11-14).
+    private static let common: Set<String> = [
+        "Chicken", "Chicken breast", "Beef", "Ground beef", "Pork", "Fish", "Salmon", "Eggs", "Milk",
+        "Butter", "Cheddar", "Onion", "Garlic", "Potato", "Tomato", "Carrot", "Bell pepper", "Lemon",
+        "Spinach", "Broccoli", "Mushrooms", "Rice", "Spaghetti", "Bread", "All-purpose flour", "Sugar",
+        "Salt", "Black pepper", "Olive oil", "Apple", "Banana",
+    ]
 
     /// Every catalog ingredient, in category order.
     static let all: [String] = IngredientCategory.allCases.flatMap { entries[$0] ?? [] }
@@ -141,7 +153,7 @@ enum IngredientCatalog {
             "Oregano", "Tarragon", "Lemongrass", "Bay leaves",
         ],
         .proteins: [
-            "Chicken breast", "Chicken thighs", "Whole chicken", "Chicken wings", "Ground beef", "Steak",
+            "Chicken", "Beef", "Pork", "Fish", "Chicken breast", "Chicken thighs", "Whole chicken", "Chicken wings", "Ground beef", "Steak",
             "Beef chuck", "Pork chops", "Pork shoulder", "Pork belly", "Ground pork", "Bacon", "Ham",
             "Sausage", "Chorizo", "Prosciutto", "Lamb", "Ground lamb", "Ground turkey", "Turkey", "Duck",
             "Salmon", "Tuna", "Cod", "Tilapia", "White fish", "Shrimp", "Scallops", "Mussels", "Clams",

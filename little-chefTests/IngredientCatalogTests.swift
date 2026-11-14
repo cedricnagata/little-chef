@@ -51,8 +51,11 @@ struct IngredientCatalogTests {
     }
 
     @Test func suggestsWhatWasTyped() {
+        // Common ingredients come first: "chi" is Chicken, not the shorter Chives.
+        #expect(IngredientCatalog.suggestions(for: "chi", excluding: []).first == "Chicken")
         let found = IngredientCatalog.suggestions(for: "chick", excluding: [])
-        #expect(found.first == "Chickpeas")
+        #expect(found.first == "Chicken")
+        #expect(found.contains("Chickpeas"))
         #expect(found.contains("Chicken breast"))
         #expect(found.count <= 5)
         // A word inside the name counts too.

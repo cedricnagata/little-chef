@@ -125,6 +125,11 @@ final class KitchenManager: ObservableObject {
 
     var hasCheckedItems: Bool { shoppingList.contains(where: \.isChecked) }
 
+    /// Which of `names` the shopping list doesn't already have.
+    func notOnShoppingList(_ names: [String]) -> [String] {
+        names.filter { name in !shoppingList.contains { IngredientMatcher.sameItem($0.name, name) } }
+    }
+
     // MARK: - Recipes
 
     /// Every inventory name, staples included: what recipes are matched against.
