@@ -283,7 +283,7 @@ struct ProfileSettingsView: View {
         let size = pendingDownload?.approximateSize ?? "several GB"
         switch kind {
         case .wifiConfirm:
-            let msg = "\(name) is approximately \(size). It keeps downloading if you switch apps, and you'll get a notification when it's ready."
+            let msg = "\(name) is about \(size.replacingOccurrences(of: "~", with: "")). It keeps downloading if you switch apps, and you'll get a notification when it's ready."
             return Alert(
                 title: Text("Download AI Model?"),
                 message: Text(msg),
@@ -291,7 +291,7 @@ struct ProfileSettingsView: View {
                 secondaryButton: .cancel { pendingDownload = nil }
             )
         case .cellularWarn:
-            let msg = "\(name) is approximately \(size) and may use significant cellular data. Connect to Wi-Fi for best results."
+            let msg = "\(name) is about \(size.replacingOccurrences(of: "~", with: "")) and may use significant cellular data. Connect to Wi-Fi for best results."
             return Alert(
                 title: Text("Cellular Connection"),
                 message: Text(msg),

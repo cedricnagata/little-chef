@@ -25,8 +25,6 @@ struct RecipeDetailView: View {
 
     /// Set while the missing-ingredients warning is up, before a cook starts.
     @State private var missingCheck: MissingIngredientsCheck?
-    /// How many items the last "add missing" put on the shopping list, for the confirmation line.
-    @State private var addedToShoppingList: Int?
     /// The outcome of the menu's Add to Shopping List, while its alert is up.
     @State private var shoppingListResult: String?
 
@@ -129,7 +127,6 @@ struct RecipeDetailView: View {
             return
         }
         let added = kitchenManager.addToShoppingList(missing, recipeTitle: currentRecipe.title)
-        addedToShoppingList = added
         shoppingListResult = added == 0
             ? "Everything you're missing is already on your shopping list."
             : "Added \(added) \(added == 1 ? "ingredient" : "ingredients") to your shopping list."
@@ -227,20 +224,21 @@ struct RecipeDetailView: View {
                 }
 
                 if let availability, !availability.canMake {
-                    Button {
-                        addedToShoppingList = kitchenManager.addToShoppingList(
-                            availability.missingNames, recipeTitle: currentRecipe.title)
-                    } label: {
-                        Label("Add \(availability.missingNames.count) missing to shopping list", systemImage: "cart.badge.plus")
-                            .font(.subheadline)
-                    }
-                    .buttonStyle(.bordered)
-                    .tint(.orange)
-
-                    if let added = addedToShoppingList {
-                        Text(added == 0 ? "Already on your shopping list." : "Added \(added) to your shopping list.")
+                    // Counts only what isn't on the list yet, and gives way once everything is.
+                    let toAdd = kitchenManager.notOnShoppingList(availability.missingNames)
+                    if toAdd.isEmpty {
+                        Label("Everything missing is on your shopping list", systemImage: "checkmark.circle")
                             .font(.caption)
                             .foregroundColor(.secondary)
+                    } else {
+                        Button {
+                            kitchenManager.addToShoppingList(toAdd, recipeTitle: currentRecipe.title)
+                        } label: {
+                            Label("Add \(toAdd.count) missing to shopping list", systemImage: "cart.badge.plus")
+                                .font(.subheadline)
+                        }
+                        .buttonStyle(.bordered)
+                        .tint(.orange)
                     }
                 }
             }
