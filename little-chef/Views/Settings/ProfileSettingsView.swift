@@ -283,7 +283,7 @@ struct ProfileSettingsView: View {
         let size = pendingDownload?.approximateSize ?? "several GB"
         switch kind {
         case .wifiConfirm:
-            let msg = "\(name) is approximately \(size). Keep the app open until the download finishes."
+            let msg = "\(name) is approximately \(size). It keeps downloading if you switch apps, and you'll get a notification when it's ready."
             return Alert(
                 title: Text("Download AI Model?"),
                 message: Text(msg),
@@ -582,7 +582,8 @@ struct ProfileSettingsView: View {
 
     private func importDescription(_ backup: ProfileBackup) -> String {
         let exported = backup.exportedAt.formatted(date: .abbreviated, time: .shortened)
-        return "Exported \(exported): \(backup.recipes.count) recipes, \(backup.pantry.count) inventory items and \(backup.shoppingList.count) on the shopping list. They're added to what's on this device, and your settings are replaced by the profile's."
+        func count(_ n: Int, _ one: String, _ many: String) -> String { "\(n) \(n == 1 ? one : many)" }
+        return "Exported \(exported): \(count(backup.recipes.count, "recipe", "recipes")), \(count(backup.pantry.count, "inventory item", "inventory items")) and \(backup.shoppingList.count) on the shopping list. They're added to what's on this device, and your settings are replaced by the profile's."
     }
 
     private func importProfile(_ backup: ProfileBackup) {

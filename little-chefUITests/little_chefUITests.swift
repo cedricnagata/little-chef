@@ -114,7 +114,7 @@ final class little_chefUITests: XCTestCase {
         if app.buttons["Add Recipe"].waitForExistence(timeout: 3) {
             app.buttons["Add Recipe"].tap()
         } else {
-            app.navigationBars.buttons.element(boundBy: app.navigationBars.buttons.count - 1).tap()
+            app.navigationBars.buttons["Add"].tap()
         }
 
         XCTAssertTrue(app.navigationBars["Add Recipe"].waitForExistence(timeout: 5))

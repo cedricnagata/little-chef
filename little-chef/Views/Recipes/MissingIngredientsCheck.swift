@@ -41,13 +41,20 @@ private struct MissingIngredientsDialog: ViewModifier {
             presenting: check
         ) { check in
             Button("Cook Anyway") { onCook(check.recipe) }
-            Button("Add to Shopping List") {
-                kitchenManager.addToShoppingList(check.availability.missingNames, recipeTitle: check.recipe.title)
+            // Not offered once everything missing is already on the list.
+            if !notListed(check.availability.missingNames).isEmpty {
+                Button("Add to Shopping List") {
+                    kitchenManager.addToShoppingList(check.availability.missingNames, recipeTitle: check.recipe.title)
+                }
             }
             Button("Cancel", role: .cancel) {}
         } message: { check in
             Text(message(for: check.availability))
         }
+    }
+
+    private func notListed(_ names: [String]) -> [String] {
+        names.filter { name in !kitchenManager.shoppingList.contains { IngredientMatcher.sameItem($0.name, name) } }
     }
 
     private var title: String {

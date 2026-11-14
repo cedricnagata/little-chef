@@ -141,7 +141,7 @@ enum IngredientCatalog {
             "Oregano", "Tarragon", "Lemongrass", "Bay leaves",
         ],
         .proteins: [
-            "Chicken breast", "Chicken thighs", "Whole chicken", "Chicken wings", "Ground beef", "Steak",
+            "Chicken", "Beef", "Pork", "Fish", "Chicken breast", "Chicken thighs", "Whole chicken", "Chicken wings", "Ground beef", "Steak",
             "Beef chuck", "Pork chops", "Pork shoulder", "Pork belly", "Ground pork", "Bacon", "Ham",
             "Sausage", "Chorizo", "Prosciutto", "Lamb", "Ground lamb", "Ground turkey", "Turkey", "Duck",
             "Salmon", "Tuna", "Cod", "Tilapia", "White fish", "Shrimp", "Scallops", "Mussels", "Clams",

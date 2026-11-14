@@ -319,6 +319,14 @@ class LLMService: ObservableObject {
             throw LLMError.loadFailed("Model failed to load")
         }
 
+        #if targetEnvironment(simulator)
+        // The Simulator has no Metal device MLX can use: the first MLX call aborts the app
+        // (`mlx::core::metal::Device::Device()`). Debug reports the 9B there so every feature can
+        // be exercised, so once a model was downloaded, opening a recipe (its read-ahead loads the
+        // model) killed the app (Mac session, 2026-11-14). Refused here, it fails like any load.
+        throw LLMError.loadFailed("On-device models can't run in the Simulator.")
+        #endif
+
         // Unload any other model first — only one model in memory at a time
         if modelContainers.keys.contains(where: { $0 != id }) { promptPrefixCache.reset() }
         for existingId in modelContainers.keys where existingId != id {

@@ -139,10 +139,12 @@ extension AVSpeechSynthesisVoice {
     }
 
     /// The voices worth offering: installed, not a novelty voice ("Bells", "Bubbles", "Bad News"),
-    /// and not the user's Personal Voice, which needs its own permission.
+    /// not one of the old MacinTalk voices (Fred, Junior, Kathy, Ralph: robotic, and not marked
+    /// as novelty), and not the user's Personal Voice, which needs its own permission.
     static var choosable: [AVSpeechSynthesisVoice] {
         speechVoices().filter {
             !$0.voiceTraits.contains(.isNoveltyVoice) && !$0.voiceTraits.contains(.isPersonalVoice)
+                && !$0.identifier.hasPrefix("com.apple.speech.synthesis.voice.")
         }
     }
 
