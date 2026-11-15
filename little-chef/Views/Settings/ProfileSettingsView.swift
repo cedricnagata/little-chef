@@ -299,7 +299,7 @@ struct ProfileSettingsView: View {
         let name = pendingDownload?.displayName ?? "The model"
         let size = pendingDownload?.approximateSize ?? "several GB"
         // Where Kokoro is the default voice it comes with the model, so the one prompt covers both.
-        let voice = Self.kokoroComesAlong ? " The Kokoro voice comes with it, about 300 MB more." : ""
+        let voice = Self.kokoroComesAlong ? " The Kokoro voice comes with it, about 200 MB more." : ""
         switch kind {
         case .wifiConfirm:
             let msg = "\(name) is about \(size.replacingOccurrences(of: "~", with: "")). It keeps downloading if you switch apps, and you'll get a notification when it's ready.\(voice)"
@@ -697,7 +697,7 @@ private struct KokoroRows: View {
             }
             Button("Cancel", role: .cancel) {}
         } message: {
-            Text("About 300 MB. Keep LittleChef open while it downloads. Kokoro is experimental: see below.")
+            Text("About 200 MB. Keep LittleChef open while it downloads. Kokoro is experimental: see below.")
         }
 
         if kokoro.isDownloading {
@@ -706,7 +706,7 @@ private struct KokoroRows: View {
                 Text("Downloading the Kokoro voice…").font(.caption).foregroundStyle(.secondary)
             }
         } else if kokoro.isEnabled, !kokoro.isDownloaded {
-            Button("Download the Kokoro Voice (about 300 MB)") { Task { await kokoro.download() } }
+            Button("Download the Kokoro Voice (about 200 MB)") { Task { await kokoro.download() } }
         } else if kokoro.isEnabled {
             Picker("Kokoro Voice", selection: Binding(get: { voice }, set: { voice = $0; onSample() })) {
                 ForEach(KokoroVoice.voices, id: \.self) { Text(KokoroVoice.label(for: $0)).tag($0) }

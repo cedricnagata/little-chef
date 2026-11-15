@@ -655,12 +655,16 @@ request.
   there is no Kokoro at all, including a 4 GiB phone with the 9B (iPhone 14 Pro). Debug always
   offers it, so the Simulator can test it. "Siri" is Cedric's name for Apple's voices, not Siri's
   own voice, which apps can't use. Where offered Kokoro is chosen until the user picks Siri, and
-  it downloads with the model, whose download prompt says so (about 300 MB, through FluidAudio's
+  it downloads with the model, whose download prompt says so (about 200 MB: 183 MB on disk in the Simulator, through FluidAudio's
   own downloader, so not in the background); picking it before then asks first.
 - **Loaded only for a cook**, last in the getting-ready screen, and only with 350 MB free;
   unloaded when the cook ends, on a memory warning with under 512 MB left, and when Settings
   closes after playing a sample. Not loaded means Apple's voice. Both are estimates until
   measured.
+- **Simulator figures** (CPU only, 2026-11-15): loads in 0.1–2 s at a 60–85 MB footprint, a
+  53-character sentence in 0.7–1.4 s at 140–146 MB, and unloading hands back little (146 → 131 MB).
+  The 350 MB load threshold and 0.35 GiB fit margin stay until a phone, with the Neural Engine,
+  is measured.
 - **Measuring it on a phone**: every load, unload and sentence logs its time and the footprint
   under `llm-timing` (`kokoro: …`), with the 9B's own lines.
 - `OnDeviceSpeaker.speak(_:voice:rate:kokoroVoice:)` uses Kokoro when it's ready and falls back
