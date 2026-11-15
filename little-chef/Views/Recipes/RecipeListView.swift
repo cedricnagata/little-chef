@@ -181,7 +181,9 @@ struct RecipeListView: View {
             HStack(spacing: 8) {
                 if kitchenManager.isRankingSuggestions {
                     ProgressView()
-                    Text("Finding the best recipes for \(MealPeriod(date: Date()).displayName)…")
+                    Text(kitchenManager.isLoadingRankingModel
+                         ? "Loading the AI model…"
+                         : "Finding the best recipes for \(MealPeriod(date: Date()).displayName)…")
                 } else if let suggestions = kitchenManager.suggestions {
                     Image(systemName: "sparkles").foregroundColor(.orange)
                     Text(suggestions.rankedByAI

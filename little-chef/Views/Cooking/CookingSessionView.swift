@@ -634,9 +634,10 @@ struct RecipeSelectorView: View {
         }
     }
 
+    /// The chooser closes first, so the getting-ready screen behind it is what's left showing.
     private func cook(_ recipe: Recipe) {
-        Task { await cookingSessionManager.startCookingSession(with: recipe) }
         dismiss()
+        Task { await cookingSessionManager.startCookingSession(with: recipe) }
     }
 
     var body: some View {

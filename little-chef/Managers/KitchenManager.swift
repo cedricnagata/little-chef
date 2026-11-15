@@ -18,6 +18,8 @@ final class KitchenManager: ObservableObject {
     /// The last ranking for the Suggested filter, and whether one is being worked out.
     @Published private(set) var suggestions: RecipeSuggestions?
     @Published private(set) var isRankingSuggestions = false
+    /// The ranking is waiting for the on-device model to load, so the header can say so.
+    @Published private(set) var isLoadingRankingModel = false
 
     /// Set once the default staples are seeded. Cleared by Delete All Data, which brings the
     /// defaults back like the other settings.
@@ -169,7 +171,17 @@ final class KitchenManager: ObservableObject {
 
         isRankingSuggestions = true
         defer { isRankingSuggestions = false }
+        // Loaded for the ranking and put away after it, as every task that needs the model does.
+        // A filter isn't worth a full-screen wait, so the list's header says it's loading instead.
+        let loadsModel = llmService.currentProvider == .local && llmService.capability.llmChatEnabled
+            && llmService.needsWarmUp(for: .local)
+        if loadsModel {
+            isLoadingRankingModel = true
+            try? await llmService.loadForUse(provider: .local)
+            isLoadingRankingModel = false
+        }
         let ranked = await RecipeSuggester.rank(recipes, availability: availability(of: recipes), ask: rankingModel)
+        if loadsModel, llmService.preparation == nil { llmService.unloadModel() }
         suggestions = ranked
         suggestionsKey = key
     }

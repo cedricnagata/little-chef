@@ -392,10 +392,9 @@ struct ProfileSettingsView: View {
 
     /// One on-device model, with everything that can be done to it.
     ///
-    /// Three states, not two. A model can be on disk without being in memory, and those cost the
-    /// user different things — several gigabytes of storage versus several gigabytes of RAM. The
-    /// row used to stop at "Downloaded", which left no way to hand the memory back short of
-    /// killing the app, and no way to reclaim the disk at all.
+    /// Downloading, on disk or in memory, and the delete button. There is no Load or Unload
+    /// (since 2026-11-14): the app loads the model for the task that needs it and puts it away
+    /// after (`LLMService.preparing`), so the label only says where it is.
     @ViewBuilder
     private func modelRow(for choice: CookingModelChoice, usage: String) -> some View {
         let isDownloading = llmService.downloadingModelId == choice.modelId
@@ -458,19 +457,6 @@ struct ProfileSettingsView: View {
 
                     Spacer()
 
-                    if isLoaded {
-                        Button("Unload") { llmService.unloadModel(modelId: choice.modelId) }
-                            .font(.caption)
-                            .buttonStyle(.bordered)
-                            .disabled(llmService.isGenerating)
-                    } else {
-                        Button("Load") { loadIntoMemory(choice) }
-                            .font(.caption)
-                            .buttonStyle(.bordered)
-                            .tint(.orange)
-                            .disabled(llmService.isLoadingModel)
-                    }
-
                     Button(role: .destructive) {
                         pendingDeletion = choice
                     } label: {
@@ -500,17 +486,6 @@ struct ProfileSettingsView: View {
             }
         }
         modelSizes = sizes
-    }
-
-    private func loadIntoMemory(_ choice: CookingModelChoice) {
-        modelError = nil
-        Task {
-            do {
-                try await llmService.preloadModel(modelId: choice.modelId)
-            } catch {
-                modelError = error.localizedDescription
-            }
-        }
     }
 
     private func deleteModel(_ choice: CookingModelChoice) {

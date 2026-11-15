@@ -143,6 +143,9 @@ class RecipeManager: ObservableObject {
         defer { isLoading = false }
         do {
             return try await withParsingContext { try await work(self.recipeParser) }
+        } catch is CancellationError {
+            // The getting-ready screen's Cancel: nothing to report.
+            return nil
         } catch {
             errorMessage = "\(failure): \(error.localizedDescription)"
             return nil

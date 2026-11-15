@@ -140,6 +140,7 @@ class LocalRecipeParser: ObservableObject {
         \(text.prefix(RecipeExtraction.maxSourceCharacters))
         """
 
+        try await llmService.ensureLoaded(for: .recipeImport)
         let response = try await llmService.generateChatCompletion(
             messages: [
                 ChatMessage(role: .system, content: "You are a recipe extraction tool. Output only valid JSON. No commentary, no markdown, no numbering of steps.")
@@ -201,6 +202,7 @@ class LocalRecipeParser: ObservableObject {
         - Keep ingredient quantities verbatim from the source
         """
 
+        try await llmService.ensureLoaded(for: .recipeImport)
         let response = try await llmService.generateChatCompletion(
             messages: [
                 ChatMessage(role: .system, content: "You are a recipe organizer. Clean up and format the recipe data. Output only valid JSON."),

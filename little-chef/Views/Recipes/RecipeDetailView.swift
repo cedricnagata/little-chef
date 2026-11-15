@@ -61,9 +61,6 @@ struct RecipeDetailView: View {
         }
         .navigationTitle("Recipe")
         .navigationBarTitleDisplayMode(.inline)
-        // Gets the on-device assistant ready for this recipe while it's being read, so starting
-        // the cook doesn't wait for it.
-        .task(id: recipe.id) { await cookingSessionManager.readAhead(for: currentRecipe) }
         .toolbar {
             if isEditing {
                 ToolbarItem(placement: .navigationBarLeading) {
@@ -342,10 +339,14 @@ struct RecipeDetailView: View {
         }
     }
 
+    /// The page stays put while the model gets ready, so Cancel leaves the user on the recipe.
     private func beginCooking() {
-        Task { await cookingSessionManager.startCookingSession(with: currentRecipe) }
-        dismiss()
-        selectedTab.wrappedValue = 1
+        Task {
+            await cookingSessionManager.startCookingSession(with: currentRecipe) {
+                dismiss()
+                selectedTab.wrappedValue = 1
+            }
+        }
     }
 
     private func updateRecipe(_ updatedRecipe: RecipeData) async {

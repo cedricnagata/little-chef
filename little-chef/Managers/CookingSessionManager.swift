@@ -117,13 +117,15 @@ class CookingSessionManager: ObservableObject, TimerManager {
 
     // MARK: - Session Management
 
-    func startCookingSession(with recipe: Recipe) async {
-        begin(
+    /// Starts a cook of `recipe` once the model is ready for it. See ``start(_:onStart:)``.
+    func startCookingSession(with recipe: Recipe, onStart: (() -> Void)? = nil) async {
+        await start(
             CookingSession(
                 sourceRecipeID: recipe.id,
                 recipe: RecipeBase(from: recipe),
                 voiceSettings: storedVoiceSettings()
-            )
+            ),
+            onStart: onStart
         )
     }
 
@@ -135,16 +137,76 @@ class CookingSessionManager: ObservableObject, TimerManager {
     /// also exactly the question the end of the session has to answer: update that recipe, or
     /// make a new one.
     func startFreestyleSession() async {
-        begin(
+        await start(
             CookingSession(
                 sourceRecipeID: nil,
                 recipe: .blank(),
                 voiceSettings: storedVoiceSettings()
-            )
+            ),
+            onStart: nil
         )
     }
 
-    private func begin(_ session: CookingSession) {
+    /// A cook whose model couldn't be got ready, while the alert asking what to do is up.
+    struct StartFailure: Identifiable {
+        let id = UUID()
+        let session: CookingSession
+        let message: String
+        let onStart: (() -> Void)?
+    }
+
+    @Published var startFailure: StartFailure?
+
+    /// Gets the model ready, with the getting-ready screen up, then opens the cook.
+    ///
+    /// The cook screen opens only once the model is loaded and has read the cook's prompt, so
+    /// every answer is quick, the first included (Cedric, 2026-11-14). The cold start was moved
+    /// here from the first question once already, as a banner in the cook screen; now nothing
+    /// opens until it is paid. On the Mac it wakes the model and its speech. Cancel leaves the
+    /// user where they were, with the model unloaded again. A model that can't load puts up
+    /// ``startFailure``, which offers the cook without the assistant. `onStart` runs just before
+    /// the cook opens, for the screen that started it to tidy itself away.
+    private func start(_ session: CookingSession, onStart: (() -> Void)?) async {
+        guard currentSession == nil else { return }
+        let provider = llmService.currentProvider
+        guard llmService.capability(of: provider).llmChatEnabled else {
+            // Nothing to get ready: the cook runs with timers only.
+            onStart?()
+            begin(session, warm: true)
+            return
+        }
+        do {
+            try await llmService.preparing(.cooking) { [self] in
+                try await llmService.loadForUse(provider: provider)
+                if provider == .local,
+                   let model = llmService.activeOnDeviceModel, llmService.isModelLoaded(model.modelId) {
+                    let recipe = createRecipeFromSession(session)
+                    llmService.updatePreparation(step: "Reading the recipe…", progress: 0)
+                    try await makeAgent(provider: .local, kitchen: kitchenNote(for: recipe))
+                        .prewarm(recipe: recipe) { [llmService] in llmService.updatePreparation(progress: $0) }
+                } else if provider == .bigBro {
+                    await llmService.prepareSpeechForSession(provider: provider)
+                }
+            }
+            onStart?()
+            begin(session, warm: true)
+        } catch is CancellationError {
+            if provider == .local { llmService.unloadModel() }
+        } catch {
+            startFailure = StartFailure(session: session, message: error.localizedDescription, onStart: onStart)
+        }
+    }
+
+    /// The failure alert's "Cook Without It": the cook opens, and the assistant tries again
+    /// on its own.
+    func startAnyway(_ failure: StartFailure) {
+        startFailure = nil
+        failure.onStart?()
+        begin(failure.session, warm: false)
+    }
+
+    /// Opens `session`. `warm`: the model is ready, so the cook screen's warm-up is skipped.
+    private func begin(_ session: CookingSession, warm: Bool) {
         currentSession = session
         kitchenNote = kitchenNote(for: createRecipeFromSession(session))
         // Read once, here. Everything downstream — the agent, the voice loop, the capability
@@ -153,7 +215,12 @@ class CookingSessionManager: ObservableObject, TimerManager {
         sessionProvider = llmService.currentProvider
 
         error = nil
-        startWarmUp()
+        if warm {
+            hasWarmedUp = true
+            isPreparingModel = false
+        } else {
+            startWarmUp()
+        }
         #if DEBUG
         if ScreenshotFixtures.isActive { stageScreenshotConversation() }
         #endif
@@ -208,7 +275,7 @@ class CookingSessionManager: ObservableObject, TimerManager {
         guard let agent = cookingAgent, let session = currentSession else { return }
         let recipe = createRecipeFromSession(session)
         promptPrewarmTask?.cancel()
-        promptPrewarmTask = Task { await agent.prewarm(recipe: recipe) }
+        promptPrewarmTask = Task { try? await agent.prewarm(recipe: recipe) }
     }
 
     func initAgentForSession() {
@@ -231,30 +298,6 @@ class CookingSessionManager: ObservableObject, TimerManager {
     private func kitchenNote(for recipe: Recipe) -> CookingPrompt.Kitchen? {
         guard let kitchen, kitchen.isTrackingInventory else { return nil }
         return CookingPrompt.Kitchen(missing: kitchen.availability(of: recipe).missingNames)
-    }
-
-    /// Loads the on-device model and reads the cooking prompt for `recipe` in while its page is
-    /// open, so starting the cook has nothing left to read and the first question reads only
-    /// itself. Called from the recipe page.
-    ///
-    /// Waits a moment first, and a page closed during that wait reads nothing, so scrolling
-    /// through recipes doesn't start a read for each one. Once started it runs to the end even if
-    /// the page closes, because closing it is usually the cook starting, which wants exactly this.
-    /// Does nothing during a cook, on BigBro, or for a model that isn't downloaded. The prompt is
-    /// the one the cook will build — same instructions, recipe and kitchen line — and the cook
-    /// finds it in `PromptPrefixCache`, which reuses only an exact match.
-    func readAhead(for recipe: Recipe) async {
-        guard currentSession == nil, llmService.currentProvider == .local else { return }
-        do { try await Task.sleep(nanoseconds: 1_500_000_000) } catch { return }
-        guard currentSession == nil else { return }
-        let note = kitchenNote(for: recipe)
-        Task { [weak self] in
-            guard let self else { return }
-            await self.llmService.prepareForSession(provider: .local)
-            // A cook of another recipe started meanwhile: its own read-ahead is the one wanted.
-            if let session = self.currentSession, session.sourceRecipeID != recipe.id { return }
-            await self.makeAgent(provider: .local, kitchen: note).prewarm(recipe: Self.recipeAsCooked(recipe))
-        }
     }
 
     private func storedVoiceSettings() -> LocalVoiceSettings {
@@ -280,6 +323,8 @@ class CookingSessionManager: ObservableObject, TimerManager {
         error = nil
         cookingAgent = nil
         clearAllTimers()
+        // Only loaded while it's needed: a cook that's over hands its memory back.
+        if sessionProvider == .local { llmService.unloadModel() }
 
         dprint("🔴 Ended cooking session and reset state")
     }
@@ -435,11 +480,6 @@ class CookingSessionManager: ObservableObject, TimerManager {
 
     private func createRecipeFromSession(_ session: CookingSession) -> Recipe {
         Self.recipe(from: session.recipe, id: session.sourceRecipeID ?? session.id)
-    }
-
-    /// `recipe` as a cook of it hands it to the assistant, for reading its prompt in ahead.
-    private static func recipeAsCooked(_ recipe: Recipe) -> Recipe {
-        Self.recipe(from: RecipeBase(from: recipe), id: recipe.id)
     }
 
     private static func recipe(from base: RecipeBase, id: UUID) -> Recipe {

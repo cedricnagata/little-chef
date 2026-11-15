@@ -50,7 +50,7 @@ every change follows; the sections after it go deep on one subsystem each (see *
 | Cook: start a cook | `Views/Cooking/CookingSessionView.swift` (`StartCookingView`, `RecipeSelectorView`) | `CookingSessionManager` | Choose Recipe, or Cook Without a Recipe. |
 | Cook: the cook itself | same file (`ActiveCookingView`), `ChatAreaView`, `InputAreaView`, `TimerViews` | `CookingSessionManager`, `VoiceAssistant`, `LLMService` | End and the recipe title are in the navigation bar; tapping the title switches recipe and chat. |
 | Ending a cook | `SessionChangesView.swift`, then `LeftoversView.swift` | `CookingSessionManager`, `RecipeManager`, `KitchenManager` | Save or discard the assistant's edits, then What's Left? for the inventory items the recipe used. |
-| Settings | `Views/Settings/ProfileSettingsView.swift`, `BigBroPairingView.swift` | `LLMService`, `VoiceAssistant`, `LocalDataManager` | Provider and model (download, load, delete), voice, Export/Import Profile, Delete All Data. |
+| Settings | `Views/Settings/ProfileSettingsView.swift`, `BigBroPairingView.swift` | `LLMService`, `VoiceAssistant`, `LocalDataManager` | Provider and model (download, delete; no Load or Unload, the app does both), voice, Export/Import Profile, Delete All Data. |
 | Live Activity for a running timer | `TimerWidget/` | `TimerActivityAttributes` | A separate target. |
 
 ### The code, by layer
@@ -93,8 +93,8 @@ every change follows; the sections after it go deep on one subsystem each (see *
 
 ### How the main flows run
 
-- **A cook.** `startCookingSession(with:)` or `startFreestyleSession()` makes a `CookingSession`
-  and warms the backend. Each question goes `InputAreaView` → `CookingSessionManager.sendQueryStreaming`
+- **A cook.** `startCookingSession(with:)` or `startFreestyleSession()` puts up the
+  getting-ready screen, loads the model and reads the cook's prompt in, then opens the cook. Each question goes `InputAreaView` → `CookingSessionManager.sendQueryStreaming`
   → `CookingCommand` (answered at once if it can be) → `LocalCookingAgent.reply` → `LLMService` on
   the session's pinned provider, with `CookingTools` for timers and recipe edits, streaming into
   the transcript and, sentence by sentence, the speaker. Edits change the session's copy only. The
@@ -131,7 +131,8 @@ every change follows; the sections after it go deep on one subsystem each (see *
 ### Sections below
 
 *TestFlight deploy pipeline* (labels, signing, build numbers, secrets, failures) · *MLX packages*
-(the mlx-swift-lm fork, background downloads, the models, memory, device tiers) · *Storage* (and
+(the mlx-swift-lm fork, background downloads, the models, memory, device tiers) · *The model
+loads for the task that needs it* · *Storage* (and
 Export/Import Profile) · *Privacy promises the code keeps* · *Permission prompts* · *Inventory,
 shopping list and suggestions* · *Editing the recipe mid-cook* · *The cooking prompt, and reusing
 it between questions* · *The cooking tools* · *Commands answered without the model* · *The cooking
@@ -509,6 +510,34 @@ older profile, fails the archive with the row in the table above.
   `little-chef.llm-provider` is the last provider used on this device, read at launch, so a cook
   started before Settings has been opened runs where the user asked.
 
+## The model loads for the task that needs it
+
+Since 2026-11-14 (Cedric asked) nothing loads the on-device model ahead of a task, and nothing
+keeps it once the task is over. Settings has no Load or Unload.
+
+- **The getting-ready screen** (`ModelPreparationView`, applied with
+  `.modelPreparationOverlay(.cooking)` in `MainView` and `.recipeImport` in `AddRecipeView`) is
+  up while `LLMService.preparation` is set: a spinner and "Loading Bonsai 2 9B…" while the
+  weights load (MLX reports no progress there), a bar while the cook's prompt is read, and Cancel.
+  It is an overlay, not a sheet, because it appears as the recipe chooser is closing and over the
+  Add Recipe sheet, and presenting at either moment fails or waits.
+- **`LLMService.preparing(purpose) { … }`** runs a task with the screen up and Cancel wired to
+  it; **`loadForUse(provider:)`** loads what the provider needs (on the Mac, wakes its model),
+  never downloading; **`ensureLoaded(for:)`** does both for a task that only needs the model
+  loaded.
+- **Cooking.** The cook opens only once the model is loaded and the prompt read (about 30 s on a
+  phone for the 9B, then every answer quick). Cancel leaves the user where they were and unloads.
+  A model that can't load (memory, the Simulator) puts up "Couldn't Get the Assistant Ready",
+  which offers Cook Without It: the cook opens with timers, and the cook screen's warm-up banner
+  tries again. Ending a cook unloads. A cook restored after a relaunch still warms up behind the
+  banner, since it reopens on its own.
+- **Recipe import.** `LocalRecipeParser` calls `ensureLoaded(for: .recipeImport)` right before
+  each model request, so a URL with schema.org never shows the screen. Cancel ends the parse
+  quietly. Closing the Add Recipe sheet unloads.
+- **Suggested** loads without the screen, a filter not being worth a full-screen wait: the
+  list's header says "Loading the AI model…", and the ranking unloads it after.
+- **In the Simulator** `loadModel` refuses outright: MLX aborts there, and Debug reports the 9B.
+
 ## Storage
 
 Recipes, preferences, the inventory and the shopping list live in SwiftData **on the device
@@ -853,12 +882,12 @@ The key needs no cook in it: only a prompt that starts with exactly the kept tok
   - a prompt that doesn't start with the kept tokens: the recipe edited mid-cook, or history
     dropping off the front;
   - the history window (20 messages), which moves 8 at a time so the second case is rare.
-- **The cook's prompt is read ahead, while the recipe is open.** `RecipeDetailView` calls
-  `CookingSessionManager.readAhead(for:)`, which after 1.5 seconds on the page loads the model and
-  reads in the prompt that recipe's cook will build. Leaving the page during the wait reads
-  nothing; once started it runs to the end, since leaving the page is usually the cook starting.
-  The cook's own read-ahead (`LocalCookingAgent.prewarm`, once the model and the agent exist)
-  then finds it all there. A cook started some other way still reads ahead at its start.
+- **The cook's prompt is read before the cook opens.** Starting a cook puts up the getting-ready
+  screen (see *The model loads for the task that needs it*), which loads the model and then reads
+  the prompt the cook will build (`LocalCookingAgent.prewarm`, with `PromptPrefixCache.prepare`
+  reporting its progress step by step), so even the first question reads only itself. Until
+  2026-11-14 the recipe page read it ahead in the background after 1.5 s open
+  (`readAhead(for:)`); that loaded the model before anything needed it, and is gone.
 - **Memory:** the kept copy and the working cache exist side by side while a reply generates.
   At 2k tokens that is about 0.1 GiB on the 9B, inside the 0.5 GiB the thresholds leave for the
   app.
@@ -882,7 +911,7 @@ cook has a kitchen. Their definitions are about 1,800 tokens, the largest part o
 five tools (`timer` with an action; `edit_ingredients` and `edit_steps`, each with add, change
 and remove) cut the prompt from about 2,220 tokens to 1,660, and took the 9B from 94% to 75% and
 the 4B from 90% to 83%. The 9B mostly said "I've removed the parmesan" and called nothing. Since
-the prompt is read ahead while the recipe is open, 560 tokens buys almost no speed, so the one
+the prompt is read before the cook opens, 560 tokens buys almost no speed, so the one
 tool per action stays. Re-measure before trying again.
 
 ## Commands answered without the model
