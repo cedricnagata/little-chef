@@ -47,7 +47,7 @@ every change follows; the sections after it go deep on one subsystem each (see *
 | Add Recipe: URL, text or photos, then review | `Views/Recipes/AddRecipeView.swift`, `EditRecipeView.swift`, `RecipeEditor.swift` | `RecipeManager` → `LocalRecipeParser` | Text and photo import need `.full` capability. Photos are read by Vision OCR; the model never sees images. |
 | Missing-ingredients warning before a cook | `Views/Recipes/MissingIngredientsCheck.swift` | `KitchenManager` | An alert: Cook Anyway, Add to Shopping List, Cancel. |
 | Kitchen: inventory and shopping list | `Views/Kitchen/KitchenView.swift` | `KitchenManager` | Inventory in sections by `IngredientCategory`, with catalog suggestions under the add field. |
-| Cook: start a cook | `Views/Cooking/CookingSessionView.swift` (`StartCookingView`, `RecipeSelectorView`) | `CookingSessionManager` | Choose Recipe, or Cook Without a Recipe. |
+| Cook: start a cook | `Views/Cooking/CookingSessionView.swift` (`StartCookingView`, `RecipeSelectorView`) | `CookingSessionManager` | Choose Recipe, or Build a Recipe (a cook with no recipe, written down as it goes). |
 | Cook: the cook itself | same file (`ActiveCookingView`), `ChatAreaView`, `InputAreaView`, `TimerViews` | `CookingSessionManager`, `VoiceAssistant`, `LLMService` | End and the recipe title are in the navigation bar; tapping the title switches recipe and chat. |
 | Ending a cook | `SessionChangesView.swift`, then `LeftoversView.swift` | `CookingSessionManager`, `RecipeManager`, `KitchenManager` | Save or discard the assistant's edits, then What's Left? for the inventory items the recipe used. |
 | Settings | `Views/Settings/ProfileSettingsView.swift`, `BigBroPairingView.swift` | `LLMService`, `VoiceAssistant`, `LocalDataManager` | Provider and model (download, delete; no Load or Unload, the app does both), voice, Export/Import Profile, Delete All Data. |
@@ -649,7 +649,8 @@ request.
   (FluidAudio #889, #844). Cedric chose to try it. A marker file is written before every
   synthesis and removed after; one still there at launch switches Kokoro off and says so in
   Settings. Re-check FluidAudio's advisories before making it less experimental.
-- **On by default where it fits**: the switch defaults on when the measured limit covers the
+- **Chosen in Settings → Voice** with a Default | Kokoro segmented control, like On-Device |
+  BigBro. **Kokoro is the default where it fits**: it is chosen until the user picks otherwise when the measured limit covers the
   device's model plus 0.35 GiB (`LLMService.fitsKokoro(alongside:)`), and off elsewhere,
   including a 4 GiB phone with the 9B. Where it's on, it downloads with the model, and the model's
   download prompt says so (about 300 MB, through FluidAudio's own downloader, so not in the
@@ -767,8 +768,9 @@ rescaling them corrupts the only record of what went in the pan).
 insert a step in the middle, and a positional compare reports that as every step below it
 having been rewritten.
 
-### Cooking without a recipe
+### Build a Recipe: cooking without one
 
+The button was "Cook Without a Recipe" until 2026-11-15.
 `startFreestyleSession()` opens a cook on a blank `RecipeBase` with `sourceRecipeID == nil`.
 That one nil is the whole difference: it picks the system prompt (record what the user says
 they used, rather than record what they say they changed), it makes the exit sheet show the

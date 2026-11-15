@@ -656,7 +656,10 @@ struct ProfileSettingsView: View {
 
 }
 
-/// The on-device Kokoro voice's rows: its switch, download, voice and what went wrong.
+/// Which engine speaks replies on the device.
+private enum VoiceEngine: Hashable { case standard, kokoro }
+
+/// The on-device voice's engine choice, and Kokoro's download, voice and what went wrong.
 private struct KokoroRows: View {
     @ObservedObject private var kokoro = KokoroVoice.shared
     @Binding var voice: String
@@ -664,17 +667,24 @@ private struct KokoroRows: View {
     @State private var confirmingDownload = false
 
     var body: some View {
-        Toggle(isOn: Binding(
-            get: { kokoro.isEnabled },
-            set: { on in
-                if on, !kokoro.isDownloaded { confirmingDownload = true } else { kokoro.isEnabled = on }
+        // Default (Apple's voices) or Kokoro, chosen like On-Device or BigBro above (Cedric,
+        // 2026-11-15). Picking Kokoro before it's downloaded asks first and stays on Default
+        // until the download starts.
+        Picker("Voice", selection: Binding(
+            get: { kokoro.isEnabled ? VoiceEngine.kokoro : .standard },
+            set: { engine in
+                if engine == .kokoro, !kokoro.isDownloaded {
+                    confirmingDownload = true
+                } else {
+                    kokoro.isEnabled = engine == .kokoro
+                    if engine == .kokoro { onSample() }
+                }
             }
         )) {
-            VStack(alignment: .leading, spacing: 2) {
-                Text("Kokoro Voice")
-                Text("Experimental").font(.caption).foregroundStyle(.secondary)
-            }
+            Text("Default").tag(VoiceEngine.standard)
+            Text("Kokoro").tag(VoiceEngine.kokoro)
         }
+        .pickerStyle(.segmented)
         .disabled(kokoro.isDownloading)
         .alert("Download the Kokoro Voice?", isPresented: $confirmingDownload) {
             Button("Download") {
@@ -685,7 +695,7 @@ private struct KokoroRows: View {
             }
             Button("Cancel", role: .cancel) {}
         } message: {
-            Text("About 300 MB. Keep LittleChef open while it downloads.")
+            Text("About 300 MB. Keep LittleChef open while it downloads. Kokoro is experimental: see below.")
         }
 
         if kokoro.isDownloading {

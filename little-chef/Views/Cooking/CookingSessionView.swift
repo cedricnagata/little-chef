@@ -83,7 +83,7 @@ struct StartCookingView: View {
                 Button {
                     Task { await cookingSessionManager.startFreestyleSession() }
                 } label: {
-                    Label("Cook Without a Recipe", systemImage: "square.and.pencil")
+                    Label("Build a Recipe", systemImage: "square.and.pencil")
                         .fontWeight(.semibold)
                         .frame(maxWidth: .infinity)
                 }
@@ -92,7 +92,7 @@ struct StartCookingView: View {
                 .disabled(!canCookWithoutRecipe)
 
                 if !canCookWithoutRecipe {
-                    Text("Cooking without a recipe needs the AI assistant. \(llmService.unavailableReason ?? "")")
+                    Text("Building a recipe needs the AI assistant. \(llmService.unavailableReason ?? "")")
                         .font(.caption)
                         .foregroundColor(.secondary)
                 } else if recipeManager.recipes.isEmpty {
