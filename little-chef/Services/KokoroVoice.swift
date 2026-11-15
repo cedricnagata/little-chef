@@ -64,10 +64,13 @@ final class KokoroVoice: ObservableObject {
     /// The app died while Kokoro was synthesizing, last time: it has been switched off.
     @Published private(set) var crashedLastTime = false
 
-    /// What loading it needs free on top of everything else: FluidAudio's ~170 MB, doubled, until
-    /// it is measured on a phone.
-    private static let memoryNeeded: UInt64 = 350 * 1024 * 1024
-    static var memoryNeededGiB: Double { Double(memoryNeeded) / 1_073_741_824 }
+    /// What loading it needs free on top of everything else. The Simulator measured it at 60–85 MB
+    /// loaded and the whole app at about 145 MB while it spoke (2026-11-15); 350 MB until then.
+    private static let memoryNeeded: UInt64 = 250 * 1024 * 1024
+    /// The room a device's memory limit must have for Kokoro beside its model to offer it at all.
+    /// 0.2 GiB puts the iPhone 14 Pro (a 4.0 GiB limit, the 9B budgeted at 3.75) just inside; it
+    /// was 0.35 GiB, which left it out, until Cedric asked for it there (2026-11-15).
+    static let fitMarginGiB = 0.2
     /// A memory warning with less than this left unloads it, and replies go back to Apple's voice.
     private static let memoryWarningUnloadHeadroom: UInt64 = 512 * 1024 * 1024
 
