@@ -121,6 +121,9 @@ final class LocalVoiceSession: NSObject, ObservableObject {
     // MARK: Machinery
 
     private let microphone: BigBroMicrophone
+    /// The microphone's engine, owned here so voice processing can be turned on in it. See
+    /// ``configureAudioSession()``.
+    private let engine: AVAudioEngine
     private let speaker = OnDeviceSpeaker()
 
     private var loopTask: Task<Void, Never>?
@@ -156,11 +159,14 @@ final class LocalVoiceSession: NSObject, ObservableObject {
         self.speaksReplies = speaksReplies
         self.wakeWord = wakeWord
         self.generateAnswer = answer
-        // A private engine, and `configuresAudioSession: false` because this type owns the
-        // session for both directions. Sharing an engine with playback is what `BigBroVoiceSession`
-        // does to get echo cancellation, and buys nothing here — the synthesizer isn't in an
-        // engine, and capture is stopped whenever it speaks.
-        self.microphone = BigBroMicrophone(tuning: tuning, configuresAudioSession: false)
+        // `configuresAudioSession: false` because this type owns the session for both
+        // directions. The engine is this type's rather than the microphone's so voice processing
+        // can be enabled in it, and so this type stops it: a borrowed engine is one the
+        // microphone never stops. Playback isn't in it — the synthesizer isn't in an engine,
+        // and capture is stopped whenever it speaks.
+        let engine = AVAudioEngine()
+        self.engine = engine
+        self.microphone = BigBroMicrophone(tuning: tuning, configuresAudioSession: false, engine: engine)
         super.init()
 
         microphone.$level
@@ -230,7 +236,7 @@ final class LocalVoiceSession: NSObject, ObservableObject {
         loopTask?.cancel()
         loopTask = nil
         clearSummon()
-        microphone.stop()
+        stopCapture()
         cancelSpeech()
         releaseAudioSession()
         phase = .idle
@@ -362,7 +368,7 @@ final class LocalVoiceSession: NSObject, ObservableObject {
         // Generation can take seconds on-device, and anything said into that gap would be
         // captured, queued, and answered after the reply the user is still waiting for.
         let willSpeak = speaksReplies
-        if willSpeak { microphone.stop() }
+        if willSpeak { stopCapture() }
 
         // Sentences are spoken strictly in order, one utterance at a time, while the next is
         // still generating — so the first word arrives about a sentence in rather than after
@@ -474,13 +480,15 @@ final class LocalVoiceSession: NSObject, ObservableObject {
 
     // MARK: - Audio session
 
-    /// One category for both directions, configured once.
+    /// One category for both directions, configured once, and voice processing on the
+    /// microphone's engine.
     ///
-    /// `.default` rather than a chat mode: a chat mode is only worth asking for alongside
-    /// `setVoiceProcessingEnabled(true)` on an engine that carries both streams, and per Apple
-    /// an app that sets one without the other gets *less* processing, not more — no echo
-    /// cancellation, no gain correction, and a deliberately quieter output. Half-duplex
-    /// capture needs none of it.
+    /// Voice processing is the noise filtering (see ``VoiceProcessing``): it suppresses the
+    /// range hood and the running tap before the endpointer and the recognizer hear them, and
+    /// lets iOS offer Voice Isolation. It is on the engine rather than asked for with a chat
+    /// mode, and the mode stays `.default`, because the answer is spoken outside the engine
+    /// while it is stopped: a chat mode with nothing processing the output is, per Apple, a
+    /// deliberately quieter output, and on `.voiceChat` one that follows the ring switch.
     ///
     /// `.defaultToSpeaker` is load-bearing: `.playAndRecord` without it routes playback to the
     /// earpiece, which is inaudible for a phone sitting on a counter.
@@ -492,6 +500,17 @@ final class LocalVoiceSession: NSObject, ObservableObject {
             options: [.defaultToSpeaker, .allowBluetoothHFP, .allowBluetoothA2DP, .duckOthers]
         )
         try session.setActive(true)
+        VoiceProcessing.enable(on: engine)
+    }
+
+    /// Ends capture and stops the engine with it.
+    ///
+    /// The microphone only removes its tap from an engine it was handed. Left running, the
+    /// engine would keep voice processing on through the spoken answer, ducking it along with
+    /// everything else on the device.
+    private func stopCapture() {
+        microphone.stop()
+        if engine.isRunning { engine.stop() }
     }
 
     /// Hands the route back, so whatever plays next picks its own category instead of

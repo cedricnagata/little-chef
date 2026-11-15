@@ -123,8 +123,7 @@ final class VoiceAssistant: NSObject, ObservableObject {
     private var speechQueueID = UUID()
 
     // Push-to-talk recording.
-    private var recorder: AVAudioRecorder?
-    private var recordingURL: URL?
+    private var recorder: FilteredRecorder?
 
     override convenience init() {
         self.init(llmService: .shared)
@@ -452,18 +451,11 @@ final class VoiceAssistant: NSObject, ObservableObject {
                                     options: [.defaultToSpeaker, .allowBluetoothHFP, .allowBluetoothA2DP])
             try session.setActive(true)
 
+            // Through voice processing, so the range hood isn't in the question. See
+            // ``FilteredRecorder``.
             let url = FileManager.default.temporaryDirectory
-                .appendingPathComponent("littlechef-voice-\(UUID().uuidString).m4a")
-            let recorder = try AVAudioRecorder(url: url, settings: [
-                AVFormatIDKey: Int(kAudioFormatMPEG4AAC),
-                AVSampleRateKey: 24_000,
-                AVNumberOfChannelsKey: 1,
-                AVEncoderAudioQualityKey: AVAudioQuality.high.rawValue,
-            ])
-            recorder.record()
-
-            self.recorder = recorder
-            self.recordingURL = url
+                .appendingPathComponent("littlechef-voice-\(UUID().uuidString).wav")
+            self.recorder = try FilteredRecorder(url: url)
             isRecording = true
         } catch {
             self.error = "Could not start recording: \(error.localizedDescription)"
@@ -471,12 +463,15 @@ final class VoiceAssistant: NSObject, ObservableObject {
     }
 
     private func stopRecordingAndTranscribe() async -> String? {
-        recorder?.stop()
-        recorder = nil
+        guard let recorder else {
+            isRecording = false
+            return nil
+        }
+        recorder.stop()
+        self.recorder = nil
         isRecording = false
 
-        guard let url = recordingURL else { return nil }
-        recordingURL = nil
+        let url = recorder.url
         defer { try? FileManager.default.removeItem(at: url) }
 
         isTranscribing = true
@@ -486,7 +481,7 @@ final class VoiceAssistant: NSObject, ObservableObject {
             let transcript: String
             if provider == .bigBro, llmService.bigBroClient.isConnected {
                 transcript = try await llmService.bigBroClient.transcribe(
-                    Data(contentsOf: url), format: "m4a"
+                    Data(contentsOf: url), format: "wav"
                 )
             } else {
                 transcript = try await OnDeviceTranscriber.transcribe(fileAt: url)

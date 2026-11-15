@@ -622,6 +622,29 @@ microphone are asked for when voice is first used: push-to-talk in `VoiceAssista
 goes false once the microphone has been refused, and is re-read when the app comes back to the
 front. Do not add a permission request to an `init` or a launch `.task`.
 
+## Noise filtering on the microphone
+
+Every way the app listens goes through Apple's voice processing, which suppresses steady
+background noise (range hood, tap, dishwasher), cancels echo and evens out the level, on the
+device. Added 2026-11-15 at Cedric's request. `Services/VoiceProcessing.swift` has the pieces.
+
+- **Hands-free on the device** (`LocalVoiceSession`) owns the microphone's `AVAudioEngine` and turns
+  voice processing on in it (`VoiceProcessing.enable(on:)`), handing it to `BigBroMicrophone`. The
+  microphone never stops an engine it was handed, so `stopCapture()` stops it, before every spoken
+  answer as well as at the end: left running, it would duck the answer.
+- **Push-to-talk** records through `FilteredRecorder` (16 kHz mono WAV) instead of `AVAudioRecorder`,
+  which cannot do voice processing. The Mac's transcription takes it as `wav`.
+- **Hands-free on a Mac** already had it, inside BigBroKit (`BigBroVoiceSession`).
+- The session mode stays `.default`. A chat mode without voice processing on the output makes
+  playback quieter, and on-device answers play outside the engine.
+- **Other audio is ducked while the microphone is open.** That comes with voice processing; it is
+  set to the least ducking iOS allows (`duckingLevel: .min`).
+- **Voice Isolation is the user's to pick**, not the app's: Apple only lets an app show its picker
+  (`MicrophoneMode.showPicker()`, the Mic Mode button on the hands-free bar, which shows while the
+  microphone is open), and iOS remembers the choice per app. It is not trained on the user's voice.
+- Not checkable in the Simulator: whether it filters, how loud answers are, and whether the
+  endpointer's sliders need moving now that room noise is lower.
+
 ## The on-device voice
 
 Replies are spoken by `AVSpeechSynthesizer` (`OnDeviceSpeaker`) unless the cook is on a Mac, which

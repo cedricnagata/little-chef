@@ -274,6 +274,20 @@ private struct VoiceStatusBar: View {
 
                 Spacer()
 
+                // iOS's own picker, where Voice Isolation lives. Only while the microphone is
+                // open: the modes apply to a running voice-processed input, and the picker
+                // offers nothing otherwise. See ``MicrophoneMode``.
+                if voiceAssistant.phase.isResting {
+                    Button { MicrophoneMode.showPicker() } label: {
+                        Image(systemName: "waveform.and.mic")
+                    }
+                    .font(.caption)
+                    .buttonStyle(.bordered)
+                    .accessibilityLabel("Mic Mode")
+                    .accessibilityValue(MicrophoneMode.current ?? "")
+                    .accessibilityHint("Choose Voice Isolation to filter out background noise")
+                }
+
                 if voiceAssistant.phase == .speaking {
                     Button("Stop") { voiceAssistant.stopHandsFreeSpeaking() }
                         .font(.caption)
