@@ -637,6 +637,32 @@ speaks with Kokoro.
   category so it is heard with the ring switch on silent. It plays from the user's choice only, not
   from the form loading.
 
+### Kokoro on the device (experimental)
+
+`KokoroVoice` runs Kokoro, the Mac's voice, on the iPhone through FluidAudio 0.18.3 (Core ML,
+`KokoroAneManager`, `.v3`, `.aneTailCpu` so it never takes the GPU from the 9B). It speaks the
+same voice ids as the Mac, so `bigBroVoice` is the choice for both. Added 2026-11-15 at Cedric's
+request.
+
+- **Known to crash on current iOS.** FluidAudio knows no safe Core ML route for Kokoro on iOS 27,
+  and iOS 26.4–26.6 have a libBNNS bug: synthesis can crash inside Apple's code, uncatchably
+  (FluidAudio #889, #844). Cedric chose to try it. A marker file is written before every
+  synthesis and removed after; one still there at launch switches Kokoro off and says so in
+  Settings. Re-check FluidAudio's advisories before making it less experimental.
+- **On by default where it fits**: the switch defaults on when the measured limit covers the
+  device's model plus 0.35 GiB (`LLMService.fitsKokoro(alongside:)`), and off elsewhere,
+  including a 4 GiB phone with the 9B. Where it's on, it downloads with the model, and the model's
+  download prompt says so (about 300 MB, through FluidAudio's own downloader, so not in the
+  background). Elsewhere Settings offers it with its own prompt.
+- **Loaded only for a cook**, last in the getting-ready screen, and only with 350 MB free;
+  unloaded when the cook ends, on a memory warning with under 512 MB left, and when Settings
+  closes after playing a sample. Not loaded means Apple's voice. Both are estimates until
+  measured.
+- **Measuring it on a phone**: every load, unload and sentence logs its time and the footprint
+  under `llm-timing` (`kokoro: …`), with the 9B's own lines.
+- `OnDeviceSpeaker.speak(_:voice:rate:kokoroVoice:)` uses Kokoro when it's ready and falls back
+  per sentence; Delete All Data removes its files (`KokoroVoice.reset`).
+
 ## Inventory, shopping list and suggestions
 
 The Kitchen tab keeps two SwiftData models, `PantryItemEntity` and `ShoppingItemEntity`, in the

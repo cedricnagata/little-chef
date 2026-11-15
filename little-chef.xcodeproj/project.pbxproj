@@ -10,6 +10,7 @@
 		8B112FF92FAD2A8400C9C796 /* WidgetKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 8B112FF82FAD2A8400C9C796 /* WidgetKit.framework */; };
 		8B112FFB2FAD2A8400C9C796 /* SwiftUI.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 8B112FFA2FAD2A8400C9C796 /* SwiftUI.framework */; };
 		8B28BF352F981150001DD2B5 /* BigBroKit in Frameworks */ = {isa = PBXBuildFile; productRef = 8B28BF342F981150001DD2B5 /* BigBroKit */; };
+		8BFA1D0A2F99000000AA0003 /* FluidAudio in Frameworks */ = {isa = PBXBuildFile; productRef = 8BFA1D0A2F99000000AA0002 /* FluidAudio */; };
 		8BAC10000000000000A1 /* TimerWidgetExtension.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = 8B112FF62FAD2A8400C9C796 /* TimerWidgetExtension.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 		8BAC10000000000000B2 /* TimerActivityAttributes.swift (shared with TimerWidgetExtension) in Sources */ = {isa = PBXBuildFile; fileRef = 8BAC10000000000000B1 /* TimerActivityAttributes.swift (shared with TimerWidgetExtension) */; };
 		8BD0A0012EBF000000BB0001 /* MLX in Frameworks */ = {isa = PBXBuildFile; productRef = 8BD0A0002EBF000000BB0001 /* MLX */; };
@@ -130,6 +131,7 @@
 				8BD0A0012EBF000000BB0001 /* MLX in Frameworks */,
 				8BD0A0032EBF000000BB0001 /* MLXLLM in Frameworks */,
 				8B28BF352F981150001DD2B5 /* BigBroKit in Frameworks */,
+				8BFA1D0A2F99000000AA0003 /* FluidAudio in Frameworks */,
 				8BD0A0052EBF000000BB0001 /* MLXLMCommon in Frameworks */,
 				8BD0A0092EBF000000BB0001 /* Tokenizers in Frameworks */,
 				8BD0A00B2EBF000000BB0001 /* HuggingFace in Frameworks */,
@@ -234,6 +236,7 @@
 				8BD0A0022EBF000000BB0001 /* MLXLLM */,
 				8BD0A0042EBF000000BB0001 /* MLXLMCommon */,
 				8B28BF342F981150001DD2B5 /* BigBroKit */,
+				8BFA1D0A2F99000000AA0002 /* FluidAudio */,
 				8BD0A0082EBF000000BB0001 /* Tokenizers */,
 				8BD0A00A2EBF000000BB0001 /* HuggingFace */,
 			);
@@ -326,6 +329,7 @@
 				8BD0A0062EBF000000BB0001 /* XCRemoteSwiftPackageReference "mlx-swift" */,
 				8BD0A0072EBF000000BB0001 /* XCRemoteSwiftPackageReference "mlx-swift-lm" */,
 				8B28BF332F981150001DD2B5 /* XCRemoteSwiftPackageReference "bigbro-kit" */,
+				8BFA1D0A2F99000000AA0001 /* XCRemoteSwiftPackageReference "FluidAudio" */,
 				8BD0A00C2EBF000000BB0001 /* XCRemoteSwiftPackageReference "swift-transformers" */,
 				8BD0A00D2EBF000000BB0001 /* XCRemoteSwiftPackageReference "swift-huggingface" */,
 			);
@@ -824,6 +828,14 @@
 /* End XCConfigurationList section */
 
 /* Begin XCRemoteSwiftPackageReference section */
+		8BFA1D0A2F99000000AA0001 /* XCRemoteSwiftPackageReference "FluidAudio" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/FluidInference/FluidAudio";
+			requirement = {
+				kind = exactVersion;
+				version = 0.18.3;
+			};
+		};
 		8B28BF332F981150001DD2B5 /* XCRemoteSwiftPackageReference "bigbro-kit" */ = {
 			isa = XCRemoteSwiftPackageReference;
 			repositoryURL = "https://github.com/cedricnagata/bigbro-kit";
@@ -867,6 +879,11 @@
 /* End XCRemoteSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
+		8BFA1D0A2F99000000AA0002 /* FluidAudio */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 8BFA1D0A2F99000000AA0001 /* XCRemoteSwiftPackageReference "FluidAudio" */;
+			productName = FluidAudio;
+		};
 		8B28BF342F981150001DD2B5 /* BigBroKit */ = {
 			isa = XCSwiftPackageProductDependency;
 			package = 8B28BF332F981150001DD2B5 /* XCRemoteSwiftPackageReference "bigbro-kit" */;

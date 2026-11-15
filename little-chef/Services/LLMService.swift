@@ -67,6 +67,17 @@ class LLMService: ObservableObject {
         return gib >= CookingModelChoice.bonsai2_27B.memoryNeeded ? [.bonsai2_27B, baseline] : [baseline]
     }()
 
+    /// The app's memory limit in GiB, sampled once, from `init`, before any model has taken a
+    /// share of it. 0 in the Simulator.
+    static let measuredMemoryLimitGiB: Double = Double(appMemoryLimit) / 1_073_741_824
+
+    /// Whether this device has room for the Kokoro voice alongside `model`: where it does,
+    /// Kokoro is the default voice (Cedric, 2026-11-15). On a 4 GiB limit with the 9B (iPhone 14
+    /// Pro, 15) it doesn't, and Kokoro is the user's choice.
+    static func fitsKokoro(alongside model: CookingModelChoice) -> Bool {
+        measuredMemoryLimitGiB >= model.memoryNeeded + KokoroVoice.memoryNeededGiB
+    }
+
     /// What iOS will let this process use before terminating it: what is left plus what is
     /// already in use. 0 where the call is unsupported, such as the simulator.
     private static var appMemoryLimit: UInt64 {
@@ -229,6 +240,7 @@ class LLMService: ObservableObject {
 
     private init() {
         _ = Self.onDeviceModelOptions
+        _ = Self.measuredMemoryLimitGiB
         Self.logMemory("at launch")
         if let stored = UserDefaults.standard.string(forKey: Self.onDeviceModelKey),
            let choice = CookingModelChoice(storedValue: stored) {
@@ -652,6 +664,7 @@ class LLMService: ObservableObject {
             try fm.removeItem(at: item)
         }
         refreshDownloadedModels()
+        Task { await KokoroVoice.shared.reset() }
 
         UserDefaults.standard.removeObject(forKey: Self.onDeviceModelKey)
         UserDefaults.standard.removeObject(forKey: Self.providerKey)

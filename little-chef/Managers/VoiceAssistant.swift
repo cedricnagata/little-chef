@@ -564,7 +564,8 @@ final class VoiceAssistant: NSObject, ObservableObject {
         await speaker.speak(
             sentence,
             voice: .resolving(voiceSettings.voiceIdentifier),
-            rate: voiceSettings.speechRate
+            rate: voiceSettings.speechRate,
+            kokoroVoice: voiceSettings.bigBroVoice
         )
     }
 

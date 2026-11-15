@@ -25,6 +25,7 @@ struct ProfileSettingsView: View {
     @State private var voices: [AVSpeechSynthesisVoice] = []
     /// Plays the sample when a voice or rate is chosen.
     @State private var sampleSpeaker = OnDeviceSpeaker()
+    @ObservedObject private var kokoro = KokoroVoice.shared
     @State private var autoSpeakResponses = true
     @State private var bigBroVoice = BigBroClient.defaultVoice
     @State private var hasLoaded = false
@@ -78,12 +79,18 @@ struct ProfileSettingsView: View {
     private func playSample() {
         let voice = AVSpeechSynthesisVoice.resolving(voiceIdentifier)
         let rate = speechRate
+        let kokoroVoice = bigBroVoice
         sampleSpeaker.stop()
         // Playback, so the sample is heard with the ring switch on silent. No cook is running
         // while Settings is open, so nothing else holds the audio session.
         try? AVAudioSession.sharedInstance().setCategory(.playback, mode: .spokenAudio, options: [.duckOthers])
         try? AVAudioSession.sharedInstance().setActive(true)
-        Task { await sampleSpeaker.speak("Preheat the oven to 200 degrees, then chop the onion.", voice: voice, rate: rate) }
+        Task {
+            // Kokoro is loaded for the sample and put away when Settings closes.
+            await KokoroVoice.shared.loadIfWanted()
+            await sampleSpeaker.speak(
+                "Preheat the oven to 200 degrees, then chop the onion.", voice: voice, rate: rate, kokoroVoice: kokoroVoice)
+        }
     }
 
     /// Presents the stored rate as a multiple of normal speed, so "normal" reads as 1.0x.
@@ -124,7 +131,10 @@ struct ProfileSettingsView: View {
                             bigBroVoice: $bigBroVoice
                         )
                     } else {
+                        KokoroRows(voice: $bigBroVoice, onSample: playSample)
+
                         // The sample plays from the user's choice only, not from loading the form.
+                        if !(kokoro.isEnabled && kokoro.isDownloaded) {
                         Picker("Voice", selection: Binding(
                             get: { voiceIdentifier },
                             set: { voiceIdentifier = $0; playSample() }
@@ -140,6 +150,8 @@ struct ProfileSettingsView: View {
                             ForEach(voices, id: \.identifier) { voice in
                                 Text(voiceLabel(voice)).tag(voice.identifier)
                             }
+                        }
+
                         }
 
                         Button("Play Sample", systemImage: "speaker.wave.2", action: playSample)
@@ -163,7 +175,9 @@ struct ProfileSettingsView: View {
             } header: {
                 Text("Voice")
             } footer: {
-                if autoSpeakResponses, llmProvider != .bigBro {
+                if autoSpeakResponses, llmProvider != .bigBro, kokoro.isEnabled {
+                    Text("Kokoro is the voice your Mac speaks with, run on this iPhone's Neural Engine. Experimental: iOS 26.4 and later have an Apple bug that can crash it, so if LittleChef closes while it's speaking it switches itself off and the Apple voice takes over.")
+                } else if autoSpeakResponses, llmProvider != .bigBro {
                     Text("iOS doesn't let apps use Siri's voice. For the most natural one, download an Enhanced or Premium voice in the Settings app under Accessibility → Spoken Content → Voices; it appears here when it's done.")
                 }
             }
@@ -236,6 +250,7 @@ struct ProfileSettingsView: View {
         .onChange(of: speechRate) { _, _ in saveIfLoaded() }
         .onChange(of: voiceIdentifier) { _, _ in saveIfLoaded() }
         .onAppear { voices = Self.installedVoices() }
+        .onDisappear { Task { await KokoroVoice.shared.unload() } }
         .onReceive(NotificationCenter.default.publisher(for: AVSpeechSynthesizer.availableVoicesDidChangeNotification)) { _ in
             voices = Self.installedVoices()
         }
@@ -281,9 +296,11 @@ struct ProfileSettingsView: View {
     private func downloadAlert(for kind: DownloadAlertKind) -> Alert {
         let name = pendingDownload?.displayName ?? "The model"
         let size = pendingDownload?.approximateSize ?? "several GB"
+        // Where Kokoro is the default voice it comes with the model, so the one prompt covers both.
+        let voice = Self.kokoroComesAlong ? " The Kokoro voice comes with it, about 300 MB more." : ""
         switch kind {
         case .wifiConfirm:
-            let msg = "\(name) is about \(size.replacingOccurrences(of: "~", with: "")). It keeps downloading if you switch apps, and you'll get a notification when it's ready."
+            let msg = "\(name) is about \(size.replacingOccurrences(of: "~", with: "")). It keeps downloading if you switch apps, and you'll get a notification when it's ready.\(voice)"
             return Alert(
                 title: Text("Download AI Model?"),
                 message: Text(msg),
@@ -291,7 +308,7 @@ struct ProfileSettingsView: View {
                 secondaryButton: .cancel { pendingDownload = nil }
             )
         case .cellularWarn:
-            let msg = "\(name) is about \(size.replacingOccurrences(of: "~", with: "")) and may use significant cellular data. Connect to Wi-Fi for best results."
+            let msg = "\(name) is about \(size.replacingOccurrences(of: "~", with: "")) and may use significant cellular data.\(voice) Connect to Wi-Fi for best results."
             return Alert(
                 title: Text("Cellular Connection"),
                 message: Text(msg),
@@ -315,7 +332,16 @@ struct ProfileSettingsView: View {
     private func startPendingDownload() {
         guard let choice = pendingDownload else { return }
         pendingDownload = nil
-        Task { await llmService.downloadModel(modelId: choice.modelId) }
+        let withVoice = Self.kokoroComesAlong
+        Task {
+            await llmService.downloadModel(modelId: choice.modelId)
+            if withVoice { await KokoroVoice.shared.download() }
+        }
+    }
+
+    /// Kokoro is switched on (the default where it fits) but not yet on the device.
+    @MainActor private static var kokoroComesAlong: Bool {
+        KokoroVoice.shared.isEnabled && !KokoroVoice.shared.isDownloaded
     }
 
     // MARK: - Provider Picker Section
@@ -630,6 +656,65 @@ struct ProfileSettingsView: View {
 
 }
 
+/// The on-device Kokoro voice's rows: its switch, download, voice and what went wrong.
+private struct KokoroRows: View {
+    @ObservedObject private var kokoro = KokoroVoice.shared
+    @Binding var voice: String
+    let onSample: () -> Void
+    @State private var confirmingDownload = false
+
+    var body: some View {
+        Toggle(isOn: Binding(
+            get: { kokoro.isEnabled },
+            set: { on in
+                if on, !kokoro.isDownloaded { confirmingDownload = true } else { kokoro.isEnabled = on }
+            }
+        )) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Kokoro Voice")
+                Text("Experimental").font(.caption).foregroundStyle(.secondary)
+            }
+        }
+        .disabled(kokoro.isDownloading)
+        .alert("Download the Kokoro Voice?", isPresented: $confirmingDownload) {
+            Button("Download") {
+                Task {
+                    kokoro.isEnabled = true
+                    await kokoro.download()
+                }
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("About 300 MB. Keep LittleChef open while it downloads.")
+        }
+
+        if kokoro.isDownloading {
+            HStack(spacing: 8) {
+                ProgressView()
+                Text("Downloading the Kokoro voice…").font(.caption).foregroundStyle(.secondary)
+            }
+        } else if kokoro.isEnabled, !kokoro.isDownloaded {
+            Button("Download the Kokoro Voice (about 300 MB)") { Task { await kokoro.download() } }
+        } else if kokoro.isEnabled {
+            Picker("Kokoro Voice", selection: Binding(get: { voice }, set: { voice = $0; onSample() })) {
+                ForEach(KokoroVoice.voices, id: \.self) { Text(KokoroVoice.label(for: $0)).tag($0) }
+            }
+        }
+
+        if let error = kokoro.error {
+            Text(error).font(.caption).foregroundStyle(.red)
+        }
+        if kokoro.crashedLastTime {
+            Label("LittleChef closed while Kokoro was speaking, so it was switched off. That's the iOS bug it's marked experimental for.", systemImage: "exclamationmark.triangle")
+                .font(.caption)
+                .foregroundStyle(.orange)
+        }
+        if kokoro.isDownloaded, !kokoro.isEnabled {
+            Button("Remove the Kokoro Voice", role: .destructive) { Task { await kokoro.deleteFiles() } }
+        }
+    }
+}
+
 /// Picks which Kokoro voice the paired Mac speaks with.
 ///
 /// Observes the client directly: `ProfileSettingsView` watches `LLMService`, which does not
@@ -645,8 +730,8 @@ private struct BigBroVoicePicker: View {
             // id with no clue why, and the app has no dependency on Kokoro to enumerate them.
             // Offered even while disconnected so the choice can be made before pairing.
             Picker("Voice", selection: $bigBroVoice) {
-                ForEach(Self.availableVoices, id: \.self) { voice in
-                    Text(Self.label(for: voice)).tag(voice)
+                ForEach(KokoroVoice.voices, id: \.self) { voice in
+                    Text(KokoroVoice.label(for: voice)).tag(voice)
                 }
             }
 
@@ -654,24 +739,6 @@ private struct BigBroVoicePicker: View {
                 .font(.caption)
                 .foregroundColor(.secondary)
         }
-    }
-
-    /// Kokoro voices the Mac's speech backend ships, American English only — the rest are
-    /// present in the model but unverified, and a cooking assistant has no use for a voice
-    /// that might mispronounce every ingredient.
-    private static let availableVoices: [String] = [
-        "af_alloy", "af_aoede", "af_bella", "af_heart", "af_jessica", "af_kore", "af_nicole",
-        "af_nova", "af_river", "af_sarah", "af_sky", "am_adam", "am_echo", "am_eric",
-        "am_fenrir", "am_liam", "am_michael", "am_onyx", "am_puck", "am_santa",
-    ]
-
-    /// "af_heart" → "Heart (female)": Kokoro's ids put the accent and voice in a prefix.
-    private static func label(for id: String) -> String {
-        let parts = id.split(separator: "_", maxSplits: 1)
-        guard parts.count == 2 else { return id }
-        let kind = parts[0].hasSuffix("f") ? "female" : parts[0].hasSuffix("m") ? "male" : nil
-        let name = parts[1].prefix(1).uppercased() + parts[1].dropFirst()
-        return kind.map { "\(name) (\($0))" } ?? name
     }
 
     private var footnote: String {

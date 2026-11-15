@@ -184,6 +184,12 @@ class CookingSessionManager: ObservableObject, TimerManager {
                     llmService.updatePreparation(step: "Reading the recipe…", progress: 0)
                     try await makeAgent(provider: .local, kitchen: kitchenNote(for: recipe))
                         .prewarm(recipe: recipe) { [llmService] in llmService.updatePreparation(progress: $0) }
+                    // Last, so it is measured against the model and prompt it shares memory with.
+                    if KokoroVoice.shared.isEnabled, KokoroVoice.shared.isDownloaded {
+                        llmService.updatePreparation(step: "Loading the Kokoro voice…", progress: nil)
+                        await KokoroVoice.shared.loadIfWanted()
+                        try Task.checkCancellation()
+                    }
                 } else if provider == .bigBro {
                     await llmService.prepareSpeechForSession(provider: provider)
                 }
@@ -192,6 +198,7 @@ class CookingSessionManager: ObservableObject, TimerManager {
             begin(session, warm: true)
         } catch is CancellationError {
             if provider == .local { llmService.unloadModel() }
+            Task { await KokoroVoice.shared.unload() }
         } catch {
             startFailure = StartFailure(session: session, message: error.localizedDescription, onStart: onStart)
         }
@@ -325,6 +332,7 @@ class CookingSessionManager: ObservableObject, TimerManager {
         clearAllTimers()
         // Only loaded while it's needed: a cook that's over hands its memory back.
         if sessionProvider == .local { llmService.unloadModel() }
+        Task { await KokoroVoice.shared.unload() }
 
         dprint("🔴 Ended cooking session and reset state")
     }
