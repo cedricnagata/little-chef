@@ -13,7 +13,7 @@ Available on [TestFlight](https://testflight.apple.com/join/Rz11FzNk)
   - **Hands-free** — answers everything it hears, for cooking alone
   - **Wait for "hey little chef"** — only answers when called by name, for a busy kitchen
 - Push-to-talk dictation as an alternative: one utterance lands in the text field, where a misheard ingredient can be corrected before it becomes a question
-- Spoken replies (Settings → Voice), with the voice matched to the active AI backend. Replies are spoken sentence by sentence as they generate, rather than after the whole answer
+- Spoken replies (Settings → Speech), with the voice matched to the active AI backend. Replies are spoken sentence by sentence as they generate, rather than after the whole answer
 
 ### AI Cooking Assistant
 - Contextual conversation tied to your current recipe and cooking session

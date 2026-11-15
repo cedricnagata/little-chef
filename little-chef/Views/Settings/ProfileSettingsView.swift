@@ -106,7 +106,7 @@ struct ProfileSettingsView: View {
 
             // MARK: - Voice
             Section {
-                Toggle("Voice", isOn: $autoSpeakResponses)
+                Toggle("Speech", isOn: $autoSpeakResponses)
 
                 // The two providers speak through different engines: Kokoro on the Mac, and on
                 // the device Siri (Apple's voices) or, where it fits, Kokoro too. Replies are

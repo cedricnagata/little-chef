@@ -638,7 +638,7 @@ speaks with Kokoro.
   waits for Kokoro to load, and the button says "Loading Kokoro…".
 - **Always normal speed** (2026-11-15): Settings has no speech rate. `speechRate` is still stored
   so older profiles decode, and nothing reads it. The voice section has no header and no note
-  about Kokoro; its switch is "Voice".
+  about Kokoro; its switch is "Speech" ("Auto-speak responses" until 2026-11-15, then "Voice").
 
 ### Kokoro on the device
 
@@ -653,10 +653,12 @@ request.
   synthesis and removed after; one still there at launch switches Kokoro off and says so in
   Settings. Re-check FluidAudio's advisories when updating it. Cedric asked (2026-11-15) that the
   app not call it experimental.
-- **Offered only where it fits, and the default there.** Settings → Voice shows a Siri | Kokoro
+- **Offered only where it fits, and the default there.** Settings (under the Speech switch) shows a Siri | Kokoro
   segmented control, like On-Device | BigBro, only when the measured limit covers the device's
-  model plus 0.35 GiB (`KokoroVoice.isOffered`, from `LLMService.fitsKokoro(alongside:)`); elsewhere
-  there is no Kokoro at all, including a 4 GiB phone with the 9B (iPhone 14 Pro). Debug always
+  model plus 0.2 GiB (`KokoroVoice.fitMarginGiB`, `KokoroVoice.isOffered`,
+  `LLMService.fitsKokoro(alongside:)`); elsewhere there is no Kokoro at all. A 4 GiB phone with the
+  9B (iPhone 14 Pro) is just inside: the margin was 0.35 GiB, which left it out, until Cedric
+  asked for it there and the Simulator had measured Kokoro small (2026-11-15). Debug always
   offers it, so the Simulator can test it. "Siri" is Cedric's name for Apple's voices, not Siri's
   own voice, which apps can't use. Where offered Kokoro is chosen until the user picks Siri, and
   it downloads with the model, whose download prompt says so (about 200 MB: 183 MB on disk in the Simulator, through FluidAudio's
@@ -664,14 +666,14 @@ request.
   model's: Download on the right (with a confirmation), then a bar and percentage while it
   downloads, then On disk or In memory, its size and delete. FluidAudio reports no progress for
   the download, so the bar is the bytes on disk against the measured 183 MB.
-- **Loaded only for a cook**, last in the getting-ready screen, and only with 350 MB free;
+- **Loaded only for a cook**, last in the getting-ready screen, and only with 250 MB free;
   unloaded when the cook ends, on a memory warning with under 512 MB left, and when Settings
   closes after playing a sample. Not loaded means Apple's voice. Both are estimates until
   measured.
 - **Simulator figures** (CPU only, 2026-11-15): loads in 0.1–2 s at a 60–85 MB footprint, a
   53-character sentence in 0.7–1.4 s at 140–146 MB, and unloading hands back little (146 → 131 MB).
-  The 350 MB load threshold and 0.35 GiB fit margin stay until a phone, with the Neural Engine,
-  is measured.
+  The 250 MB load threshold and 0.2 GiB fit margin rest on these; check them on a phone, with
+  the Neural Engine, from the `kokoro:` lines.
 - **Measuring it on a phone**: every load, unload and sentence logs its time and the footprint
   under `llm-timing` (`kokoro: …`), with the 9B's own lines.
 - `OnDeviceSpeaker.speak(_:voice:rate:kokoroVoice:)` uses Kokoro when it's ready and falls back
