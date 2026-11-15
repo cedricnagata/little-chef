@@ -119,7 +119,7 @@ struct ProfileSettingsView: View {
 
             // MARK: - Voice
             Section {
-                Toggle("Auto-speak responses", isOn: $autoSpeakResponses)
+                Toggle("Voice", isOn: $autoSpeakResponses)
 
                 // The two providers speak through different engines, so the controls that apply
                 // are disjoint: Kokoro on the Mac exposes named voices and no rate, AVSpeech on
