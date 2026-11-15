@@ -666,7 +666,7 @@ private struct KokoroRows: View {
             Button("Download") { Task { await kokoro.download() } }
             Button("Cancel", role: .cancel) {}
         } message: {
-            Text("Kokoro is about \(Self.size(KokoroVoice.expectedDownloadBytes)). Keep LittleChef open while it downloads. It's experimental: an iOS bug can crash it, and if that happens it switches itself off.")
+            Text("Kokoro is about \(Self.size(KokoroVoice.expectedDownloadBytes)). Keep LittleChef open while it downloads.")
         }
         .alert("Remove Kokoro?", isPresented: $confirmingRemoval) {
             Button("Cancel", role: .cancel) {}
@@ -681,7 +681,7 @@ private struct KokoroRows: View {
                     VStack(alignment: .leading, spacing: 2) {
                         Text("Kokoro")
                             .font(.subheadline)
-                        Text("Spoken replies on this iPhone · Experimental")
+                        Text("Spoken replies on this iPhone")
                             .font(.caption2)
                             .foregroundColor(.secondary)
                     }
@@ -752,7 +752,7 @@ private struct KokoroRows: View {
             Text(error).font(.caption).foregroundStyle(.red)
         }
         if kokoro.crashedLastTime {
-            Label("LittleChef closed while Kokoro was speaking, so it was switched off. That's the iOS bug it's marked experimental for.", systemImage: "exclamationmark.triangle")
+            Label("LittleChef closed while Kokoro was speaking, which an iOS bug can cause, so Siri took over. Pick Kokoro to switch it back on.", systemImage: "exclamationmark.triangle")
                 .font(.caption)
                 .foregroundStyle(.orange)
         }

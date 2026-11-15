@@ -640,7 +640,7 @@ speaks with Kokoro.
   so older profiles decode, and nothing reads it. The voice section has no header and no note
   about Kokoro; its switch is "Voice".
 
-### Kokoro on the device (experimental)
+### Kokoro on the device
 
 `KokoroVoice` runs Kokoro, the Mac's voice, on the iPhone through FluidAudio 0.18.3 (Core ML,
 `KokoroAneManager`, `.v3`, `.aneTailCpu` so it never takes the GPU from the 9B). It speaks the
@@ -651,7 +651,8 @@ request.
   and iOS 26.4–26.6 have a libBNNS bug: synthesis can crash inside Apple's code, uncatchably
   (FluidAudio #889, #844). Cedric chose to try it. A marker file is written before every
   synthesis and removed after; one still there at launch switches Kokoro off and says so in
-  Settings. Re-check FluidAudio's advisories before making it less experimental.
+  Settings. Re-check FluidAudio's advisories when updating it. Cedric asked (2026-11-15) that the
+  app not call it experimental.
 - **Offered only where it fits, and the default there.** Settings → Voice shows a Siri | Kokoro
   segmented control, like On-Device | BigBro, only when the measured limit covers the device's
   model plus 0.35 GiB (`KokoroVoice.isOffered`, from `LLMService.fitsKokoro(alongside:)`); elsewhere

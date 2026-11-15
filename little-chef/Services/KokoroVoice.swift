@@ -3,7 +3,7 @@
 //  little-chef
 //
 //  Kokoro on the iPhone, through Core ML (FluidAudio): the voice the Mac speaks with, without the
-//  Mac. Experimental and opt-in, because of the Apple bug below.
+//  Mac. Offered only where memory allows; see the Apple bug below.
 //
 
 import Foundation
