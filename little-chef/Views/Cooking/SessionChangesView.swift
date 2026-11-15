@@ -88,7 +88,7 @@ struct SessionChangesView: View {
         } header: {
             Text("Name")
         } footer: {
-            Text("You cooked this without a recipe. Give it a name and it will be saved to your recipes.")
+            Text("You built this recipe as you cooked. Give it a name and it will be saved to your recipes.")
         }
     }
 

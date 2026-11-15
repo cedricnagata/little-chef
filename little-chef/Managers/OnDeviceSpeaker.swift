@@ -24,18 +24,37 @@ final class OnDeviceSpeaker: NSObject {
 
     private let synthesizer = AVSpeechSynthesizer()
     private var finished: CheckedContinuation<Void, Never>?
+    /// Plays a Kokoro sentence (see ``KokoroVoice``).
+    private var player: AVAudioPlayer?
+    /// Bumped by every `stop()`, so a Kokoro sentence that finishes synthesizing after the stop
+    /// it was meant to honour isn't played.
+    private var generation = 0
 
     override init() {
         super.init()
         synthesizer.delegate = self
     }
 
-    var isSpeaking: Bool { synthesizer.isSpeaking }
+    var isSpeaking: Bool { synthesizer.isSpeaking || player?.isPlaying == true }
 
     /// Speaks `text` and returns when it has finished — or been stopped.
-    func speak(_ text: String, voice: AVSpeechSynthesisVoice?, rate: Float) async {
+    ///
+    /// With `kokoroVoice` and ``KokoroVoice`` loaded, Kokoro speaks it; otherwise, or if Kokoro
+    /// fails on this sentence, Apple's `voice` does.
+    func speak(_ text: String, voice: AVSpeechSynthesisVoice?, rate: Float, kokoroVoice: String? = nil) async {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
+
+        if let kokoroVoice, KokoroVoice.shared.isReady {
+            let started = generation
+            let speed = rate / AVSpeechUtteranceDefaultSpeechRate
+            if let wav = await KokoroVoice.shared.synthesize(SpokenText.forSpeech(trimmed), voice: kokoroVoice, speed: speed) {
+                guard generation == started else { return }
+                if await play(wav) { return }
+            } else if generation != started {
+                return
+            }
+        }
 
         // "1 tbsp" would be read out as letters. See `SpokenText`.
         let utterance = AVSpeechUtterance(string: SpokenText.forSpeech(trimmed))
@@ -59,8 +78,32 @@ final class OnDeviceSpeaker: NSObject {
         }
     }
 
+    /// Plays one Kokoro sentence to the end, or until stopped. False if it couldn't be played.
+    private func play(_ wav: Data) async -> Bool {
+        guard let player = try? AVAudioPlayer(data: wav) else { return false }
+        player.delegate = self
+        await withCheckedContinuation { continuation in
+            if let pending = finished {
+                finished = nil
+                pending.resume()
+            }
+            finished = continuation
+            self.player = player
+            if !player.play() { resume() }
+        }
+        self.player = nil
+        return true
+    }
+
     /// Stops immediately. Anything awaiting `speak` returns.
     func stop() {
+        generation += 1
+        if let player {
+            player.stop()
+            self.player = nil
+            resume()
+            return
+        }
         // Gated on the return value rather than on `isSpeaking`. An utterance that has been
         // handed to the synthesizer but has not started yet reports `isSpeaking == false`
         // while still being cancellable — checking the flag would skip the cancel, leave it to
@@ -90,6 +133,16 @@ extension OnDeviceSpeaker: @preconcurrency AVSpeechSynthesizerDelegate {
 
     func speechSynthesizer(_ synthesizer: AVSpeechSynthesizer, didCancel utterance: AVSpeechUtterance) {
         resume()
+    }
+}
+
+extension OnDeviceSpeaker: AVAudioPlayerDelegate {
+    nonisolated func audioPlayerDidFinishPlaying(_ player: AVAudioPlayer, successfully flag: Bool) {
+        Task { @MainActor in self.resume() }
+    }
+
+    nonisolated func audioPlayerDecodeErrorDidOccur(_ player: AVAudioPlayer, error: Error?) {
+        Task { @MainActor in self.resume() }
     }
 }
 

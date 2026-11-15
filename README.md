@@ -13,7 +13,7 @@ Available on [TestFlight](https://testflight.apple.com/join/Rz11FzNk)
   - **Hands-free** — answers everything it hears, for cooking alone
   - **Wait for "hey little chef"** — only answers when called by name, for a busy kitchen
 - Push-to-talk dictation as an alternative: one utterance lands in the text field, where a misheard ingredient can be corrected before it becomes a question
-- Auto-speak responses, with the voice matched to the active AI backend. Replies are spoken sentence by sentence as they generate, rather than after the whole answer
+- Spoken replies (Settings → Voice), with the voice matched to the active AI backend. Replies are spoken sentence by sentence as they generate, rather than after the whole answer
 
 ### AI Cooking Assistant
 - Contextual conversation tied to your current recipe and cooking session
@@ -23,7 +23,7 @@ Available on [TestFlight](https://testflight.apple.com/join/Rz11FzNk)
 ### Changing the Recipe as You Cook
 - Ask the assistant to change the recipe mid-cook: add or remove ingredients, rewrite steps, change the title, times or servings
 - Nothing is saved until you finish. Ending the cook shows what changed, and you choose whether to keep it
-- **Cook Without a Recipe** starts from a blank page: tell the assistant what you're using and doing, and it writes the recipe down for you to save at the end
+- **Build a Recipe** starts from a blank page: tell the assistant what you're using and doing, and it writes the recipe down for you to save at the end
 - Change the servings and every ingredient amount rescales, mixed numbers and fractions included
 
 ### Recipe Import

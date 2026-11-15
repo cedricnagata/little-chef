@@ -41,6 +41,20 @@ struct MainView: View {
                 mainTabView
             }
         }
+        // Starting a cook: the cook screen opens once the model is ready.
+        .modelPreparationOverlay(.cooking)
+        .alert(
+            "Couldn't Get the Assistant Ready",
+            isPresented: Binding(
+                get: { cookingSessionManager.startFailure != nil },
+                set: { if !$0 { cookingSessionManager.startFailure = nil } }),
+            presenting: cookingSessionManager.startFailure
+        ) { failure in
+            Button("Cook Without It") { cookingSessionManager.startAnyway(failure) }
+            Button("Cancel", role: .cancel) { cookingSessionManager.startFailure = nil }
+        } message: { failure in
+            Text("\(failure.message) Timers still work, and the assistant tries again during the cook.")
+        }
         .environmentObject(recipeManager)
         .environmentObject(kitchenManager)
         .environment(\.selectedTab, $selectedTab)

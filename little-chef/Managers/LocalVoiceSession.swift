@@ -463,7 +463,8 @@ final class LocalVoiceSession: NSObject, ObservableObject {
         await speaker.speak(
             text,
             voice: .resolving(voiceSettings.voiceIdentifier),
-            rate: voiceSettings.speechRate
+            rate: voiceSettings.speechRate,
+            kokoroVoice: voiceSettings.bigBroVoice
         )
     }
 

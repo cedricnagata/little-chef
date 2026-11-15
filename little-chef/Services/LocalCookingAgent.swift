@@ -34,7 +34,7 @@ final class LocalCookingAgent {
     private let maxHistoryMessages = 20
 
     /// Names the cooking conversation to `LLMService`'s kept prompt cache. The same for every
-    /// cook, so a prompt read ahead while the recipe was open is still there when the cook starts:
+    /// cook, so the prompt read while the cook was getting ready is the one its questions use:
     /// the cache is reused only where the new prompt begins with exactly the tokens it holds, so
     /// a different recipe or conversation can't pick up the wrong one. See `PromptPrefixCache`.
     static let promptCacheKey = "cooking"
@@ -78,10 +78,12 @@ final class LocalCookingAgent {
 
     /// Reads the instructions, tools and recipe into the on-device model now, while the cook is
     /// starting, so the first question doesn't wait for them. Nothing to do on the Mac.
-    func prewarm(recipe: Recipe?) async {
+    /// Throws only `CancellationError`; `progress` is how much of the prompt has been read.
+    func prewarm(recipe: Recipe?, progress: (@MainActor @Sendable (Double) -> Void)? = nil) async throws {
         guard provider == .local else { return }
-        await llmService.prewarmPrompt(
-            system: buildSystemMessage(recipe: recipe), tools: cookingTools(), promptCacheKey: Self.promptCacheKey)
+        try await llmService.prewarmPrompt(
+            system: buildSystemMessage(recipe: recipe), tools: cookingTools(), promptCacheKey: Self.promptCacheKey,
+            progress: progress)
     }
 
     /// The tools this agent would offer, or none if the pinned provider can't call them.

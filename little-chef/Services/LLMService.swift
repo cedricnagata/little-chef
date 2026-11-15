@@ -67,6 +67,17 @@ class LLMService: ObservableObject {
         return gib >= CookingModelChoice.bonsai2_27B.memoryNeeded ? [.bonsai2_27B, baseline] : [baseline]
     }()
 
+    /// The app's memory limit in GiB, sampled once, from `init`, before any model has taken a
+    /// share of it. 0 in the Simulator.
+    static let measuredMemoryLimitGiB: Double = Double(appMemoryLimit) / 1_073_741_824
+
+    /// Whether this device has room for the Kokoro voice alongside `model`: where it does,
+    /// Kokoro is offered, and the default voice (Cedric, 2026-11-15). On a 4 GiB limit with the 9B
+    /// (iPhone 14 Pro, 15) it doesn't fit, and isn't offered.
+    static func fitsKokoro(alongside model: CookingModelChoice) -> Bool {
+        measuredMemoryLimitGiB >= model.memoryNeeded + KokoroVoice.memoryNeededGiB
+    }
+
     /// What iOS will let this process use before terminating it: what is left plus what is
     /// already in use. 0 where the call is unsupported, such as the simulator.
     private static var appMemoryLimit: UInt64 {
@@ -229,6 +240,7 @@ class LLMService: ObservableObject {
 
     private init() {
         _ = Self.onDeviceModelOptions
+        _ = Self.measuredMemoryLimitGiB
         Self.logMemory("at launch")
         if let stored = UserDefaults.standard.string(forKey: Self.onDeviceModelKey),
            let choice = CookingModelChoice(storedValue: stored) {
@@ -450,9 +462,78 @@ class LLMService: ObservableObject {
         await ModelDownloader.shared.start(modelId: modelId)
     }
 
-    /// Download and load a model into memory (used internally).
-    func preloadModel(modelId: String? = nil) async throws {
-        _ = try await loadModel(modelId: modelId)
+    // MARK: - Getting the model ready for a task
+
+    /// What the getting-ready screen shows while a task waits for its model. Nil when nothing is
+    /// waiting. See ``preparing(_:_:)``.
+    @Published private(set) var preparation: ModelPreparation?
+    /// Cancels the task the getting-ready screen is up for.
+    private var cancelPreparationTask: (() -> Void)?
+
+    /// Runs `body`, a task that needs the model, with the getting-ready screen up for `purpose`
+    /// until it finishes, and its Cancel button cancelling it.
+    ///
+    /// The model is loaded when a task needs it and not before (Cedric, 2026-11-14): no Load
+    /// button in Settings, no loading while a recipe page is open. A task that would otherwise
+    /// have loaded it silently, as the first question of a cook or a parse did, shows this
+    /// instead. One at a time; a second caller waits for none and just runs.
+    func preparing<T>(_ purpose: ModelPreparation.Purpose, _ body: @escaping @MainActor () async throws -> T) async throws -> T {
+        guard preparation == nil else { return try await body() }
+        preparation = ModelPreparation(purpose: purpose, step: "Getting ready…", progress: nil)
+        let task = Task { @MainActor in try await body() }
+        cancelPreparationTask = { task.cancel() }
+        defer {
+            preparation = nil
+            cancelPreparationTask = nil
+        }
+        return try await withTaskCancellationHandler {
+            try await task.value
+        } onCancel: {
+            task.cancel()
+        }
+    }
+
+    /// Loads the on-device model with the getting-ready screen up for `purpose`, unless it is
+    /// loaded already or isn't downloaded. For tasks that would otherwise load it inside their
+    /// first request, out of sight.
+    func ensureLoaded(for purpose: ModelPreparation.Purpose) async throws {
+        guard currentProvider == .local, needsWarmUp(for: .local) else { return }
+        try await preparing(purpose) { [self] in try await loadForUse(provider: .local) }
+    }
+
+    /// The step and progress the getting-ready screen shows. `progress` nil: no fraction known.
+    func updatePreparation(step: String? = nil, progress: Double?) {
+        guard var current = preparation else { return }
+        if let step { current.step = step }
+        current.progress = progress
+        preparation = current
+    }
+
+    /// The getting-ready screen's Cancel.
+    func cancelPreparation() {
+        cancelPreparationTask?()
+    }
+
+    /// Loads what `provider` needs to answer, if it isn't up already, saying so on the
+    /// getting-ready screen. A model that isn't downloaded is left alone: nothing here starts a
+    /// download. Throws why it couldn't load (not enough memory, say), or `CancellationError`.
+    func loadForUse(provider: LLMProvider? = nil) async throws {
+        switch provider ?? currentProvider {
+        case .local:
+            guard let model = activeOnDeviceModel, isModelDownloaded(model.modelId),
+                  !isModelLoaded(model.modelId) else { return }
+            // MLX reports nothing while it reads the weights, so this step has no fraction.
+            updatePreparation(step: "Loading \(model.displayName)…", progress: nil)
+            _ = try await loadModel(modelId: model.modelId)
+            try Task.checkCancellation()
+        case .bigBro:
+            guard bigBroClient.isConnected else { return }
+            updatePreparation(step: "Waking your Mac's model…", progress: nil)
+            // Best-effort, as the cook's warm-up always was: the first request waits out a Mac
+            // still downloading its model.
+            try? await bigBroClient.runModel(Self.bigBroModel)
+            try Task.checkCancellation()
+        }
     }
 
     func unloadModel(modelId: String? = nil) {
@@ -583,6 +664,7 @@ class LLMService: ObservableObject {
             try fm.removeItem(at: item)
         }
         refreshDownloadedModels()
+        Task { await KokoroVoice.shared.reset() }
 
         UserDefaults.standard.removeObject(forKey: Self.onDeviceModelKey)
         UserDefaults.standard.removeObject(forKey: Self.providerKey)
@@ -1051,8 +1133,17 @@ class LLMService: ObservableObject {
     ///
     /// Only for a model already in memory or on disk, like every on-device request: this must
     /// never be what starts a download.
-    func prewarmPrompt(system: ChatMessage, tools: CookingTools?, promptCacheKey: String) async {
+    ///
+    /// Reports how much of the prompt it has read to `progress`, on the main actor, and throws
+    /// only `CancellationError`: any other failure is logged and costs only the cold start.
+    func prewarmPrompt(
+        system: ChatMessage, tools: CookingTools?, promptCacheKey: String,
+        progress: (@MainActor @Sendable (Double) -> Void)? = nil
+    ) async throws {
         guard let model = activeOnDeviceModel else { return }
+        let report: (@Sendable (Double) -> Void)? = progress.map { onMain in
+            { @Sendable fraction in Task { @MainActor in onMain(fraction) } }
+        }
         do {
             let container = try await downloadedModelContainer(modelId: model.modelId)
             let toolSpecs = tools?.nativeToolSpecs
@@ -1077,10 +1168,13 @@ class LLMService: ObservableObject {
                 _ = try prefixCache.prepare(
                     prompt: prompt,
                     boundary: PromptPrefixCache.boundary(prompt: prompt, placeholderPrompt: placeholderPrompt),
-                    key: "\(promptCacheKey)|\(model.modelId)", model: context.model, parameters: parameters)
+                    key: "\(promptCacheKey)|\(model.modelId)", model: context.model, parameters: parameters,
+                    progress: report)
                 return (started.timeIntervalSince(queued), Date().timeIntervalSince(started))
             }
             dprint("🤖 [LLM] Read the cook's prompt ahead in \(String(format: "%.1f", read.read))s (\(prefixCache.lastReusedTokenCount) tokens already read, \(String(format: "%.1f", read.waited))s waiting)")
+        } catch is CancellationError {
+            throw CancellationError()
         } catch {
             dprint("🤖 [LLM] ⚠️ Couldn't read the cook's prompt ahead: \(error.localizedDescription)")
         }
@@ -1120,4 +1214,16 @@ private final class ReuseCount: @unchecked Sendable {
     private var reused = 0
     func set(prompt: Int, reused: Int) { lock.withLock { self.prompt = prompt; self.reused = reused } }
     func get() -> (prompt: Int, reused: Int) { lock.withLock { (prompt, reused) } }
+}
+
+/// What the getting-ready screen shows. See ``LLMService/preparing(_:_:)``.
+struct ModelPreparation: Identifiable, Equatable {
+    /// Which screen it covers: the getting-ready screen is drawn where the task was started.
+    enum Purpose { case cooking, recipeImport }
+
+    let id = UUID()
+    let purpose: Purpose
+    var step: String
+    /// How far through `step`, 0–1, or nil when there is no telling.
+    var progress: Double?
 }

@@ -52,7 +52,8 @@ final class PromptPrefixCache: @unchecked Sendable {
     /// tokens aren't a prefix of — the recipe was edited, history dropped off the front — is read
     /// from the start, as every prompt was before.
     func prepare(
-        prompt: [Int], boundary: Int, key: String, model: any LanguageModel, parameters: GenerateParameters
+        prompt: [Int], boundary: Int, key: String, model: any LanguageModel, parameters: GenerateParameters,
+        progress: (@Sendable (Double) -> Void)? = nil
     ) throws -> (cache: [KVCache], suffix: [Int]) {
         let boundary = min(max(boundary, 0), prompt.count - 1)
 
@@ -68,12 +69,16 @@ final class PromptPrefixCache: @unchecked Sendable {
         lastReusedTokenCount = start
 
         let step = max(parameters.prefill.stepSize ?? 128, 1)
+        let first = start
         while start < boundary {
+            // A cook whose getting-ready screen was cancelled stops reading here.
+            try Task.checkCancellation()
             let end = min(start + step, boundary)
             let chunk = MLXArray(prompt[start..<end].map(Int32.init))[.newAxis]
             _ = model.nextTokenLogits(LMInput.Text(tokens: chunk), cache: working, state: nil)
             eval(working)
             start = end
+            progress?(Double(start - first) / Double(max(boundary - first, 1)))
         }
 
         self.cache = working.map { $0.copy() }

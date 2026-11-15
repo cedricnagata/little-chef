@@ -156,6 +156,12 @@ struct AddRecipeView: View {
                     recipeManager.clearError()
                 }
             }
+            // Parsing waits on this while the on-device model loads.
+            .modelPreparationOverlay(.recipeImport)
+            // Loaded for importing only: closing the sheet hands the memory back.
+            .onDisappear {
+                if LLMService.shared.currentProvider == .local { LLMService.shared.unloadModel() }
+            }
         }
     }
     
