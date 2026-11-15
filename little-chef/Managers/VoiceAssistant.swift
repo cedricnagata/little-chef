@@ -549,7 +549,7 @@ final class VoiceAssistant: NSObject, ObservableObject {
                     llmService.bigBroClient.speak(
                         SpokenText.forSpeech(sentence),
                         voice: voiceSettings.bigBroVoice,
-                        speed: macSpeed()
+                        speed: 1
                     )
                 )
                 return
@@ -564,16 +564,11 @@ final class VoiceAssistant: NSObject, ObservableObject {
         await speaker.speak(
             sentence,
             voice: .resolving(voiceSettings.voiceIdentifier),
-            rate: voiceSettings.speechRate,
+            rate: AVSpeechUtteranceDefaultSpeechRate,
             kokoroVoice: voiceSettings.bigBroVoice
         )
     }
 
-    /// little-chef stores an absolute `AVSpeechUtterance.rate`; the Mac takes a multiplier
-    /// where 1.0 is normal speed.
-    private func macSpeed() -> Double {
-        Double(voiceSettings.speechRate / AVSpeechUtteranceDefaultSpeechRate)
-    }
 
     /// Silences whatever is speaking, typed or hands-free.
     func stopSpeaking() {
