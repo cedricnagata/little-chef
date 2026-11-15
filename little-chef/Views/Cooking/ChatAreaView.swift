@@ -45,6 +45,11 @@ struct ChatAreaView: View {
             // Dragging the transcript is the other natural "I'm done typing" gesture, and
             // interactive dismissal follows the finger instead of snapping.
             .scrollDismissesKeyboard(.interactively)
+            // Opened on the newest message. Switching from the recipe to the chat used to show
+            // the top of the conversation, with the answer just given somewhere below.
+            .onAppear {
+                if let lastMessage = messages.last { proxy.scrollTo(lastMessage.id, anchor: .bottom) }
+            }
             // Follows the reply as it grows, not only when a message is added: a long answer
             // streams in below the fold otherwise.
             .onChange(of: messages.last.map { "\($0.id):\($0.content.count)" }) {

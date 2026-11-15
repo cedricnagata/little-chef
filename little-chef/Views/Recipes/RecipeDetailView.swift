@@ -325,7 +325,9 @@ struct RecipeDetailView: View {
         guard let updated = draft?.toRecipeData() else { return }
         dismissKeyboard()
         Task {
-            await updateRecipe(updated)
+            // A save that failed leaves the editor open with the edits in it; the list's error
+            // alert says why.
+            guard await recipeManager.updateRecipe(id: recipe.id, with: updated) else { return }
             draft = nil
             withAnimation { isEditing = false }
         }
@@ -346,13 +348,6 @@ struct RecipeDetailView: View {
                 dismiss()
                 selectedTab.wrappedValue = 1
             }
-        }
-    }
-
-    private func updateRecipe(_ updatedRecipe: RecipeData) async {
-        let success = await recipeManager.updateRecipe(id: recipe.id, with: updatedRecipe)
-        if !success {
-            dprint("Failed to update recipe: \(recipeManager.errorMessage ?? "Unknown error")")
         }
     }
 }

@@ -181,7 +181,7 @@ final class KitchenManager: ObservableObject {
             isLoadingRankingModel = false
         }
         let ranked = await RecipeSuggester.rank(recipes, availability: availability(of: recipes), ask: rankingModel)
-        if loadsModel, llmService.preparation == nil { llmService.unloadModel() }
+        if loadsModel { llmService.releaseModelAfterTask() }
         suggestions = ranked
         suggestionsKey = key
     }

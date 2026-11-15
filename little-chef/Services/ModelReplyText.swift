@@ -168,6 +168,20 @@ enum TimerActionInference {
         pattern: "(?<![A-Za-z])['\"\u{2018}\u{201C}]([^'\"\u{2018}\u{2019}\u{201C}\u{201D}]+)['\"\u{2019}\u{201D}](?![A-Za-z])"
     )
 
+    /// A timer action reported as done or under way, in either order: "stopped the 'pasta'
+    /// timer", "starting your rice timer", "timer cancelled", "the timer has been deleted".
+    ///
+    /// Only those forms. Any reply with "timer" and "stop", "start" or "remove" in it used to
+    /// count, and with one timer set every name resolves to it: "when the timer goes off,
+    /// remove the pan from the heat" deleted it, and "stop stirring once the timer rings"
+    /// paused it. A negated one ("I haven't started the timer") is not an action either.
+    private static let verb = "(stopp|paus|delet|remov|cancell?|start|resum|restart)"
+    private static let quote = "['\"\u{2018}\u{2019}\u{201C}\u{201D}]"
+    private static let reported: [NSRegularExpression] = [
+        "(?<!n't )(?<!n\u{2019}t )(?<!not )(?<!never )\\b\(verb)(?:ed|ing)\\b(?:\\s+[a-z]+){0,2}?(?:\\s+\(quote)[^'\"]{1,40}\(quote))?(?:\\s+[a-z]+){0,2}?\\s+timers?\\b",
+        "\\btimers?\\b(?:\\s+\(quote)[^'\"]{1,40}\(quote))?(?:\\s+(?:is|was|has been|is now))?(?:\\s+now)?\\s+\(verb)ed\\b",
+    ].compactMap { try? NSRegularExpression(pattern: $0) }
+
     static func action(for reply: String) -> Action? {
         let lower = reply.lowercased()
         guard lower.contains("timer") else { return nil }
@@ -177,20 +191,21 @@ enum TimerActionInference {
         // Inferring from that is how a freshly created timer began counting down on its own.
         if lower.contains("creat") || lower.contains("set for") { return nil }
 
+        let whole = NSRange(lower.startIndex..., in: lower)
+        guard let stem = reported.lazy
+            .compactMap({ $0.firstMatch(in: lower, range: whole) })
+            .compactMap({ Range($0.range(at: 1), in: lower).map { String(lower[$0]) } })
+            .first else { return nil }
+
         let name = quotedName?
             .firstMatch(in: reply, range: NSRange(reply.startIndex..., in: reply))
             .flatMap { Range($0.range(at: 1), in: reply) }
             .map { String(reply[$0]) } ?? "timer"
 
-        if lower.contains("stop") || lower.contains("paus") {
-            return Action(tool: "stop_timer", timerName: name)
+        switch stem {
+        case "stopp", "paus": return Action(tool: "stop_timer", timerName: name)
+        case "delet", "remov", "cancel", "cancell": return Action(tool: "delete_timer", timerName: name)
+        default: return Action(tool: "start_timer", timerName: name)
         }
-        if lower.contains("delet") || lower.contains("remov") || lower.contains("cancel") {
-            return Action(tool: "delete_timer", timerName: name)
-        }
-        if lower.contains("start") || lower.contains("resum") {
-            return Action(tool: "start_timer", timerName: name)
-        }
-        return nil
     }
 }

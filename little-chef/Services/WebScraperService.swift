@@ -49,23 +49,30 @@ final class WebScraperService: NSObject {
         // leave it waiting forever.
         guard continuation == nil else { throw WebScraperError.busy }
 
-        let result = try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<ScrapedRecipePage, Error>) in
-            self.continuation = continuation
+        // Cancelled with its task (the import sheet closing), so the page stops loading and the
+        // next import isn't refused as busy for the rest of the timeout.
+        let result = try await withTaskCancellationHandler {
+            try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<ScrapedRecipePage, Error>) in
+                self.continuation = continuation
 
-            let config = WKWebViewConfiguration()
-            let wv = WKWebView(frame: .zero, configuration: config)
-            wv.navigationDelegate = self
-            self.webView = wv
+                let config = WKWebViewConfiguration()
+                let wv = WKWebView(frame: .zero, configuration: config)
+                wv.navigationDelegate = self
+                self.webView = wv
 
-            self.timeoutTask = Task {
-                try? await Task.sleep(nanoseconds: 15_000_000_000)
-                if self.continuation != nil {
-                    dprint("🌐 [SCRAPER] ❌ Timeout after 15s")
-                    self.finish(with: .failure(WebScraperError.fetchFailed))
+                self.timeoutTask = Task {
+                    try? await Task.sleep(nanoseconds: 15_000_000_000)
+                    // Cancelled means this scrape finished; any continuation now is a later one's.
+                    if !Task.isCancelled, self.continuation != nil {
+                        dprint("🌐 [SCRAPER] ❌ Timeout after 15s")
+                        self.finish(with: .failure(WebScraperError.fetchFailed))
+                    }
                 }
-            }
 
-            wv.load(URLRequest(url: urlObj))
+                wv.load(URLRequest(url: urlObj))
+            }
+        } onCancel: {
+            Task { @MainActor in self.finish(with: .failure(CancellationError())) }
         }
 
         dprint("🌐 [SCRAPER] ✅ Got content (\(result.text.count) chars)")

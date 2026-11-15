@@ -87,7 +87,7 @@ class LocalTimer: ObservableObject, Identifiable {
         timer = nil
 
         if let end = endDate {
-            remainingSeconds = max(0, Int(end.timeIntervalSinceNow))
+            remainingSeconds = max(0, Int(end.timeIntervalSinceNow.rounded(.up)))
         }
         endDate = nil
 
@@ -156,13 +156,20 @@ class LocalTimer: ObservableObject, Identifiable {
         guard let end = endDate else { return }
         let remaining = end.timeIntervalSinceNow
         if remaining <= 0 {
-            complete()
+            // The app was suspended past the end: the notification already announced it, and a
+            // chime minutes late, on coming back to the app, announces nothing.
+            complete(chime: remaining > -Self.lateChimeLimit)
         } else {
-            remainingSeconds = Int(remaining)
+            // Rounded up, as a kitchen timer reads: a fresh 5:00 shows 5:00 and not 4:59, and
+            // 0:00 is shown only once it is over.
+            remainingSeconds = Int(remaining.rounded(.up))
         }
     }
 
-    private func complete() {
+    /// How late a finished timer may still chime. See `tick()`.
+    private static let lateChimeLimit: TimeInterval = 5
+
+    private func complete(chime: Bool = true) {
         timer?.invalidate()
         timer = nil
         status = .ended
@@ -177,7 +184,7 @@ class LocalTimer: ObservableObject, Identifiable {
         //
         // The audible alert is ours to play while the app is open, because a notification sound
         // over the hands-free audio session usually never reaches the speaker.
-        Task { @MainActor in TimerAlertPlayer.shared.fire() }
+        if chime { Task { @MainActor in TimerAlertPlayer.shared.fire() } }
 
         // Left on screen for a moment — a finished timer that vanishes instantly is one you
         // can miss entirely if you were looking at the pan.

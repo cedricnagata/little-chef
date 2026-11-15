@@ -6,6 +6,7 @@
 //
 
 import Foundation
+import ImageIO
 import Vision
 import UIKit
 
@@ -23,13 +24,30 @@ class OCRService {
             throw OCRError.invalidImage
         }
 
-        let text = try await performOCR(on: cgImage)
+        // The pixels of a photo taken upright are stored sideways, with the rotation kept beside
+        // them. Read without it, a portrait photo of a recipe was recognized as a page lying on
+        // its side, which finds little or nothing.
+        let text = try await performOCR(on: cgImage, orientation: Self.orientation(of: image))
 
         guard !text.isEmpty else {
             throw OCRError.noTextFound
         }
 
         return text
+    }
+
+    private static func orientation(of image: UIImage) -> CGImagePropertyOrientation {
+        switch image.imageOrientation {
+        case .up: return .up
+        case .down: return .down
+        case .left: return .left
+        case .right: return .right
+        case .upMirrored: return .upMirrored
+        case .downMirrored: return .downMirrored
+        case .leftMirrored: return .leftMirrored
+        case .rightMirrored: return .rightMirrored
+        @unknown default: return .up
+        }
     }
 
     /// Extract text from multiple images and combine
@@ -59,44 +77,23 @@ class OCRService {
 
     // MARK: - Private Methods
 
-    private func performOCR(on cgImage: CGImage) async throws -> String {
-        return try await withCheckedThrowingContinuation { continuation in
-            let request = VNRecognizeTextRequest { request, error in
-                if let error = error {
-                    continuation.resume(throwing: error)
-                    return
-                }
-
-                guard let observations = request.results as? [VNRecognizedTextObservation] else {
-                    continuation.resume(returning: "")
-                    return
-                }
-
-                // Extract text from observations
-                let recognizedText = observations.compactMap { observation in
-                    observation.topCandidates(1).first?.string
-                }.joined(separator: "\n")
-
-                continuation.resume(returning: recognizedText)
-            }
-
-            // Configure OCR request
+    /// Off the main thread: recognition takes seconds, and this is called from main-actor code.
+    /// The results are read after `perform` returns rather than in a completion handler, so a
+    /// failure reported both ways can't resume a continuation twice.
+    private func performOCR(on cgImage: CGImage, orientation: CGImagePropertyOrientation) async throws -> String {
+        try await Task.detached(priority: .userInitiated) { () throws -> String in
+            let request = VNRecognizeTextRequest()
             request.recognitionLevel = .accurate
             request.recognitionLanguages = ["en-US"]
             request.usesLanguageCorrection = true
-
-            // Minimum text height for better accuracy (0.0 to 1.0)
             request.minimumTextHeight = 0.02
 
-            // Perform the request
-            let handler = VNImageRequestHandler(cgImage: cgImage, options: [:])
-
-            do {
-                try handler.perform([request])
-            } catch {
-                continuation.resume(throwing: error)
-            }
-        }
+            let handler = VNImageRequestHandler(cgImage: cgImage, orientation: orientation, options: [:])
+            try handler.perform([request])
+            return (request.results ?? [])
+                .compactMap { $0.topCandidates(1).first?.string }
+                .joined(separator: "\n")
+        }.value
     }
 }
 

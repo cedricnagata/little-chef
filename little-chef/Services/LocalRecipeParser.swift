@@ -57,8 +57,9 @@ class LocalRecipeParser: ObservableObject {
             if confidence < 1.0 && capability.llmRecipeParsingEnabled && llmService.isReadyForOpportunisticCleanup {
                 dprint("📖 [PARSER] Schema.org incomplete (confidence \(confidence)), running LLM cleanup")
                 statusMessage = "Filling in missing details..."
+                // Only into the gaps: what the page said stands, whatever the model made of it.
                 if let cleaned = try? await cleanupWithLLM(schema: recipeData, sourceUrl: url) {
-                    recipeData = cleaned
+                    recipeData = RecipeExtraction.filling(recipeData, from: cleaned)
                 }
             }
         } else {
@@ -140,6 +141,7 @@ class LocalRecipeParser: ObservableObject {
         \(text.prefix(RecipeExtraction.maxSourceCharacters))
         """
 
+        try Task.checkCancellation()
         try await llmService.ensureLoaded(for: .recipeImport)
         let response = try await llmService.generateChatCompletion(
             messages: [
@@ -202,6 +204,7 @@ class LocalRecipeParser: ObservableObject {
         - Keep ingredient quantities verbatim from the source
         """
 
+        try Task.checkCancellation()
         try await llmService.ensureLoaded(for: .recipeImport)
         let response = try await llmService.generateChatCompletion(
             messages: [

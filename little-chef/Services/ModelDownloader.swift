@@ -55,6 +55,8 @@ final class ModelDownloader: ObservableObject {
     /// Bytes already in finished blobs, and bytes received so far by each running task.
     private var finishedBytes: Int64 = 0
     private var runningBytes: [Int: Int64] = [:]
+    /// Tasks of this download that have completed. See `received(_:task:)`.
+    private var completedTasks: Set<Int> = []
     private var retries: [String: Int] = [:]
 
     private init() {
@@ -149,7 +151,9 @@ final class ModelDownloader: ObservableObject {
     // MARK: - Session events
 
     fileprivate func received(_ bytes: Int64, task: Int) {
-        guard plan != nil else { return }
+        // A progress report can arrive after its task's completion. Counted then, the file is
+        // in the total twice: once as finished, once as still running.
+        guard plan != nil, !completedTasks.contains(task) else { return }
         runningBytes[task] = bytes
         updateProgress()
     }
@@ -157,6 +161,7 @@ final class ModelDownloader: ObservableObject {
     fileprivate func completed(task: Int, path: String, modelId: String, error: Error?) {
         guard let plan, plan.modelId == modelId, let layout else { return }
         runningBytes[task] = nil
+        completedTasks.insert(task)
         if let error {
             let nsError = error as NSError
             if nsError.code == NSURLErrorCancelled, nsError.domain == NSURLErrorDomain,
@@ -218,6 +223,7 @@ final class ModelDownloader: ObservableObject {
         progress = 0
         finishedBytes = 0
         runningBytes = [:]
+        completedTasks = []
     }
 
     private func updateProgress() {

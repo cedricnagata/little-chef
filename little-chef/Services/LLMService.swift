@@ -359,7 +359,8 @@ class LLMService: ObservableObject {
         do {
             try await waitForMemory(toLoad: id)
         } catch {
-            loadError = error.localizedDescription
+            // A cancelled wait isn't a failure to show in Settings.
+            if !(error is CancellationError) { loadError = error.localizedDescription }
             isLoadingModel = false
             currentlyLoadingModelId = nil
             throw error
@@ -525,7 +526,13 @@ class LLMService: ObservableObject {
             // MLX reports nothing while it reads the weights, so this step has no fraction.
             updatePreparation(step: "Loading \(model.displayName)…", progress: nil)
             _ = try await loadModel(modelId: model.modelId)
-            try Task.checkCancellation()
+            // A load can't be stopped part-way. One whose task was cancelled meanwhile (the
+            // import sheet closed, the filter changed) is put away again, or it stays in memory
+            // with nothing left to unload it.
+            if Task.isCancelled {
+                if !cookInProgress { unloadModel(modelId: model.modelId) }
+                throw CancellationError()
+            }
         case .bigBro:
             guard bigBroClient.isConnected else { return }
             updatePreparation(step: "Waking your Mac's model…", progress: nil)
@@ -534,6 +541,18 @@ class LLMService: ObservableObject {
             try? await bigBroClient.runModel(Self.bigBroModel)
             try Task.checkCancellation()
         }
+    }
+
+    /// True while a cook is open. Set by `CookingSessionManager`.
+    var cookInProgress = false
+
+    /// Puts the on-device model away after a task that loaded it for itself (an import, the
+    /// Suggested ranking), unless something else is using it: a cook that is open, or a task
+    /// behind the getting-ready screen. Without the check, a ranking that finished after a cook
+    /// had opened unloaded the model under the cook.
+    func releaseModelAfterTask() {
+        guard currentProvider == .local, !cookInProgress, preparation == nil else { return }
+        unloadModel()
     }
 
     func unloadModel(modelId: String? = nil) {
@@ -909,6 +928,10 @@ class LLMService: ObservableObject {
                 break
             }
         }
+        // A cancelled reply (the cook ended, the import was closed) stops here: the stream ends
+        // early on cancellation, and half an answer must not go on to run its tool calls.
+        try Task.checkCancellation()
+
         if let onChunk {
             let rest = filter.finish()
             if !rest.isEmpty {
@@ -952,11 +975,15 @@ class LLMService: ObservableObject {
         }
 
         // Models that write tool calls as text instead of making them.
+        var ranTextCall = false
         let reply = ModelReplyText.replacingToolCalls(in: text) { name, arguments in
-            tools.execute(toolName: name, arguments: arguments).forUser
+            ranTextCall = true
+            return tools.execute(toolName: name, arguments: arguments).forUser
         }
-        // And models that describe a timer action without calling anything.
-        if let action = TimerActionInference.action(for: reply) {
+        // And models that describe a timer action without calling anything. Not after a call
+        // written as text: its result is in the reply now ("Timer 'pasta' deleted."), and
+        // inferring from that ran the action a second time, on the one timer left.
+        if !ranTextCall, let action = TimerActionInference.action(for: reply) {
             _ = tools.execute(toolName: action.tool, arguments: ["name": action.timerName])
         }
         return reply
