@@ -649,12 +649,14 @@ request.
   (FluidAudio #889, #844). Cedric chose to try it. A marker file is written before every
   synthesis and removed after; one still there at launch switches Kokoro off and says so in
   Settings. Re-check FluidAudio's advisories before making it less experimental.
-- **Chosen in Settings → Voice** with a Default | Kokoro segmented control, like On-Device |
-  BigBro. **Kokoro is the default where it fits**: it is chosen until the user picks otherwise when the measured limit covers the
-  device's model plus 0.35 GiB (`LLMService.fitsKokoro(alongside:)`), and off elsewhere,
-  including a 4 GiB phone with the 9B. Where it's on, it downloads with the model, and the model's
-  download prompt says so (about 300 MB, through FluidAudio's own downloader, so not in the
-  background). Elsewhere Settings offers it with its own prompt.
+- **Offered only where it fits, and the default there.** Settings → Voice shows a Siri | Kokoro
+  segmented control, like On-Device | BigBro, only when the measured limit covers the device's
+  model plus 0.35 GiB (`KokoroVoice.isOffered`, from `LLMService.fitsKokoro(alongside:)`); elsewhere
+  there is no Kokoro at all, including a 4 GiB phone with the 9B (iPhone 14 Pro). Debug always
+  offers it, so the Simulator can test it. "Siri" is Cedric's name for Apple's voices, not Siri's
+  own voice, which apps can't use. Where offered Kokoro is chosen until the user picks Siri, and
+  it downloads with the model, whose download prompt says so (about 300 MB, through FluidAudio's
+  own downloader, so not in the background); picking it before then asks first.
 - **Loaded only for a cook**, last in the getting-ready screen, and only with 350 MB free;
   unloaded when the cook ends, on a memory warning with under 512 MB left, and when Settings
   closes after playing a sample. Not loaded means Apple's voice. Both are estimates until

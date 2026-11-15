@@ -131,10 +131,12 @@ struct ProfileSettingsView: View {
                             bigBroVoice: $bigBroVoice
                         )
                     } else {
-                        KokoroRows(voice: $bigBroVoice, onSample: playSample)
+                        if kokoro.isOffered {
+                            KokoroRows(voice: $bigBroVoice, onSample: playSample)
+                        }
 
                         // The sample plays from the user's choice only, not from loading the form.
-                        if !(kokoro.isEnabled && kokoro.isDownloaded) {
+                        if !(kokoro.isOffered && kokoro.isEnabled && kokoro.isDownloaded) {
                         Picker("Voice", selection: Binding(
                             get: { voiceIdentifier },
                             set: { voiceIdentifier = $0; playSample() }
@@ -175,8 +177,8 @@ struct ProfileSettingsView: View {
             } header: {
                 Text("Voice")
             } footer: {
-                if autoSpeakResponses, llmProvider != .bigBro, kokoro.isEnabled {
-                    Text("Kokoro is the voice your Mac speaks with, run on this iPhone's Neural Engine. Experimental: iOS 26.4 and later have an Apple bug that can crash it, so if LittleChef closes while it's speaking it switches itself off and the Apple voice takes over.")
+                if autoSpeakResponses, llmProvider != .bigBro, kokoro.isOffered, kokoro.isEnabled {
+                    Text("Kokoro is the voice your Mac speaks with, run on this iPhone's Neural Engine. Experimental: iOS 26.4 and later have an Apple bug that can crash it, so if LittleChef closes while it's speaking it switches itself off and Siri takes over.")
                 } else if autoSpeakResponses, llmProvider != .bigBro {
                     Text("iOS doesn't let apps use Siri's voice. For the most natural one, download an Enhanced or Premium voice in the Settings app under Accessibility → Spoken Content → Voices; it appears here when it's done.")
                 }
@@ -341,7 +343,7 @@ struct ProfileSettingsView: View {
 
     /// Kokoro is switched on (the default where it fits) but not yet on the device.
     @MainActor private static var kokoroComesAlong: Bool {
-        KokoroVoice.shared.isEnabled && !KokoroVoice.shared.isDownloaded
+        KokoroVoice.isOffered && KokoroVoice.shared.isEnabled && !KokoroVoice.shared.isDownloaded
     }
 
     // MARK: - Provider Picker Section
@@ -667,9 +669,9 @@ private struct KokoroRows: View {
     @State private var confirmingDownload = false
 
     var body: some View {
-        // Default (Apple's voices) or Kokoro, chosen like On-Device or BigBro above (Cedric,
-        // 2026-11-15). Picking Kokoro before it's downloaded asks first and stays on Default
-        // until the download starts.
+        // Siri (what Cedric calls Apple's voices; not Siri's own, which apps can't use) or Kokoro,
+        // chosen like On-Device or BigBro above (2026-11-15). Picking Kokoro before it's downloaded
+        // asks first and stays on Siri until the download starts.
         Picker("Voice", selection: Binding(
             get: { kokoro.isEnabled ? VoiceEngine.kokoro : .standard },
             set: { engine in
@@ -681,7 +683,7 @@ private struct KokoroRows: View {
                 }
             }
         )) {
-            Text("Default").tag(VoiceEngine.standard)
+            Text("Siri").tag(VoiceEngine.standard)
             Text("Kokoro").tag(VoiceEngine.kokoro)
         }
         .pickerStyle(.segmented)

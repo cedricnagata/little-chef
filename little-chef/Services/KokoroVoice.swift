@@ -112,7 +112,20 @@ final class KokoroVoice: ObservableObject {
     }
 
     /// Whether replies should be spoken with Kokoro: switched on, and loaded.
-    var isReady: Bool { isEnabled && isLoaded }
+    var isReady: Bool { isOffered && isEnabled && isLoaded }
+
+    /// Whether this device is offered Kokoro at all: only where the memory limit has room for it
+    /// beside the model the device runs (Cedric, 2026-11-15: not shown where it doesn't fit).
+    /// Always in Debug, which reports the 9B everywhere too, so the Simulator can exercise it.
+    static let isOffered: Bool = {
+        #if DEBUG
+        return true
+        #else
+        return LLMService.supportedOnDeviceModel.map(LLMService.fitsKokoro(alongside:)) ?? false
+        #endif
+    }()
+
+    var isOffered: Bool { Self.isOffered }
 
     // MARK: - Download
 
@@ -154,9 +167,8 @@ final class KokoroVoice: ObservableObject {
         error = nil
     }
 
-    private static var enabledByDefault: Bool {
-        LLMService.supportedOnDeviceModel.map(LLMService.fitsKokoro(alongside:)) ?? false
-    }
+    /// Kokoro is the default wherever it is offered.
+    private static var enabledByDefault: Bool { isOffered }
 
     // MARK: - Loading
 
@@ -164,7 +176,7 @@ final class KokoroVoice: ObservableObject {
     /// isn't on the device just means Apple's voice. A failure is reported in Settings and the
     /// cook carries on with Apple's voice.
     func loadIfWanted() async {
-        guard isEnabled, isDownloaded, !isLoaded else { return }
+        guard isOffered, isEnabled, isDownloaded, !isLoaded else { return }
         let available = UInt64(os_proc_available_memory())
         if available > 0, available < Self.memoryNeeded {
             Self.log.notice("kokoro: not loaded, \(available >> 20, privacy: .public) MB available")

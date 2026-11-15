@@ -72,8 +72,8 @@ class LLMService: ObservableObject {
     static let measuredMemoryLimitGiB: Double = Double(appMemoryLimit) / 1_073_741_824
 
     /// Whether this device has room for the Kokoro voice alongside `model`: where it does,
-    /// Kokoro is the default voice (Cedric, 2026-11-15). On a 4 GiB limit with the 9B (iPhone 14
-    /// Pro, 15) it doesn't, and Kokoro is the user's choice.
+    /// Kokoro is offered, and the default voice (Cedric, 2026-11-15). On a 4 GiB limit with the 9B
+    /// (iPhone 14 Pro, 15) it doesn't fit, and isn't offered.
     static func fitsKokoro(alongside model: CookingModelChoice) -> Bool {
         measuredMemoryLimitGiB >= model.memoryNeeded + KokoroVoice.memoryNeededGiB
     }
