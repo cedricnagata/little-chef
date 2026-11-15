@@ -267,3 +267,21 @@ func pluralsMatchTheirSingulars(item: String, line: String) {
     #expect(merged.difficulty == "easy")
     #expect(merged.sourceUrl == "https://example.com")
 }
+
+// MARK: - Found in the Simulator pass
+
+@MainActor
+struct SweepSimulatorTests {
+    @Test(arguments: ["Set a 5 minute rice timer", "5 minute rice timer", "set a rice timer for 5 minutes"])
+    func aTimerNamedBetweenTheDurationAndTimer(said: String) {
+        let timers = SweepTimers()
+        let reply = CookingCommand.answer(to: said, recipe: nil, lastReply: nil, tools: CookingTools(timerManager: timers))
+        #expect(reply != nil)
+        #expect(timers.timers.first?.label == "rice")
+        #expect(timers.timers.first?.durationSeconds == 300)
+    }
+}
+
+@Test func noSpaceIsLeftBeforeAComma() {
+    #expect(HTMLText.clean("Tortilla chips <a href=\"x\"></a>, to serve") == "Tortilla chips, to serve")
+}

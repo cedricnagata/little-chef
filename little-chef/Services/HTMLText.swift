@@ -156,6 +156,8 @@ extension String {
         replacingOccurrences(of: "\u{00A0}", with: " ")
             .replacingOccurrences(of: "[ \\t]+", with: " ", options: .regularExpression)
             .replacingOccurrences(of: " ?\\n[ \\n]*", with: "\n", options: .regularExpression)
+            // "Tortilla chips , to serve": what a tag between the words leaves behind.
+            .replacingOccurrences(of: " +([,;])", with: "$1", options: .regularExpression)
             .trimmingCharacters(in: .whitespacesAndNewlines)
     }
 }

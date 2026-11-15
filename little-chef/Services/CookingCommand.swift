@@ -95,7 +95,10 @@ enum CookingCommand {
         let verb = #"(?:set|make|create|add|put on|give me|i need)(?: up)?(?: a| an| me a| me an)?"#
         let named = #"(?: (?:for|called|named)(?: the| my)? ([a-z][a-z ]*?))?"#
         // (duration, name) capture order differs by pattern, so each is tried with its own order.
+        let unit = "(?:hours?|hrs?|minutes?|mins?|seconds?|secs?)"
         let forms: [(pattern: String, duration: Int, name: Int)] = [
+            // "Set a 5 minute rice timer": the name between the duration and "timer".
+            ("^(?:\(verb) )?(.+? \(unit)) ([a-z][a-z ]*?) timer$", 1, 2),
             ("^\(verb) (.+?) timer\(named)$", 1, 2),
             ("^\(verb) ([a-z][a-z ]*?) timer for (.+)$", 2, 1),
             ("^\(verb) timer(?: (?:called|named) ([a-z][a-z ]*?))? for (.+)$", 2, 1),
