@@ -230,6 +230,8 @@ final class VoiceAssistant: NSObject, ObservableObject {
         bigBroPlayer.shutdown()
         speaker.stop()
         cancelSpeechQueue()
+        // Whoever takes the route next owns the session; it is no longer this type's to release.
+        holdsPlaybackSession = false
 
         usesWakeWord = wantsWakeWord
         isHandsFree = true
@@ -438,6 +440,8 @@ final class VoiceAssistant: NSObject, ObservableObject {
         bigBroPlayer.shutdown()
         speaker.stop()
         cancelSpeechQueue()
+        // Whoever takes the route next owns the session; it is no longer this type's to release.
+        holdsPlaybackSession = false
 
         do {
             let session = AVAudioSession.sharedInstance()
@@ -536,6 +540,7 @@ final class VoiceAssistant: NSObject, ObservableObject {
             guard let self, self.speechQueueID == queueID else { return }
             self.isSpeaking = false
             self.speakerTask = nil
+            self.releasePlaybackSession()
             // The engine stays up between utterances on purpose — restarting it per sentence
             // costs latency the user hears as a gap. It is released on handover instead, in
             // `startRecording` and `startHandsFree`.
@@ -561,12 +566,44 @@ final class VoiceAssistant: NSObject, ObservableObject {
                 bigBroPlayer.shutdown()
             }
         }
+        prepareToSpeakOnDevice()
         await speaker.speak(
             sentence,
             voice: .resolving(voiceSettings.voiceIdentifier),
             rate: AVSpeechUtteranceDefaultSpeechRate,
             kokoroVoice: voiceSettings.bigBroVoice
         )
+    }
+
+    /// Whether this type put the audio session into playback for a typed reply, and so should
+    /// hand it back when the reply has been spoken.
+    private var holdsPlaybackSession = false
+
+    /// Makes a typed reply audible with the ring switch on silent.
+    ///
+    /// Nothing set the session on this path, so the on-device voices played in the app's default
+    /// category, which the silent switch mutes: with Speech on and the phone on silent, as a
+    /// phone on a kitchen counter usually is, a typed question was answered in silence. Only
+    /// hands-free (its own session) and Settings' sample were heard. Left alone while a
+    /// recording or a loop holds the session; the Mac's player sets its own.
+    private func prepareToSpeakOnDevice() {
+        guard !holdsPlaybackSession, !isHandsFree, !isRecording else { return }
+        let session = AVAudioSession.sharedInstance()
+        do {
+            try session.setCategory(.playback, mode: .spokenAudio, options: [.duckOthers])
+            try session.setActive(true)
+            holdsPlaybackSession = true
+        } catch {
+            dprint("🔊 Couldn't set the audio session for speech: \(error.localizedDescription)")
+        }
+    }
+
+    /// Hands the session back once nothing is speaking, so music that was ducked comes back up.
+    private func releasePlaybackSession() {
+        guard holdsPlaybackSession else { return }
+        holdsPlaybackSession = false
+        guard !isHandsFree, !isRecording else { return }
+        try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
     }
 
 
@@ -577,6 +614,7 @@ final class VoiceAssistant: NSObject, ObservableObject {
         speaker.stop()
         stopHandsFreeSpeaking()
         isSpeaking = false
+        releasePlaybackSession()
     }
 
     private func cancelSpeechQueue() {

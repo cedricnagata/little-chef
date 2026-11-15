@@ -63,6 +63,9 @@ class CookingSessionManager: ObservableObject, TimerManager {
     /// `warmUpTask`, which is nil both before a warm-up and when there was nothing to warm.
     private var hasWarmedUp = false
 
+    /// The answer being generated, held so ending the cook can stop it.
+    private var replyTask: Task<String, Error>?
+
     /// Where the cook in progress is kept between launches. See `SavedCook`.
     private let cookStore: SavedCookStore
     private var saveTask: Task<Void, Never>?
@@ -108,6 +111,7 @@ class CookingSessionManager: ObservableObject, TimerManager {
             Task { await activity.end(nil, dismissalPolicy: .immediate) }
         }
         sessionProvider = cook.provider
+        llmService.cookInProgress = true
         kitchenNote = cook.kitchen
         localTimers = cook.timers.map { LocalTimer.restoring($0.resumed()) }
         hasWarmedUp = false
@@ -157,6 +161,8 @@ class CookingSessionManager: ObservableObject, TimerManager {
 
     @Published var startFailure: StartFailure?
 
+    private var isStarting = false
+
     /// Gets the model ready, with the getting-ready screen up, then opens the cook.
     ///
     /// The cook screen opens only once the model is loaded and has read the cook's prompt, so
@@ -167,7 +173,10 @@ class CookingSessionManager: ObservableObject, TimerManager {
     /// ``startFailure``, which offers the cook without the assistant. `onStart` runs just before
     /// the cook opens, for the screen that started it to tidy itself away.
     private func start(_ session: CookingSession, onStart: (() -> Void)?) async {
-        guard currentSession == nil else { return }
+        // One at a time: a second tap while the first is getting ready would open a second cook.
+        guard currentSession == nil, !isStarting else { return }
+        isStarting = true
+        defer { isStarting = false }
         let provider = llmService.currentProvider
         guard llmService.capability(of: provider).llmChatEnabled else {
             // Nothing to get ready: the cook runs with timers only.
@@ -214,6 +223,7 @@ class CookingSessionManager: ObservableObject, TimerManager {
 
     /// Opens `session`. `warm`: the model is ready, so the cook screen's warm-up is skipped.
     private func begin(_ session: CookingSession, warm: Bool) {
+        llmService.cookInProgress = true
         currentSession = session
         kitchenNote = kitchenNote(for: createRecipeFromSession(session))
         // Read once, here. Everything downstream — the agent, the voice loop, the capability
@@ -330,10 +340,16 @@ class CookingSessionManager: ObservableObject, TimerManager {
         promptPrewarmTask = nil
         hasWarmedUp = false
         isPreparingModel = false
+        // An answer still being written belongs to this cook. Left running, it kept the model
+        // generating after the cook had gone, and its tool calls landed on whatever came next:
+        // a timer it created showed up in the following cook.
+        replyTask?.cancel()
+        replyTask = nil
         currentSession = nil
         error = nil
         cookingAgent = nil
         clearAllTimers()
+        llmService.cookInProgress = false
         // Only loaded while it's needed: a cook that's over hands its memory back.
         if sessionProvider == .local { llmService.unloadModel() }
         Task { await KokoroVoice.shared.unload() }
@@ -401,27 +417,48 @@ class CookingSessionManager: ObservableObject, TimerManager {
             Message(id: replyID, role: "assistant", content: "", timestamp: Date())
         )
 
-        var sentences = SentenceSplitter()
-        do {
-            let response = try await agent.reply(to: query, recipe: recipe, history: history) { [weak self] chunk in
+        let sentences = SentenceBox()
+
+        // In a task of its own so that ending the cook can cancel it (`endCookingSession`).
+        let task = Task { [weak self] in
+            try await agent.reply(to: query, recipe: recipe, history: history) { chunk in
                 guard let self else { return }
                 self.appendToMessage(replyID, chunk)
                 if let onSentence {
-                    sentences.append(chunk).forEach(onSentence)
+                    sentences.splitter.append(chunk).forEach(onSentence)
                 }
             }
-            if let rest = sentences.flush() { onSentence?(rest) }
+        }
+        replyTask = task
+
+        do {
+            let response = try await withTaskCancellationHandler {
+                try await task.value
+            } onCancel: {
+                task.cancel()
+            }
+            if let rest = sentences.splitter.flush() { onSentence?(rest) }
 
             // The finished reply replaces what streamed: tool results and clean-up happen at the
             // end, so the two can differ.
             replaceMessage(replyID, with: response)
             return response
+        } catch is CancellationError {
+            // The cook ended mid-answer: nothing to report, and no session to report it in.
+            currentSession?.conversationHistory.removeAll { $0.id == replyID }
+            return nil
         } catch {
             self.error = "Failed to get response: \(error.localizedDescription)"
             dprint("Agent query error: \(error)")
             currentSession?.conversationHistory.removeAll { $0.id == replyID }
             return nil
         }
+    }
+
+    /// The sentence splitter for one reply, shared by the reply's task and the code awaiting it.
+    @MainActor
+    private final class SentenceBox {
+        var splitter = SentenceSplitter()
     }
 
     private func appendToMessage(_ id: UUID, _ text: String) {
@@ -544,6 +581,8 @@ class CookingSessionManager: ObservableObject, TimerManager {
     /// tools, and a create that quietly started would make the second one meaningless.
     @discardableResult
     func createTimer(name: String, durationSeconds: Int) -> Bool {
+        // Timers belong to a cook. A tool call arriving after the cook ended creates nothing.
+        guard currentSession != nil else { return false }
         // Exact match, not `findTimer` — its fuzzy fallbacks are there to *resolve* a name the
         // model half-remembered, and one of them answers "the only timer" to any query at all.
         // Reused for the duplicate check, that made the first timer of a cook block every one
@@ -841,9 +880,7 @@ extension CookingSessionManager: RecipeEditing {
             applied.append("Tags set to \(tags.joined(separator: ", ")).")
         }
 
-        if !applied.isEmpty {
-            applied.append("Nothing is saved until the user chooses to keep it at the end of the cook.")
-        }
+        // The tool adds the not-saved reminder, to the model's copy only.
         return applied
     }
 

@@ -219,7 +219,8 @@ final class little_chefUITests: XCTestCase {
         // Older iOS upper-cases Form section headers ("AI PROVIDER"); iOS 26 shows them as
         // written ("AI Provider"). Match either.
         XCTAssertTrue(sectionHeader("AI Provider", in: app).waitForExistence(timeout: 5))
-        XCTAssertTrue(sectionHeader("Voice", in: app).exists)
+        // The voice section has had no header since #37; its switch is what names it.
+        XCTAssertTrue(app.switches["Speech"].exists)
         // The Form is lazy: Delete All Data, in the last section, is not in the
         // accessibility tree until it is scrolled into view.
         let deleteAll = app.buttons["Delete All Data"]

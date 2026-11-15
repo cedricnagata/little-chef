@@ -46,20 +46,37 @@ enum RecipeLineMatcher {
             return overlapping
         }
 
-        // Last resort: "the garlic" against "2 cloves of garlic, minced". Short words are
-        // dropped so that "the" and "of" can't carry a match on their own.
-        let words = needle
-            .split(whereSeparator: { !$0.isLetter && !$0.isNumber })
-            .filter { $0.count >= 3 }
+        // Last resort: "the garlic" against "2 cloves of garlic, minced". Only on the words a
+        // line is about. Any three letters used to count, and a substring was enough, so "the
+        // paprika" removed the first line with "the" in it and "1 cup sugar" rewrote the flour.
+        let words = distinctiveWords(in: needle)
         guard !words.isEmpty else { return nil }
-
         let scored = lines.enumerated().map { index, line -> (index: Int, score: Int) in
-            let haystack = line.lowercased()
-            return (index, words.filter { haystack.contains($0) }.count)
+            (index, words.intersection(distinctiveWords(in: line.lowercased())).count)
         }
-        guard let best = scored.max(by: { $0.score < $1.score }), best.score > 0 else { return nil }
+        // `max(by:)` returns the last of equals; the first line with the best score is the one meant.
+        guard let best = scored.reversed().max(by: { $0.score < $1.score }), best.score > 0 else { return nil }
         return best.index
     }
+
+    /// The words that say what a line is about: no amounts, units, or words every line has.
+    /// Singular, so "eggs" finds "1 egg".
+    static func distinctiveWords(in text: String) -> Set<String> {
+        Set(text
+            .split(whereSeparator: { !$0.isLetter })
+            .map { IngredientMatcher.singular(String($0)) }
+            .filter { $0.count >= 3 && !commonWords.contains($0) })
+    }
+
+    private static let commonWords: Set<String> = [
+        "the", "and", "for", "with", "from", "into", "onto", "over", "until", "then", "that", "this",
+        "some", "any", "all", "more", "about", "your", "our", "its", "are", "was", "has", "have",
+        "one", "two", "three", "four", "five", "six", "half", "step", "ingredient", "line",
+        "cup", "tablespoon", "teaspoon", "tbsp", "tsp", "gram", "kilogram", "ounce", "pound", "lbs",
+        "liter", "litre", "milliliter", "millilitre", "pinch", "dash", "clove", "can", "piece",
+        "slice", "bunch", "minute", "hour", "second", "large", "medium", "small", "fresh",
+        "add", "use", "put", "mix", "stir", "cook", "heat",
+    ]
 
     /// "3", "step 3", "#3" → 3. Nil for anything that isn't just a step number.
     static func stepNumber(_ text: String) -> Int? {

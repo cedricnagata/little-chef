@@ -480,6 +480,11 @@ struct CookingTools {
                 return ToolOutcome("No timer called '\(name)' exists. Create it first.")
             }
             let newName = string(arguments["new_name"]) ?? string(arguments["newName"])
+            if let newName, let taken = timerManager.getAllTimers().first(where: {
+                $0.label.caseInsensitiveCompare(newName) == .orderedSame
+            }), taken.id != timerManager.getTimer(name: name)?.id {
+                return ToolOutcome("There is already a timer called '\(taken.label)'. Choose another name.")
+            }
             let totalSeconds = duration(from: arguments)
             let newDuration = totalSeconds > 0 ? totalSeconds : nil
             guard newName != nil || newDuration != nil else {
@@ -692,11 +697,11 @@ struct CookingTools {
             let steps = lines(from: arguments, keys: ["steps", "step", "items", "text"])
             guard !steps.isEmpty else { return ToolOutcome("Error: missing 'steps'") }
 
-            // Highest position first: removing step 2 renumbers step 3, so a batch given as
-            // numbers and applied in order would take out the wrong lines after the first.
+            // Numbers before quotes, highest first: removing any step renumbers the ones after
+            // it, so a number applied after another removal takes out the wrong line.
             var removed: [String] = []
             var unmatched: [String] = []
-            for step in Self.numberedLast(steps) {
+            for step in Self.numbersFirst(steps) {
                 if let line = editor.removeStep(matching: step) {
                     removed.append(line)
                 } else {
@@ -732,11 +737,15 @@ struct CookingTools {
                 cuisineType: string(arguments["cuisine"]) ?? string(arguments["cuisine_type"]),
                 tags: tags
             )
-            guard !applied.isEmpty else {
+            // The not-saved reminder is the model's alone, as in `recipeOutcome`: on the phone
+            // the user's copy is the reply, and it was read out after every renamed dish.
+            let spoken = applied.filter { $0 != Self.notSavedYet }
+            guard !spoken.isEmpty else {
                 return ToolOutcome("Nothing changed — give at least one detail to set.")
             }
-            // `setRecipeDetails` already ends its report with the not-saved reminder.
-            return ToolOutcome(applied.joined(separator: " "))
+            return ToolOutcome(
+                forModel: (spoken + [Self.notSavedYet]).joined(separator: " "),
+                forUser: spoken.joined(separator: " "))
 
         default:
             return nil
@@ -778,8 +787,20 @@ struct CookingTools {
         return trimmed.isEmpty ? nil : trimmed
     }
 
+    /// A timer's length in seconds. Minutes can be a fraction (1.5), and a model that ignores
+    /// the schema writes "5 minutes" in the field: both were read as less than was asked for,
+    /// or as nothing.
     private func duration(from arguments: [String: Any]) -> Int {
-        int(arguments["minutes"]) * 60 + int(arguments["seconds"])
+        Int((amount(arguments["minutes"]) * 60 + amount(arguments["seconds"])).rounded())
+    }
+
+    /// The number a duration field holds, or the one its text starts with.
+    private func amount(_ value: Any?) -> Double {
+        if let i = value as? Int { return Double(i) }
+        if let d = value as? Double { return d }
+        guard let s = value as? String,
+              let range = s.range(of: #"\d+(?:\.\d+)?"#, options: .regularExpression) else { return 0 }
+        return Double(s[range]) ?? 0
     }
 
     /// Tool results are read back by a speech model, so durations are spelled out rather than
@@ -962,15 +983,15 @@ struct CookingTools {
         return "\(label) now: \(body)."
     }
 
-    /// The entries reordered so that anything written as a bare position comes last, highest
-    /// first. Removing step 2 renumbers everything below it, so a batch of numbers applied in the
-    /// order given takes out the wrong lines after the first one. Quotes are unaffected by
-    /// renumbering and keep their order.
-    private static func numberedLast(_ entries: [String]) -> [String] {
+    /// The entries reordered so that anything written as a bare position comes first, highest
+    /// first. Removing a step renumbers everything below it, so the numbers are applied while
+    /// they still mean what the model saw: before any quoted step goes, and from the bottom up.
+    /// Quotes are unaffected by renumbering and keep their order.
+    private static func numbersFirst(_ entries: [String]) -> [String] {
         let position = RecipeLineMatcher.stepNumber
         let quotes = entries.filter { position($0) == nil }
         let numbers = entries.filter { position($0) != nil }
             .sorted { (position($0) ?? 0) > (position($1) ?? 0) }
-        return quotes + numbers
+        return numbers + quotes
     }
 }

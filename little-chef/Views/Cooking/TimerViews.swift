@@ -134,8 +134,9 @@ struct AddTimerView: View {
 
                 Section {
                     HStack(spacing: 0) {
-                        durationWheel("Minutes", unit: "min", selection: $selectedMinutes)
-                        durationWheel("Seconds", unit: "sec", selection: $selectedSeconds)
+                        // Up to four hours: a roast or a braise runs past the 59 minutes this stopped at.
+                        durationWheel("Minutes", unit: "min", range: 0...240, selection: $selectedMinutes)
+                        durationWheel("Seconds", unit: "sec", range: 0...59, selection: $selectedSeconds)
                     }
                 } header: {
                     Text("Duration")
@@ -160,10 +161,10 @@ struct AddTimerView: View {
     }
 
     /// One wheel with its unit beside the selected row, as the Clock app's timer draws it.
-    private func durationWheel(_ title: String, unit: String, selection: Binding<Int>) -> some View {
+    private func durationWheel(_ title: String, unit: String, range: ClosedRange<Int>, selection: Binding<Int>) -> some View {
         HStack(spacing: 4) {
             Picker(title, selection: selection) {
-                ForEach(0...59, id: \.self) { value in
+                ForEach(range, id: \.self) { value in
                     Text("\(value)").tag(value)
                 }
             }

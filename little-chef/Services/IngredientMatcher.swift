@@ -61,7 +61,9 @@ enum IngredientMatcher {
             }
             if !uncovered.isEmpty {
                 missing.append(line)
-                missingNames += uncovered.map { $0.joined(separator: " or ").capitalizedFirst }
+                missingNames += uncovered.map {
+                    $0.joined(separator: " or ").replacingOccurrences(of: halfAndHalf, with: "half and half").capitalizedFirst
+                }
             }
         }
         return RecipeAvailability(missing: missing, missingNames: missingNames, requiredCount: required)
@@ -118,6 +120,9 @@ enum IngredientMatcher {
         // An ingredient made of always-available parts ("water", "ice") is dropped, and so is an
         // alternative that is: "water or stock" needs nothing from the inventory.
         var names: [[String]] = []
+        // One ingredient, not a half and another half: split on "and", it stripped to nothing
+        // and the line was never counted as needed.
+        text = text.replacingOccurrences(of: "half[ -]and[ -]half", with: halfAndHalf, options: .regularExpression)
         for part in text.components(separatedBy: " and ") {
             let alternatives = part.components(separatedBy: " or ")
                 .map(stripQuantityAndUnits)
@@ -140,6 +145,7 @@ enum IngredientMatcher {
     /// "2 1/2 cups finely chopped fresh parsley" → "parsley".
     static func stripQuantityAndUnits(_ text: String) -> String {
         var words = text
+            .replacingOccurrences(of: "half[ -]and[ -]half", with: halfAndHalf, options: .regularExpression)
             .replacingOccurrences(of: "[0-9½¼¾⅓⅔⅛⅜⅝⅞./\\-–]+", with: " ", options: .regularExpression)
             .split(whereSeparator: { $0.isWhitespace })
             .map { $0.trimmingCharacters(in: .punctuationCharacters) }
@@ -151,13 +157,29 @@ enum IngredientMatcher {
 
     /// Cheap English singular: enough for "tomatoes", "berries", "eggs". Leaves short words and
     /// words that only look plural ("asparagus", "hummus", "swiss") alone.
+    ///
+    /// The result is a key for comparing, not a word to show: "cookie" and "cookies" both give
+    /// "cooky", and "chili" and "chilies" both "chily", so each matches the other.
     static func singular(_ word: String) -> String {
+        if let irregular = irregularSingulars[word] { return irregular }
         guard word.count > 3, !word.hasSuffix("ss"), !word.hasSuffix("us"), !word.hasSuffix("is") else { return word }
-        if word.hasSuffix("ies") { return String(word.dropLast(3)) + "y" }
-        if word.hasSuffix("oes") || word.hasSuffix("shes") || word.hasSuffix("ches") { return String(word.dropLast(2)) }
-        if word.hasSuffix("s") { return String(word.dropLast()) }
+        var word = word
+        if word.hasSuffix("ies"), word.count > 4 {
+            word = String(word.dropLast(3)) + "y"
+        } else if word.hasSuffix("oes") || word.hasSuffix("shes") || word.hasSuffix("ches") {
+            word = String(word.dropLast(2))
+        } else if word.hasSuffix("s") {
+            word = String(word.dropLast())
+        }
+        if word.count > 3, word.hasSuffix("ie") { return String(word.dropLast(2)) + "y" }
+        if word.count > 4, word.hasSuffix("i") { return String(word.dropLast()) + "y" }
         return word
     }
+
+    private static let irregularSingulars = ["leaves": "leaf", "loaves": "loaf", "halves": "half", "knives": "knife"]
+
+    /// "Half and half" as one word, so it survives the split on "and" and the dropping of "half".
+    private static let halfAndHalf = "halfandhalf"
 
     // MARK: - Vocabulary
 

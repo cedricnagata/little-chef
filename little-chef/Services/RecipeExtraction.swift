@@ -41,7 +41,7 @@ enum RecipeExtraction {
             cookTime: minutes(from: json["cookTime"]),
             ingredients: HTMLText.clean(lines(from: json["recipeIngredient"])),
             instructions: HTMLText.clean(instructions(from: json["recipeInstructions"])).map(strippingStepNumber),
-            tags: HTMLText.clean(lines(from: json["recipeCategory"])).map { $0.lowercased() },
+            tags: tags(from: [json["recipeCategory"], json["keywords"]]),
             sourceUrl: sourceUrl,
             cuisineType: lines(from: json["recipeCuisine"]).first.map { HTMLText.clean($0) },
             difficulty: nil
@@ -216,6 +216,49 @@ enum RecipeExtraction {
         default:
             return nil
         }
+    }
+
+    /// Tags from schema.org's `recipeCategory` and `keywords`, each of which is a list or one
+    /// comma-separated string ("Dinner, Main Course"). Lower case, in order, no repeats, and no
+    /// more than eight: some sites put a paragraph of search terms in `keywords`.
+    static func tags(from values: [Any?]) -> [String] {
+        var seen = Set<String>()
+        var tags: [String] = []
+        for value in values {
+            for line in lines(from: value) {
+                for part in line.split(separator: ",") {
+                    let tag = HTMLText.clean(String(part)).lowercased()
+                    guard !tag.isEmpty, tag.count <= 30, seen.insert(tag).inserted else { continue }
+                    tags.append(tag)
+                }
+            }
+        }
+        return Array(tags.prefix(8))
+    }
+
+    /// `source` with only its gaps filled from `model`: the clean-up pass's answer.
+    ///
+    /// The model is asked to keep what the page said and fill what it left out, and a small
+    /// model doesn't always: it renames the dish, rounds an amount, drops the last steps when it
+    /// runs out of tokens. Whatever the page gave is kept exactly, so the pass can only add.
+    static func filling(_ source: RecipeData, from model: RecipeData) -> RecipeData {
+        func text(_ value: String?) -> String? {
+            guard let trimmed = value?.trimmingCharacters(in: .whitespacesAndNewlines), !trimmed.isEmpty else { return nil }
+            return trimmed
+        }
+        return RecipeData(
+            title: text(source.title) ?? model.title,
+            description: text(source.description) ?? model.description,
+            servings: source.servings,
+            prepTime: source.prepTime ?? model.prepTime,
+            cookTime: source.cookTime ?? model.cookTime,
+            ingredients: source.ingredients.isEmpty ? model.ingredients : source.ingredients,
+            instructions: source.instructions.isEmpty ? model.instructions : source.instructions,
+            tags: source.tags.isEmpty ? model.tags : source.tags,
+            sourceUrl: text(source.sourceUrl) ?? model.sourceUrl,
+            cuisineType: text(source.cuisineType) ?? model.cuisineType,
+            difficulty: text(source.difficulty) ?? model.difficulty
+        )
     }
 
     /// "1. Preheat the oven" → "Preheat the oven", and the "Step 1:" and "1)" forms too.

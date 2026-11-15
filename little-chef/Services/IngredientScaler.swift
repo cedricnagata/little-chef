@@ -68,8 +68,10 @@ enum IngredientScaler {
 
     /// An amount at the start of the line, optionally a range. Not followed by "-inch" or
     /// "-pound": "1-inch piece of ginger" is the size of the piece, not a count of anything.
+    /// And not followed by more of a number, or that rule is dodged by backing up a digit:
+    /// "12-inch tortillas" matched as "1" and doubled to "22-inch".
     private static let amountRegex = try? NSRegularExpression(
-        pattern: #"^\s*(\#(number))(?:(\s*(?:-|–|to)\s*)(\#(number)))?(?!\s*-\s*[A-Za-z])"#,
+        pattern: #"^\s*(\#(number))(?:(\s*(?:-|–|to)\s*)(\#(number)))?(?![\d/½¼¾⅓⅔⅛⅜⅝⅞]|\.\d)(?!\s*-\s*[A-Za-z])"#,
         options: [.caseInsensitive]
     )
 
@@ -137,6 +139,10 @@ enum IngredientScaler {
     /// "1 1/2" rather than "1.5", and whole numbers past ten: nobody weighs out 83.25 grams.
     static func format(_ value: Double) -> String {
         if value >= 10 { return String(Int(value.rounded())) }
+        // Less than any kitchen fraction: the number itself, never "0 teaspoon".
+        if value > 0, value < 0.09 {
+            return String(format: value < 0.01 ? "%.3f" : "%.2f", value)
+        }
 
         let whole = value.rounded(.down)
         let remainder = value - whole

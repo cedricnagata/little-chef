@@ -56,13 +56,16 @@ enum CookingCommand {
     private static func timeLeftAnswer(_ said: String, timers: [LocalTimer]) -> String? {
         let patterns = [
             #"^how (?:much time|much longer|long)(?: is| s)?(?: there)?(?: left| remaining| to go)(?: on| for| in)?(?: the| my)?(?: (.+?))?$"#,
+            #"^how (?:much time|much longer|long)(?: is| s)(?: there)?(?: on| for| in)?(?: the| my)? (.+? timers?)$"#,
             #"^how long (?:until|till|before)(?: the)? (.+?) (?:is done|is ready|goes off|finishes|rings|ends)$"#,
             #"^(?:how are|check)(?: the| my)? (timers?)$"#,
             #"^time check$"#,
         ]
         // "How much longer on the chicken" is about the chicken timer only if there is one: with
         // no timer by that name it is a question about cooking it.
-        if let name = firstMatch(said, [#"^how much longer(?: on| for| is)?(?: the| my)? (.+?)$"#]).flatMap(timerName(from:)) {
+        // And "how much longer is left" names no timer at all: it goes on to the patterns below.
+        if let name = firstMatch(said, [#"^how much longer(?: on| for| is)?(?: the| my)? (.+?)$"#]).flatMap(timerName(from:)),
+           !["left", "remaining", "to go"].contains(name) {
             return resolve(name, in: timers).map(describe)
         }
         guard let phrase = firstMatch(said, patterns) else { return nil }
@@ -92,7 +95,10 @@ enum CookingCommand {
         let verb = #"(?:set|make|create|add|put on|give me|i need)(?: up)?(?: a| an| me a| me an)?"#
         let named = #"(?: (?:for|called|named)(?: the| my)? ([a-z][a-z ]*?))?"#
         // (duration, name) capture order differs by pattern, so each is tried with its own order.
+        let unit = "(?:hours?|hrs?|minutes?|mins?|seconds?|secs?)"
         let forms: [(pattern: String, duration: Int, name: Int)] = [
+            // "Set a 5 minute rice timer": the name between the duration and "timer".
+            ("^(?:\(verb) )?(.+? \(unit)) ([a-z][a-z ]*?) timer$", 1, 2),
             ("^\(verb) (.+?) timer\(named)$", 1, 2),
             ("^\(verb) ([a-z][a-z ]*?) timer for (.+)$", 2, 1),
             ("^\(verb) timer(?: (?:called|named) ([a-z][a-z ]*?))? for (.+)$", 2, 1),
@@ -123,7 +129,17 @@ enum CookingCommand {
             let phrase = groups[1]
             let timer: LocalTimer?
             if let name = phrase.flatMap(timerName(from:)) {
-                timer = resolve(name, in: timers)
+                // Deleting is the one action that can't be taken back, and "remove the garlic"
+                // is about the recipe: without the word "timer" it is a timer command only when
+                // it gives a timer's whole name, and "remove", "clear" and "get rid of" never are.
+                let saysTimer = phrase?.split(separator: " ").contains { $0 == "timer" || $0 == "timers" } ?? false
+                if action.tool == "delete_timer", !saysTimer {
+                    let exact = timers.first { $0.label.caseInsensitiveCompare(name) == .orderedSame }
+                    guard said.hasPrefix("cancel") || said.hasPrefix("delete"), let exact else { return nil }
+                    timer = exact
+                } else {
+                    timer = resolve(name, in: timers)
+                }
             } else if phrase == nil || isJustTimer(phrase!) {
                 // "start" on its own is what the create reply tells the user to say. "stop" and
                 // "cancel" on their own are not taken as timer commands: they as often mean the

@@ -529,13 +529,18 @@ keeps it once the task is over. Settings has no Load or Unload.
   phone for the 9B, then every answer quick). Cancel leaves the user where they were and unloads.
   A model that can't load (memory, the Simulator) puts up "Couldn't Get the Assistant Ready",
   which offers Cook Without It: the cook opens with timers, and the cook screen's warm-up banner
-  tries again. Ending a cook unloads. A cook restored after a relaunch still warms up behind the
-  banner, since it reopens on its own.
+  tries again. Ending a cook unloads, and cancels an answer still being written
+  (`replyTask`): left running, its tool calls landed on the next cook. A cook restored after a
+  relaunch still warms up behind the banner, since it reopens on its own.
 - **Recipe import.** `LocalRecipeParser` calls `ensureLoaded(for: .recipeImport)` right before
   each model request, so a URL with schema.org never shows the screen. Cancel ends the parse
-  quietly. Closing the Add Recipe sheet unloads.
+  quietly. Closing the Add Recipe sheet cancels a parse still running and unloads.
 - **Suggested** loads without the screen, a filter not being worth a full-screen wait: the
   list's header says "Loading the AI model…", and the ranking unloads it after.
+- **A task puts the model away with `releaseModelAfterTask()`, never `unloadModel()`.** It
+  leaves the model alone while a cook is open (`cookInProgress`) or a task is behind the
+  getting-ready screen. A ranking that finished after a cook had opened used to unload the
+  model under the cook. Only the cook itself, ending or cancelled, calls `unloadModel()`.
 - **In the Simulator** `loadModel` refuses outright: MLX aborts there, and Debug reports the 9B.
 
 ## Storage
@@ -636,6 +641,11 @@ speaks with Kokoro.
 - **Choosing a voice plays a sample**, through the playback category so it is heard with the ring
   switch on silent. It plays from the user's choice only, not from the form loading. With Kokoro it
   waits for Kokoro to load, and the button says "Loading Kokoro…".
+- **A typed reply sets the audio session too** (`VoiceAssistant.prepareToSpeakOnDevice`,
+  2026-11-15): playback, spoken audio, ducking, released when the reply has been spoken. Nothing
+  set it on that path before, so the default category applied, which the ring switch mutes: with
+  the phone on silent a typed question was answered without a sound. Hands-free and push-to-talk
+  set their own session and are left alone.
 - **Always normal speed** (2026-11-15): Settings has no speech rate. `speechRate` is still stored
   so older profiles decode, and nothing reads it. The voice section has no header and no note
   about Kokoro; its switch is "Speech" ("Auto-speak responses" until 2026-11-15, then "Voice").
@@ -699,6 +709,9 @@ the list, with or without an AI backend, so it has to be instant and give the sa
   one ingredient with two acceptable alternatives.
 - **What is skipped.** Optional, garnish and serving lines are never counted as missing. Water and
   section headers ("For the sauce:") are dropped.
+- **Plurals.** `singular` gives a key for comparing, not a word to show: "cookies" and "cookie"
+  both give "cooky", "bay leaves" matches "bay leaf". "Half and half" is kept as one name; split
+  on its "and" it used to strip to nothing and was never counted as needed.
 - **When two names match.** One side's words must be a subset of the other's. "Garlic" covers
   "garlic cloves", but "black pepper" doesn't cover "bell pepper". This is lenient on purpose:
   "cinnamon" also covers "ground cinnamon". A wrong "you have it" costs a substitution, while a
@@ -847,12 +860,16 @@ LLMService BigBro paths catch it rather than rethrowing: the tools already ran, 
 in the working copy and will be offered for saving at the end of the cook. Rethrowing would put
 "Failed to get response" in front of someone whose recipe did change.
 
-### Timer inference is guarded on the word "timer"
+### Timer inference acts only on an action the reply reports
 
-`TimerActionInference` (in `ModelReplyText.swift`) reads verbs out of ordinary prose and acts on
-them, and `deleteTimer` falls back to "the only timer" when the name doesn't match. Once the
-assistant could talk about recipes, "Removed 'garlic' from the ingredients" was one sentence
-away from cancelling the timer on the oven. Do not loosen that guard; `ReplyTextTests` holds it.
+`TimerActionInference` (in `ModelReplyText.swift`) reads a timer action out of prose and runs
+it, and `deleteTimer` falls back to "the only timer" when the name doesn't match. So it acts
+only on a reply that says "timer" and reports the action as done or under way ("stopped the
+'pasta' timer", "timer cancelled", "resuming the timer"), never on a bare verb: until
+2026-11-15 "when the timer goes off, remove the pan from the heat" deleted the timer and "stop
+stirring once the timer rings" paused it. It is skipped when the reply ran a tool call written
+as text, whose result ("Timer 'pasta' deleted.") reads as a report and ran the action again on
+the one timer left. Do not loosen either guard; `ReplyTextTests` and `BugSweepTests` hold them.
 
 ### What streams is what the user sees
 
@@ -999,7 +1016,9 @@ cases (2026-11-10, 25 cases): 9B 75/75, 4B 70/75.
 `IngredientScaler` scales the **leading** amount of a line and nothing else. In "1 (14 oz) can
 tomatoes" the 1 is a count and the 14 a package size. A line with no leading amount ("salt to
 taste") is left exactly as it is. Mixed numbers, unicode fractions, ranges and number words are
-read; results snap to kitchen fractions below 10 and whole numbers above.
+read; results snap to kitchen fractions below 10 and whole numbers above. A number written
+against a unit with a hyphen is a size and is left alone: "1-inch piece of ginger", and
+"12-inch tortillas", which until 2026-11-15 was read as "1" and doubled to "22-inch".
 
 It must stay a pure function. `CookingSessionManager.updateServings` scales the working copy and
 the baseline separately, and identical inputs giving identical outputs is what makes a serving
@@ -1011,6 +1030,13 @@ change cancel out instead of showing as unsaved recipe edits.
 strings, lists as one string, missing lists as empty, trailing commas. A strict decoder used to
 throw the whole recipe away over any one of those.
 
+- **The clean-up pass only fills gaps.** When a page's schema.org data is incomplete and a
+  model is ready, the model is asked to complete it, and `RecipeExtraction.filling(_:from:)`
+  takes from its answer only the fields the page left empty. A small model renames the dish,
+  rounds amounts or runs out of tokens part-way through the steps; whatever the page said stands.
+- **Tags** come from `recipeCategory` and `keywords`, split on commas, at most eight.
+- **Photos** are read by `OCRService` with the photo's orientation, off the main thread. A
+  portrait photo's pixels are stored sideways, and read without the orientation it found little.
 - **Yields.** Servings come from the first number in a yield, so "4-6 servings" is 4. Joining
   every digit read it as 46.
 - **One size limit.** `RecipeExtraction.maxSourceCharacters` caps both the text box and the prompt.

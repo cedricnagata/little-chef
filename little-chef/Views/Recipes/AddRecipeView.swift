@@ -24,6 +24,7 @@ struct AddRecipeView: View {
     @State private var parseWarnings: [String] = []
     @State private var showingEditView = false
     @State private var isParsingRecipe = false
+    @State private var parseTask: Task<Void, Never>?
     @State private var showingErrorAlert = false
     @State private var errorAlertMessage = ""
 
@@ -135,6 +136,11 @@ struct AddRecipeView: View {
                             let success = await recipeManager.createRecipe(finalRecipe)
                             if success {
                                 dismiss()
+                            } else {
+                                // Shown here: the list's own error alert is behind this sheet.
+                                errorAlertMessage = recipeManager.errorMessage ?? "Couldn't save the recipe."
+                                recipeManager.clearError()
+                                showingErrorAlert = true
                             }
                         }
                     }
@@ -159,8 +165,11 @@ struct AddRecipeView: View {
             // Parsing waits on this while the on-device model loads.
             .modelPreparationOverlay(.recipeImport)
             // Loaded for importing only: closing the sheet hands the memory back.
+            // A parse still running is stopped first: left alone it went on to load the model
+            // after the sheet had gone, with nothing left to put it away.
             .onDisappear {
-                if LLMService.shared.currentProvider == .local { LLMService.shared.unloadModel() }
+                parseTask?.cancel()
+                LLMService.shared.releaseModelAfterTask()
             }
         }
     }
@@ -199,7 +208,7 @@ struct AddRecipeView: View {
     
     private func parseRecipe() {
         dismissKeyboard()
-        Task {
+        parseTask = Task {
             isParsingRecipe = true
             
             let result: RecipeParseResponse?

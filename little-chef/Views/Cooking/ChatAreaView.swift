@@ -16,6 +16,8 @@ struct ChatAreaView: View {
         cookingSessionManager.conversationHistory.filter { $0.isUser || !$0.content.isEmpty }
     }
 
+    private static let endID = "chat-end"
+
     var body: some View {
         ScrollViewReader { proxy in
             ScrollView {
@@ -39,18 +41,25 @@ struct ChatAreaView: View {
                         }
                         .padding()
                     }
+
+                    // Something to scroll to that is always the very end, below the last bubble
+                    // and its timestamp.
+                    Color.clear.frame(height: 1).id(Self.endID)
                 }
                 .padding()
             }
+            // Opened at the newest message. Switching from the recipe to the chat used to show
+            // the top of the conversation, with the answer just given somewhere below.
+            .defaultScrollAnchor(.bottom, for: .initialOffset)
             // Dragging the transcript is the other natural "I'm done typing" gesture, and
             // interactive dismissal follows the finger instead of snapping.
             .scrollDismissesKeyboard(.interactively)
             // Follows the reply as it grows, not only when a message is added: a long answer
             // streams in below the fold otherwise.
             .onChange(of: messages.last.map { "\($0.id):\($0.content.count)" }) {
-                if let lastMessage = messages.last {
+                if !messages.isEmpty {
                     withAnimation(.easeOut(duration: 0.3)) {
-                        proxy.scrollTo(lastMessage.id, anchor: .bottom)
+                        proxy.scrollTo(Self.endID, anchor: .bottom)
                     }
                 }
             }
