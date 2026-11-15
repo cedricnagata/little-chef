@@ -247,6 +247,7 @@ class CookingSessionManager: ObservableObject, TimerManager {
         guard llmService.needsWarmUp(for: provider) else {
             isPreparingModel = false
             prewarmPrompt()
+            if provider == .local { Task { await KokoroVoice.shared.loadIfWanted() } }
             return
         }
         isPreparingModel = true
@@ -255,6 +256,9 @@ class CookingSessionManager: ObservableObject, TimerManager {
             await self.llmService.prepareForSession(provider: provider)
             // Speech is loaded lazily on the Mac too, and hands-free is one tap away from here.
             await self.llmService.prepareSpeechForSession(provider: provider)
+            // A cook that reopened on its own (a relaunch, or Cook Without It) gets Kokoro here,
+            // behind the same banner, as a started one does behind the getting-ready screen.
+            if provider == .local { await KokoroVoice.shared.loadIfWanted() }
             guard !Task.isCancelled else { return }
             self.isPreparingModel = false
             self.prewarmPrompt()

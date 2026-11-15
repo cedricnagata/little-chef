@@ -17,9 +17,6 @@ struct ProfileSettingsView: View {
     @EnvironmentObject var voiceAssistant: VoiceAssistant
 
     @State private var llmProvider: LLMProvider = .local
-    /// Absolute `AVSpeechUtterance.rate`, where `AVSpeechUtteranceDefaultSpeechRate` is normal
-    /// speed. Shown to the user as a multiple of that via `speechRateMultiplier`.
-    @State private var speechRate: Float = AVSpeechUtteranceDefaultSpeechRate
     @State private var voiceIdentifier = AVSpeechSynthesisVoice.automaticIdentifier
     /// The voices to offer, re-read when one is downloaded or deleted in the Settings app.
     @State private var voices: [AVSpeechSynthesisVoice] = []
@@ -76,9 +73,12 @@ struct ProfileSettingsView: View {
         return "Automatic (\([voice.name, voice.qualityName].compactMap { $0 }.joined(separator: " ")))"
     }
 
+    /// Replies on the device are spoken by Kokoro, not Siri.
+    private var usesKokoro: Bool { kokoro.isOffered && kokoro.isEnabled }
+
     private func playSample() {
         let voice = AVSpeechSynthesisVoice.resolving(voiceIdentifier)
-        let rate = speechRate
+        let rate = AVSpeechUtteranceDefaultSpeechRate
         let kokoroVoice = bigBroVoice
         sampleSpeaker.stop()
         // Playback, so the sample is heard with the ring switch on silent. No cook is running
@@ -91,19 +91,6 @@ struct ProfileSettingsView: View {
             await sampleSpeaker.speak(
                 "Preheat the oven to 200 degrees, then chop the onion.", voice: voice, rate: rate, kokoroVoice: kokoroVoice)
         }
-    }
-
-    /// Presents the stored rate as a multiple of normal speed, so "normal" reads as 1.0x.
-    ///
-    /// `AVSpeechUtterance.rate` runs 0.0–1.0 with 0.5 as normal, which surfaced as "0.5x" and
-    /// made the top half of the old 0.1–2.0 slider dead: every value above 1.0 saturated at
-    /// maximum and sounded identical. Because the default is exactly half the maximum, a
-    /// 0.5x–2.0x multiplier covers the whole usable range with none of it wasted.
-    private var speechRateMultiplier: Binding<Float> {
-        Binding(
-            get: { speechRate / AVSpeechUtteranceDefaultSpeechRate },
-            set: { speechRate = $0 * AVSpeechUtteranceDefaultSpeechRate }
-        )
     }
 
     var body: some View {
@@ -121,9 +108,9 @@ struct ProfileSettingsView: View {
             Section {
                 Toggle("Voice", isOn: $autoSpeakResponses)
 
-                // The two providers speak through different engines, so the controls that apply
-                // are disjoint: Kokoro on the Mac exposes named voices and no rate, AVSpeech on
-                // the device exposes installed voices and a rate.
+                // The two providers speak through different engines: Kokoro on the Mac, and on
+                // the device Siri (Apple's voices) or, where it fits, Kokoro too. Replies are
+                // always spoken at normal speed (Cedric, 2026-11-15: no speech rate setting).
                 if autoSpeakResponses {
                     if llmProvider == .bigBro {
                         BigBroVoicePicker(
@@ -136,50 +123,43 @@ struct ProfileSettingsView: View {
                         }
 
                         // The sample plays from the user's choice only, not from loading the form.
-                        if !(kokoro.isOffered && kokoro.isEnabled && kokoro.isDownloaded) {
-                        Picker("Voice", selection: Binding(
-                            get: { voiceIdentifier },
-                            set: { voiceIdentifier = $0; playSample() }
-                        )) {
-                            Text(automaticLabel).tag(AVSpeechSynthesisVoice.automaticIdentifier)
-                            // A saved voice since deleted in the Settings app stays selectable
-                            // rather than silently resetting the choice; it speaks as automatic.
-                            if !AVSpeechSynthesisVoice.isAutomatic(voiceIdentifier),
-                               !voices.contains(where: { $0.identifier == voiceIdentifier }) {
-                                Text("Not installed (using automatic)").tag(voiceIdentifier)
-                            }
-                            Divider()
-                            ForEach(voices, id: \.identifier) { voice in
-                                Text(voiceLabel(voice)).tag(voice.identifier)
+                        if !usesKokoro {
+                            Picker("Voice", selection: Binding(
+                                get: { voiceIdentifier },
+                                set: { voiceIdentifier = $0; playSample() }
+                            )) {
+                                Text(automaticLabel).tag(AVSpeechSynthesisVoice.automaticIdentifier)
+                                // A saved voice since deleted in the Settings app stays selectable
+                                // rather than silently resetting the choice; it speaks as automatic.
+                                if !AVSpeechSynthesisVoice.isAutomatic(voiceIdentifier),
+                                   !voices.contains(where: { $0.identifier == voiceIdentifier }) {
+                                    Text("Not installed (using automatic)").tag(voiceIdentifier)
+                                }
+                                Divider()
+                                ForEach(voices, id: \.identifier) { voice in
+                                    Text(voiceLabel(voice)).tag(voice.identifier)
+                                }
                             }
                         }
 
-                        }
-
-                        Button("Play Sample", systemImage: "speaker.wave.2", action: playSample)
-
-                        VStack(alignment: .leading, spacing: 4) {
-                            HStack {
-                                Text("Speech Rate")
-                                Spacer()
-                                Text("\(speechRateMultiplier.wrappedValue, specifier: "%.1f")x")
-                                    .font(.caption)
-                                    .foregroundColor(.secondary)
-                                    .monospacedDigit()
+                        if !(kokoro.isOffered && kokoro.isEnabled && !kokoro.isDownloaded) {
+                            // Waits for Kokoro to load first, as a cook does, and says so.
+                            Button(action: playSample) {
+                                if kokoro.isLoading {
+                                    HStack(spacing: 8) {
+                                        ProgressView()
+                                        Text("Loading Kokoro…")
+                                    }
+                                } else {
+                                    Label("Play Sample", systemImage: "speaker.wave.2")
+                                }
                             }
-                            Slider(value: speechRateMultiplier, in: 0.5...2.0, step: 0.1) { editing in
-                                if !editing { playSample() }
-                            }
-                                .tint(.orange)
+                            .disabled(kokoro.isLoading)
                         }
                     }
                 }
-            } header: {
-                Text("Voice")
             } footer: {
-                if autoSpeakResponses, llmProvider != .bigBro, kokoro.isOffered, kokoro.isEnabled {
-                    Text("Kokoro is the voice your Mac speaks with, run on this iPhone's Neural Engine. Experimental: iOS 26.4 and later have an Apple bug that can crash it, so if LittleChef closes while it's speaking it switches itself off and Siri takes over.")
-                } else if autoSpeakResponses, llmProvider != .bigBro {
+                if autoSpeakResponses, llmProvider != .bigBro, !usesKokoro {
                     Text("iOS doesn't let apps use Siri's voice. For the most natural one, download an Enhanced or Premium voice in the Settings app under Accessibility → Spoken Content → Voices; it appears here when it's done.")
                 }
             }
@@ -249,7 +229,6 @@ struct ProfileSettingsView: View {
             LLMService.shared.currentProvider = new
             saveIfLoaded()
         }
-        .onChange(of: speechRate) { _, _ in saveIfLoaded() }
         .onChange(of: voiceIdentifier) { _, _ in saveIfLoaded() }
         .onAppear { voices = Self.installedVoices() }
         .onDisappear { Task { await KokoroVoice.shared.unload() } }
@@ -625,7 +604,6 @@ struct ProfileSettingsView: View {
             // A device with no on-device model can only be `.bigBro`, whatever is stored.
             let provider: LLMProvider = LLMService.deviceSupportsLocalModels ? prefs.llmProvider : .bigBro
             llmProvider = provider
-            speechRate = prefs.voiceSettings.speechRate
             voiceIdentifier = AVSpeechSynthesisVoice.isAutomatic(prefs.voiceSettings.voiceIdentifier)
                 ? AVSpeechSynthesisVoice.automaticIdentifier : prefs.voiceSettings.voiceIdentifier
             autoSpeakResponses = prefs.voiceSettings.autoSpeakResponses
@@ -639,7 +617,7 @@ struct ProfileSettingsView: View {
 
     private func savePreferences() {
         let voiceSettings = LocalVoiceSettings(
-            speechRate: speechRate,
+            speechRate: AVSpeechUtteranceDefaultSpeechRate,
             voiceIdentifier: voiceIdentifier,
             autoSpeakResponses: autoSpeakResponses,
             wakePhrase: LocalVoiceSettings.wakePhrase,
@@ -661,55 +639,112 @@ struct ProfileSettingsView: View {
 /// Which engine speaks replies on the device.
 private enum VoiceEngine: Hashable { case standard, kokoro }
 
-/// The on-device voice's engine choice, and Kokoro's download, voice and what went wrong.
+/// Siri or Kokoro, and Kokoro's row, built like the Bonsai model's: its name on the left, Download
+/// on the right with the progress where the button was, then on disk or in memory, its size and
+/// delete (Cedric, 2026-11-15).
 private struct KokoroRows: View {
     @ObservedObject private var kokoro = KokoroVoice.shared
     @Binding var voice: String
     let onSample: () -> Void
     @State private var confirmingDownload = false
+    @State private var confirmingRemoval = false
 
     var body: some View {
-        // Siri (what Cedric calls Apple's voices; not Siri's own, which apps can't use) or Kokoro,
-        // chosen like On-Device or BigBro above (2026-11-15). Picking Kokoro before it's downloaded
-        // asks first and stays on Siri until the download starts.
+        // "Siri" is Cedric's name for Apple's voices; Siri's own voice isn't available to apps.
         Picker("Voice", selection: Binding(
             get: { kokoro.isEnabled ? VoiceEngine.kokoro : .standard },
             set: { engine in
-                if engine == .kokoro, !kokoro.isDownloaded {
-                    confirmingDownload = true
-                } else {
-                    kokoro.isEnabled = engine == .kokoro
-                    if engine == .kokoro { onSample() }
-                }
+                kokoro.isEnabled = engine == .kokoro
+                if engine == .kokoro, kokoro.isDownloaded { onSample() }
             }
         )) {
             Text("Siri").tag(VoiceEngine.standard)
             Text("Kokoro").tag(VoiceEngine.kokoro)
         }
         .pickerStyle(.segmented)
-        .disabled(kokoro.isDownloading)
-        .alert("Download the Kokoro Voice?", isPresented: $confirmingDownload) {
-            Button("Download") {
-                Task {
-                    kokoro.isEnabled = true
-                    await kokoro.download()
-                }
-            }
+        .alert("Download Kokoro?", isPresented: $confirmingDownload) {
+            Button("Download") { Task { await kokoro.download() } }
             Button("Cancel", role: .cancel) {}
         } message: {
-            Text("About 200 MB. Keep LittleChef open while it downloads. Kokoro is experimental: see below.")
+            Text("Kokoro is about \(Self.size(KokoroVoice.expectedDownloadBytes)). Keep LittleChef open while it downloads. It's experimental: an iOS bug can crash it, and if that happens it switches itself off.")
+        }
+        .alert("Remove Kokoro?", isPresented: $confirmingRemoval) {
+            Button("Cancel", role: .cancel) {}
+            Button("Remove", role: .destructive) { Task { await kokoro.deleteFiles() } }
+        } message: {
+            Text("Frees \(kokoro.downloadedBytes.map(Self.size) ?? "the storage it's using"). Siri speaks replies until you download it again.")
         }
 
-        if kokoro.isDownloading {
-            HStack(spacing: 8) {
-                ProgressView()
-                Text("Downloading the Kokoro voice…").font(.caption).foregroundStyle(.secondary)
+        if kokoro.isEnabled {
+            VStack(alignment: .leading, spacing: 8) {
+                HStack {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Kokoro")
+                            .font(.subheadline)
+                        Text("Spoken replies on this iPhone · Experimental")
+                            .font(.caption2)
+                            .foregroundColor(.secondary)
+                    }
+
+                    Spacer()
+
+                    if kokoro.isDownloading {
+                        HStack(spacing: 6) {
+                            ProgressView(value: kokoro.downloadProgress, total: 1.0)
+                                .frame(width: 60)
+                                .tint(.orange)
+                            Text("\(Int(kokoro.downloadProgress * 100))%")
+                                .font(.caption2)
+                                .foregroundColor(.secondary)
+                                .monospacedDigit()
+                        }
+                    } else if !kokoro.isDownloaded {
+                        Button {
+                            confirmingDownload = true
+                        } label: {
+                            Text("Download")
+                                .font(.caption)
+                                .fontWeight(.medium)
+                        }
+                        .buttonStyle(.bordered)
+                        .tint(.orange)
+                    }
+                }
+
+                if kokoro.isDownloaded, !kokoro.isDownloading {
+                    HStack(spacing: 8) {
+                        Label(
+                            kokoro.isLoaded ? "In memory" : "On disk",
+                            systemImage: kokoro.isLoaded ? "memorychip.fill" : "internaldrive"
+                        )
+                        .font(.caption2)
+                        .foregroundColor(kokoro.isLoaded ? .green : .secondary)
+
+                        if let bytes = kokoro.downloadedBytes {
+                            Text(Self.size(bytes))
+                                .font(.caption2)
+                                .foregroundColor(.secondary)
+                        }
+
+                        Spacer()
+
+                        Button(role: .destructive) {
+                            confirmingRemoval = true
+                        } label: {
+                            Image(systemName: "trash")
+                        }
+                        .font(.caption)
+                        .buttonStyle(.bordered)
+                        .tint(.red)
+                        .disabled(kokoro.isLoading)
+                    }
+                }
             }
-        } else if kokoro.isEnabled, !kokoro.isDownloaded {
-            Button("Download the Kokoro Voice (about 200 MB)") { Task { await kokoro.download() } }
-        } else if kokoro.isEnabled {
-            Picker("Kokoro Voice", selection: Binding(get: { voice }, set: { voice = $0; onSample() })) {
-                ForEach(KokoroVoice.voices, id: \.self) { Text(KokoroVoice.label(for: $0)).tag($0) }
+
+            if kokoro.isDownloaded {
+                Picker("Kokoro Voice", selection: Binding(get: { voice }, set: { voice = $0; onSample() })) {
+                    ForEach(KokoroVoice.voices, id: \.self) { Text(KokoroVoice.label(for: $0)).tag($0) }
+                }
             }
         }
 
@@ -721,9 +756,10 @@ private struct KokoroRows: View {
                 .font(.caption)
                 .foregroundStyle(.orange)
         }
-        if kokoro.isDownloaded, !kokoro.isEnabled {
-            Button("Remove the Kokoro Voice", role: .destructive) { Task { await kokoro.deleteFiles() } }
-        }
+    }
+
+    private static func size(_ bytes: Int64) -> String {
+        ByteCountFormatter.string(fromByteCount: bytes, countStyle: .file)
     }
 }
 

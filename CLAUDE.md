@@ -633,9 +633,12 @@ speaks with Kokoro.
 - **What the picker offers** is `choosable` (no novelty voices, no Personal Voice), the device's
   language and English, best first, re-read on `availableVoicesDidChangeNotification`. A chosen
   voice since deleted stays selected and speaks as automatic, logged.
-- **Choosing a voice or letting go of the rate slider plays a sample**, through the playback
-  category so it is heard with the ring switch on silent. It plays from the user's choice only, not
-  from the form loading.
+- **Choosing a voice plays a sample**, through the playback category so it is heard with the ring
+  switch on silent. It plays from the user's choice only, not from the form loading. With Kokoro it
+  waits for Kokoro to load, and the button says "Loading Kokoro…".
+- **Always normal speed** (2026-11-15): Settings has no speech rate. `speechRate` is still stored
+  so older profiles decode, and nothing reads it. The voice section has no header and no note
+  about Kokoro; its switch is "Voice".
 
 ### Kokoro on the device (experimental)
 
@@ -656,7 +659,10 @@ request.
   offers it, so the Simulator can test it. "Siri" is Cedric's name for Apple's voices, not Siri's
   own voice, which apps can't use. Where offered Kokoro is chosen until the user picks Siri, and
   it downloads with the model, whose download prompt says so (about 200 MB: 183 MB on disk in the Simulator, through FluidAudio's
-  own downloader, so not in the background); picking it before then asks first.
+  own downloader, so not in the background). Picking Kokoro shows its row, built like the Bonsai
+  model's: Download on the right (with a confirmation), then a bar and percentage while it
+  downloads, then On disk or In memory, its size and delete. FluidAudio reports no progress for
+  the download, so the bar is the bytes on disk against the measured 183 MB.
 - **Loaded only for a cook**, last in the getting-ready screen, and only with 350 MB free;
   unloaded when the cook ends, on a memory warning with under 512 MB left, and when Settings
   closes after playing a sample. Not loaded means Apple's voice. Both are estimates until

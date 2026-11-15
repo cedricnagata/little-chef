@@ -124,9 +124,8 @@ enum CookingModelChoice: String, Codable, CaseIterable {
 
 /// How the assistant speaks and listens.
 struct LocalVoiceSettings: Codable, Equatable {
-    /// Absolute `AVSpeechUtterance.rate` on its 0.0–1.0 scale, where 0.5
-    /// (`AVSpeechUtteranceDefaultSpeechRate`) is normal speed — not a multiplier. Settings
-    /// displays it as a multiple of normal, so a stored 0.5 shows as "1.0x".
+    /// Absolute `AVSpeechUtterance.rate` on its 0.0–1.0 scale, 0.5 being normal. No longer read: replies are always spoken at normal speed (2026-11-15, when Settings
+    /// lost its rate slider). Kept so profiles saved by earlier builds, and read by them, decode.
     var speechRate: Float
     var voiceIdentifier: String
     var autoSpeakResponses: Bool

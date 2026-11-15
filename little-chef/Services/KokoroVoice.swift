@@ -54,7 +54,11 @@ final class KokoroVoice: ObservableObject {
     }
     @Published private(set) var isDownloaded: Bool
     @Published private(set) var isDownloading = false
+    /// How far the download is, 0–1, while ``isDownloading``.
+    @Published private(set) var downloadProgress: Double = 0
     @Published private(set) var isLoaded = false
+    /// Loading now: what plays a sample waits on, and says so.
+    @Published private(set) var isLoading = false
     /// The last download or load failure, for Settings.
     @Published private(set) var error: String?
     /// The app died while Kokoro was synthesizing, last time: it has been switched off.
@@ -66,6 +70,9 @@ final class KokoroVoice: ObservableObject {
     static var memoryNeededGiB: Double { Double(memoryNeeded) / 1_073_741_824 }
     /// A memory warning with less than this left unloads it, and replies go back to Apple's voice.
     private static let memoryWarningUnloadHeadroom: UInt64 = 512 * 1024 * 1024
+
+    /// What the English download comes to on disk: 183 MB in the Simulator (2026-11-15).
+    static let expectedDownloadBytes: Int64 = 183_000_000
 
     private static let enabledKey = "little-chef.kokoro-enabled"
     private static let downloadedKey = "little-chef.kokoro-downloaded"
@@ -131,11 +138,27 @@ final class KokoroVoice: ObservableObject {
 
     /// Fetches the English Core ML stages and voice data (a few hundred MB), loading and unloading
     /// them once, which is also what compiles them for this device.
+    ///
+    /// FluidAudio reports no progress for this download, so the bar is the bytes on disk against
+    /// the measured total, sampled twice a second, held under 100% until it has finished.
     func download() async {
         guard !isDownloading else { return }
         isDownloading = true
+        downloadProgress = 0
         error = nil
-        defer { isDownloading = false }
+        let watcher = Task { [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .milliseconds(500))
+                guard let self else { return }
+                let fraction = Double(Self.bytesOnDisk()) / Double(Self.expectedDownloadBytes)
+                self.downloadProgress = min(max(fraction, self.downloadProgress), 0.99)
+            }
+        }
+        defer {
+            watcher.cancel()
+            isDownloading = false
+            downloadProgress = 0
+        }
         do {
             let manager = Self.makeManager()
             try await manager.initialize(preloadVoices: [Self.voices[3]])
@@ -183,6 +206,8 @@ final class KokoroVoice: ObservableObject {
             return
         }
         let started = Date()
+        isLoading = true
+        defer { isLoading = false }
         do {
             let manager = Self.makeManager()
             try await manager.initialize()
@@ -223,6 +248,23 @@ final class KokoroVoice: ObservableObject {
     }
 
     // MARK: - Helpers
+
+    /// What Kokoro's files take on disk, or nil when it isn't downloaded.
+    var downloadedBytes: Int64? {
+        isDownloaded ? Self.bytesOnDisk() : nil
+    }
+
+    private static func bytesOnDisk() -> Int64 {
+        guard let walker = FileManager.default.enumerator(
+            at: directory, includingPropertiesForKeys: [.totalFileAllocatedSizeKey, .fileAllocatedSizeKey]
+        ) else { return 0 }
+        var total: Int64 = 0
+        for case let url as URL in walker {
+            let values = try? url.resourceValues(forKeys: [.totalFileAllocatedSizeKey, .fileAllocatedSizeKey])
+            total += Int64(values?.totalFileAllocatedSize ?? values?.fileAllocatedSize ?? 0)
+        }
+        return total
+    }
 
     /// The CPU and Neural Engine route on every OS: on iOS 26 FluidAudio's default would put two
     /// stages on the GPU, which the 9B is using to answer.
